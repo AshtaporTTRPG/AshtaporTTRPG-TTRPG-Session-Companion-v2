@@ -1,0 +1,476 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { liveFeedSync, UnifiedFeedItem } from '../utils/liveFeedSync';
+import { roomSync } from '../utils/roomSync';
+import { playDiceRollSound } from '../utils/audio';
+import { executeDiceRoll } from '../utils/dice';
+import { DiceRollResult, DieType } from '../types/ttrpg';
+import {
+  Radio,
+  Dices,
+  Swords,
+  Send,
+  Zap,
+  Trash2,
+  Sparkles,
+} from 'lucide-react';
+
+interface LiveCombatFeedProps {
+  roomCode: string;
+  isDm: boolean;
+}
+
+export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }) => {
+  const [feedItems, setFeedItems] = useState<UnifiedFeedItem[]>(() => liveFeedSync.getFeed());
+  const [chatInput, setChatInput] = useState('');
+  const [advantageMode, setAdvantageMode] = useState<'normal' | 'adv' | 'dis'>('normal');
+
+  // Ref to the INTERNAL scrollable div only - NEVER use scrollIntoView on window
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const unsub = liveFeedSync.subscribe((items) => {
+      setFeedItems([...items]);
+      // Scroll ONLY the inner container gently to the bottom, without scrolling the page/window
+      setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      }, 20);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Quick Dice Roll Function - Connected to shared liveFeedSync and roomSync
+  const handleQuickRoll = (sides: number) => {
+    playDiceRollSound();
+    const rollerName = roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player');
+    const advMode =
+      sides === 20
+        ? advantageMode === 'adv'
+          ? 'advantage'
+          : advantageMode === 'dis'
+          ? 'disadvantage'
+          : 'normal'
+        : 'normal';
+
+    const rollObj = executeDiceRoll({
+      diceType: `d${sides}` as DieType,
+      count: sides === 20 && advMode !== 'normal' ? 2 : 1,
+      advantageMode: advMode,
+      sender: rollerName,
+      isDm,
+      visibility: 'public',
+      rollType: 'Straight roll',
+    });
+
+    liveFeedSync.recordDiceRoll(rollObj, true);
+  };
+
+  // Send Chat / Tactical Callout
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const senderName = roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player');
+    liveFeedSync.recordChat(senderName, isDm, chatInput.trim(), true);
+    setChatInput('');
+  };
+
+  return (
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col h-full space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+        <div className="flex items-center gap-2">
+          <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display">
+            Live Room Feed
+          </h3>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-full">
+            Room {roomCode}
+          </span>
+          {isDm && feedItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => liveFeedSync.clearFeed()}
+              className="text-slate-500 hover:text-slate-300 p-0.5 transition"
+              title="Clear Room Feed"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Internal Scrollable Message Container - ONLY this element scrolls */}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[320px] max-h-[500px]"
+      >
+        {feedItems.length === 0 ? (
+          <div className="text-center p-8 text-slate-500 text-xs italic">
+            No events logged yet. Rolls, turn announcements, and callouts will appear here live.
+          </div>
+        ) : (
+          feedItems.map((evt) => {
+            const time = new Date(evt.timestamp).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            });
+
+            // Turn change announcement
+            if (evt.type === 'turn') {
+              return (
+                <div
+                  key={evt.id}
+                  className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/50 text-amber-200 text-xs shadow-sm flex items-start gap-2"
+                >
+                  <Swords className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="font-bold text-slate-100">{evt.message}</div>
+                    <span className="text-[10px] text-amber-400/80 font-mono">{time}</span>
+                  </div>
+                </div>
+              );
+            }
+
+            // Dice Roll event - Unified with Dice Chamber
+            if (evt.type === 'dice') {
+              const isNat20 = evt.rollDetails?.isCrit || evt.rollDetails?.total === 20;
+              const isNat1 = evt.rollDetails?.isFumble || evt.rollDetails?.total === 1;
+              const rollType = evt.rollDetails?.rollType;
+              const label = evt.rollDetails?.label;
+              const formula = evt.rollDetails?.formula;
+              const rolls = evt.rollDetails?.rolls;
+              const total = evt.rollDetails?.total;
+              const isIndividual = evt.rollDetails?.displayMode === 'individual';
+              const poolBreakdown = evt.rollDetails?.poolBreakdown;
+              const modifier = evt.rollDetails?.modifier;
+              const pairedRolls = evt.rollDetails?.pairedRolls;
+              const advantageMode = evt.rollDetails?.advantageMode;
+
+              return (
+                <div
+                  key={evt.id}
+                  className={`p-2.5 rounded-xl border text-xs space-y-1.5 transition-all shadow-sm ${
+                    isNat20
+                      ? 'bg-amber-950/40 border-amber-500/70 shadow-amber-950/30'
+                      : isNat1
+                      ? 'bg-rose-950/40 border-rose-500/60 shadow-rose-950/30'
+                      : 'bg-slate-950 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-cyan-300 flex items-center gap-1.5 flex-wrap">
+                      <Dices className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{evt.sender}</span>
+                      {evt.isDm && (
+                        <span className="text-[9px] text-amber-400 font-semibold px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/60">
+                          DM
+                        </span>
+                      )}
+                      {rollType && rollType !== 'Straight roll' && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 text-slate-300 font-medium">
+                          {rollType}
+                        </span>
+                      )}
+                      {isIndividual && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 font-bold">
+                          Individual
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">{time}</span>
+                  </div>
+
+                  {label && (
+                    <div className="text-[11px] text-amber-300 font-medium italic">
+                      "{label}"
+                    </div>
+                  )}
+
+                  {isIndividual ? (
+                    /* Individual Mode: Displays each die result separately by die type without adding them together */
+                    <div className="space-y-1.5 pt-0.5 border-t border-slate-800/60">
+                      {/* Paired Breakdown if Advantage/Disadvantage */}
+                      {pairedRolls && pairedRolls.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-semibold text-amber-300 font-mono">
+                            d20 ({advantageMode || 'contested'}):
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {pairedRolls.map((pair) => (
+                              <div
+                                key={pair.pairIndex}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono"
+                              >
+                                <span className="text-[9px] text-slate-400 font-bold">P{pair.pairIndex}:</span>
+                                <span
+                                  className={`px-1 py-0.2 rounded font-bold ${
+                                    pair.selected === 20
+                                      ? 'bg-amber-400 text-slate-950'
+                                      : pair.selected === 1
+                                      ? 'bg-rose-600 text-white'
+                                      : 'bg-amber-950/80 text-amber-200 border border-amber-600/60'
+                                  }`}
+                                >
+                                  [{pair.selected}]
+                                </span>
+                                <span className="text-[10px] text-slate-500 flex items-center opacity-80">
+                                  (drop{' '}
+                                  <span className="line-through decoration-rose-500 text-slate-400 font-semibold">
+                                    {pair.discarded}
+                                  </span>
+                                  )
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Other non-d20 die groups if present, or all groups if normal roll */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(poolBreakdown && poolBreakdown.length > 0
+                          ? pairedRolls && pairedRolls.length > 0
+                            ? poolBreakdown.filter((g) => g.dieType !== 'd20')
+                            : poolBreakdown
+                          : pairedRolls && pairedRolls.length > 0
+                          ? []
+                          : [{ dieType: evt.rollDetails?.diceType || 'd20', rolls: rolls || [] }]
+                        ).map((group, gIdx) => (
+                          <div
+                            key={gIdx}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono"
+                          >
+                            <span className="font-bold text-amber-300">{group.dieType}:</span>
+                            <div className="flex items-center gap-0.5">
+                              {group.rolls.map((r, rIdx) => {
+                                const rNat20 = group.dieType === 'd20' && r === 20;
+                                const rNat1 = group.dieType === 'd20' && r === 1;
+                                return (
+                                  <span
+                                    key={rIdx}
+                                    className={`px-1 py-0.2 rounded font-bold ${
+                                      rNat20
+                                        ? 'bg-amber-400 text-slate-950'
+                                        : rNat1
+                                        ? 'bg-rose-600 text-white'
+                                        : 'bg-slate-800 text-slate-200'
+                                    }`}
+                                  >
+                                    [{r}]
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+
+                        {modifier !== undefined && modifier !== 0 && (
+                          <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800">
+                            Mod: {modifier > 0 ? `+${modifier}` : modifier}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Sum Mode (Default): Grand total + breakdown in small text */
+                    <div className="space-y-1 pt-0.5">
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-[11px] font-mono text-slate-400">
+                          {formula || evt.message}
+                          {rolls && rolls.length > 0 && (
+                            <span className="text-slate-500 ml-1">
+                              [{rolls.join(', ')}]
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {isNat20 && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-bold text-[9px] tracking-wider animate-pulse">
+                              NAT 20
+                            </span>
+                          )}
+                          {isNat1 && (
+                            <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] tracking-wider">
+                              NAT 1
+                            </span>
+                          )}
+                          {typeof total === 'number' && (
+                            <span
+                              className={`text-base font-bold font-mono ${
+                                isNat20
+                                  ? 'text-amber-300'
+                                  : isNat1
+                                  ? 'text-rose-400'
+                                  : 'text-slate-100'
+                              }`}
+                            >
+                              {total}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Paired Breakdown in Sum Mode if Advantage/Disadvantage was active */}
+                      {pairedRolls && pairedRolls.length > 0 && (
+                        <div className="pt-1 border-t border-slate-800/60 flex flex-wrap items-center gap-1 text-[11px] font-mono">
+                          <span className="text-[9px] uppercase font-bold text-amber-300">
+                            {advantageMode || 'pairs'}:
+                          </span>
+                          {pairedRolls.map((pair) => (
+                            <span
+                              key={pair.pairIndex}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-[10px]"
+                            >
+                              <span className="text-slate-500">P{pair.pairIndex}:</span>
+                              <span
+                                className={`font-bold ${
+                                  pair.selected === 20
+                                    ? 'text-amber-400'
+                                    : pair.selected === 1
+                                    ? 'text-rose-400'
+                                    : 'text-amber-200'
+                                }`}
+                              >
+                                [{pair.selected}]
+                              </span>
+                              <span className="text-slate-500 flex items-center">
+                                (drop{' '}
+                                <span className="line-through decoration-rose-500 text-slate-400 font-semibold">
+                                  {pair.discarded}
+                                </span>
+                                )
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // Combat action log (Damage, Healing, Conditions)
+            if (evt.type === 'combat') {
+              const isDamage = evt.message.includes('took');
+              const isHeal = evt.message.includes('healed');
+
+              return (
+                <div
+                  key={evt.id}
+                  className={`p-2 rounded-xl border text-xs space-y-0.5 ${
+                    isDamage
+                      ? 'bg-rose-950/30 border-rose-800/60 text-rose-200'
+                      : isHeal
+                      ? 'bg-emerald-950/30 border-emerald-800/60 text-emerald-200'
+                      : 'bg-slate-950/80 border-slate-800/80 text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-300">{evt.sender}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">{time}</span>
+                  </div>
+                  <p className="font-medium">{evt.message}</p>
+                </div>
+              );
+            }
+
+            // Chat message
+            return (
+              <div
+                key={evt.id}
+                className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs space-y-0.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1">
+                    {evt.sender}
+                    {evt.isDm && <span className="text-[9px] text-amber-400 font-semibold">(DM)</span>}
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">{time}</span>
+                </div>
+                <p className="text-slate-300 whitespace-pre-wrap">{evt.message}</p>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Quick Dice Chamber Bar */}
+      <div className="pt-2 border-t border-slate-800 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+            <Dices className="w-3.5 h-3.5 text-amber-400" /> Quick Roll:
+          </span>
+
+          <div className="flex items-center bg-slate-950 rounded-lg p-0.5 border border-slate-800 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setAdvantageMode('normal')}
+              className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
+                advantageMode === 'normal' ? 'bg-slate-800 text-amber-300 font-bold' : 'text-slate-400'
+              }`}
+            >
+              Norm
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdvantageMode('adv')}
+              className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
+                advantageMode === 'adv' ? 'bg-emerald-950 text-emerald-300 font-bold' : 'text-slate-400'
+              }`}
+            >
+              Adv
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdvantageMode('dis')}
+              className={`px-1.5 py-0.5 rounded cursor-pointer transition ${
+                advantageMode === 'dis' ? 'bg-rose-950 text-rose-300 font-bold' : 'text-slate-400'
+              }`}
+            >
+              Dis
+            </button>
+          </div>
+        </div>
+
+        {/* Dice buttons */}
+        <div className="grid grid-cols-6 gap-1">
+          {[20, 12, 10, 8, 6, 4].map((sides) => (
+            <button
+              key={sides}
+              type="button"
+              onClick={() => handleQuickRoll(sides)}
+              className="py-1 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-800 hover:border-amber-400 text-slate-200 hover:text-amber-300 transition cursor-pointer shadow-sm text-center"
+            >
+              d{sides}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Chat Message Input */}
+      <form onSubmit={handleSendChat} className="flex items-center gap-1.5 pt-1">
+        <input
+          type="text"
+          placeholder="Combat callout or note..."
+          value={chatInput}
+          onChange={(e) => setChatInput(e.target.value)}
+          className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-slate-950 border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-amber-400"
+        />
+        <button
+          type="submit"
+          className="p-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer"
+          title="Send Callout to Room"
+        >
+          <Send className="w-4 h-4" />
+        </button>
+      </form>
+    </div>
+  );
+};
