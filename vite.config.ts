@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: '/AshtaporTTRPG-TTRPG-Session-Companion-v2/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
