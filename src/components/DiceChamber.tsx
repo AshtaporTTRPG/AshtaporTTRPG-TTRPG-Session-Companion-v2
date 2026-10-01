@@ -1027,11 +1027,11 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
             <button
               type="button"
               onClick={() => {
-                liveFeedSync.clearFeed(true);
+                liveFeedSync.clearFeed();
                 setDiceHistory([]);
               }}
               className="text-slate-400 hover:text-rose-300 text-xs px-2.5 py-1 rounded bg-slate-950/80 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-800/60 transition cursor-pointer flex items-center gap-1 shadow-sm"
-              title="Clear Live Feed Log (persists globally for all tabs and peers)"
+              title="Clear Local Feed Log (clears only your view, does not affect others)"
             >
               <Trash2 className="w-3.5 h-3.5 text-slate-400" />
               <span>Clear Log</span>

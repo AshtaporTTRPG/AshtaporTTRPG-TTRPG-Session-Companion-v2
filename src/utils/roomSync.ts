@@ -132,12 +132,19 @@ class RoomSyncManager {
 
   constructor() {
     try {
-      const savedRoom = localStorage.getItem('ttrpg_active_room');
-      if (savedRoom) this.roomCode = savedRoom.toUpperCase();
-      const savedName = localStorage.getItem('ttrpg_player_name');
+      const savedRoom = localStorage.getItem('ttrpg_active_room') || sessionStorage.getItem('ttrpg_active_room');
+      if (savedRoom && savedRoom.trim()) this.roomCode = savedRoom.trim().toUpperCase();
+      const savedName = localStorage.getItem('ttrpg_player_name') || sessionStorage.getItem('ttrpg_player_name');
       if (savedName && savedName.trim()) this.peerName = savedName.trim();
-      const savedDm = localStorage.getItem('ttrpg_user_is_dm');
-      if (savedDm !== null) this.isDm = savedDm === 'true';
+      const savedRole = localStorage.getItem('ttrpg_user_role') || sessionStorage.getItem('ttrpg_user_role');
+      if (savedRole === 'player') {
+        this.isDm = false;
+      } else if (savedRole === 'dm') {
+        this.isDm = true;
+      } else {
+        const savedDm = localStorage.getItem('ttrpg_user_is_dm') ?? sessionStorage.getItem('ttrpg_user_is_dm');
+        if (savedDm !== null) this.isDm = savedDm === 'true';
+      }
     } catch {
       // ignore
     }
@@ -149,6 +156,15 @@ class RoomSyncManager {
           try {
             localStorage.setItem('ttrpg_is_hosting', 'true');
             sessionStorage.setItem('ttrpg_is_hosting', 'true');
+          } catch {}
+        }
+        // If player was actively connected or reconnecting, preserve player_joined flag across refresh
+        if (!this.isDm && (this.status === 'connected' || this.status === 'reconnecting' || this.status === 'connecting')) {
+          try {
+            localStorage.setItem('ttrpg_player_joined', 'true');
+            sessionStorage.setItem('ttrpg_player_joined', 'true');
+            localStorage.setItem('ttrpg_connection_active', 'true');
+            sessionStorage.setItem('ttrpg_connection_active', 'true');
           } catch {}
         }
         this.cleanupPeer();
@@ -175,7 +191,10 @@ class RoomSyncManager {
       // Player session recovery if player refreshed while connected
       const wasPlayerJoined =
         typeof window !== 'undefined' &&
-        sessionStorage.getItem('ttrpg_player_joined') === 'true';
+        (sessionStorage.getItem('ttrpg_player_joined') === 'true' ||
+          localStorage.getItem('ttrpg_player_joined') === 'true' ||
+          sessionStorage.getItem('ttrpg_connection_active') === 'true' ||
+          localStorage.getItem('ttrpg_connection_active') === 'true');
 
       if (wasPlayerJoined && !this.isDm) {
         this.status = 'connecting';
@@ -231,6 +250,7 @@ class RoomSyncManager {
         roomChanged = true;
         try {
           localStorage.setItem('ttrpg_active_room', this.roomCode);
+          sessionStorage.setItem('ttrpg_active_room', this.roomCode);
         } catch {}
       }
     }
@@ -241,6 +261,7 @@ class RoomSyncManager {
         nameChanged = true;
         try {
           localStorage.setItem('ttrpg_player_name', this.peerName);
+          sessionStorage.setItem('ttrpg_player_name', this.peerName);
         } catch {}
       }
     }
@@ -248,6 +269,9 @@ class RoomSyncManager {
       this.isDm = isDmRole;
       try {
         localStorage.setItem('ttrpg_user_is_dm', String(isDmRole));
+        sessionStorage.setItem('ttrpg_user_is_dm', String(isDmRole));
+        localStorage.setItem('ttrpg_user_role', isDmRole ? 'dm' : 'player');
+        sessionStorage.setItem('ttrpg_user_role', isDmRole ? 'dm' : 'player');
       } catch {}
     }
 
@@ -306,7 +330,11 @@ class RoomSyncManager {
       localStorage.setItem('ttrpg_is_hosting', 'true');
       sessionStorage.setItem('ttrpg_is_hosting', 'true');
       localStorage.setItem('ttrpg_active_room', this.roomCode);
+      sessionStorage.setItem('ttrpg_active_room', this.roomCode);
       localStorage.setItem('ttrpg_user_is_dm', 'true');
+      sessionStorage.setItem('ttrpg_user_is_dm', 'true');
+      localStorage.setItem('ttrpg_user_role', 'dm');
+      sessionStorage.setItem('ttrpg_user_role', 'dm');
     } catch {}
 
     this.hostRecoveryAttempts = 0;
@@ -522,8 +550,20 @@ class RoomSyncManager {
    */
   public joinRoom(): void {
     this.wasExplicitLeave = false;
+    this.isDm = false;
     try {
       sessionStorage.setItem('ttrpg_player_joined', 'true');
+      localStorage.setItem('ttrpg_player_joined', 'true');
+      sessionStorage.setItem('ttrpg_connection_active', 'true');
+      localStorage.setItem('ttrpg_connection_active', 'true');
+      localStorage.setItem('ttrpg_active_room', this.roomCode);
+      sessionStorage.setItem('ttrpg_active_room', this.roomCode);
+      localStorage.setItem('ttrpg_player_name', this.peerName);
+      sessionStorage.setItem('ttrpg_player_name', this.peerName);
+      localStorage.setItem('ttrpg_user_role', 'player');
+      sessionStorage.setItem('ttrpg_user_role', 'player');
+      localStorage.setItem('ttrpg_user_is_dm', 'false');
+      sessionStorage.setItem('ttrpg_user_is_dm', 'false');
     } catch {}
     this.startPeerClient();
   }
@@ -703,15 +743,12 @@ class RoomSyncManager {
             );
           }
 
-          // Restore feed state to localStorage if available
-          if (Array.isArray(feed) && feed.length > 0) {
+          // Forward INITIAL_STATE_SYNC payload to listeners (e.g. liveFeedSync)
+          this.listeners.forEach((fn) => {
             try {
-              localStorage.setItem('ttrpg_unified_live_feed', JSON.stringify(feed));
+              fn(data);
             } catch {}
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new StorageEvent('storage', { key: 'ttrpg_unified_live_feed' }));
-            }
-          }
+          });
 
           this.notifyPresence();
           return;
@@ -937,7 +974,9 @@ class RoomSyncManager {
 
   private getFeedSnapshot() {
     try {
-      const feedRaw = localStorage.getItem('ttrpg_unified_live_feed');
+      const feedRaw =
+        localStorage.getItem('ttrpg_unified_live_feed_dm') ||
+        localStorage.getItem('ttrpg_unified_live_feed');
       return feedRaw ? JSON.parse(feedRaw) : [];
     } catch {
       return [];
@@ -989,6 +1028,9 @@ class RoomSyncManager {
     this.wasExplicitLeave = true;
     try {
       sessionStorage.removeItem('ttrpg_player_joined');
+      localStorage.removeItem('ttrpg_player_joined');
+      sessionStorage.removeItem('ttrpg_connection_active');
+      localStorage.removeItem('ttrpg_connection_active');
     } catch {}
 
     if (this.clientReconnectTimer) {
@@ -1403,6 +1445,14 @@ class RoomSyncManager {
       statusText: this.statusText,
       lastError: this.lastError,
     };
+  }
+
+  public getIsDm(): boolean {
+    return this.isDm;
+  }
+
+  public getRole(): 'dm' | 'player' {
+    return this.isDm ? 'dm' : 'player';
   }
 
   public getShareableJoinLink(): string {

@@ -16,10 +16,25 @@ import { roomSync } from './utils/roomSync';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'combat' | 'dice' | 'geometry' | 'map' | 'notes'>('combat');
-  const [isDm, setIsDm] = useState<boolean>(true);
+
+  // Check stored state on page load/mount:
+  // If the user was in Player Mode, initialize the application directly in Player Mode (do not default to DM Mode)
+  const [isDm, setIsDm] = useState<boolean>(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('room')) return false; // Joining via shareable link defaults to Player Mode
+      const savedRole = localStorage.getItem('ttrpg_user_role') || sessionStorage.getItem('ttrpg_user_role');
+      if (savedRole === 'player') return false;
+      if (savedRole === 'dm') return true;
+      const savedDm = localStorage.getItem('ttrpg_user_is_dm');
+      if (savedDm !== null) return savedDm === 'true';
+    } catch {}
+    return true; // Default to DM only if no prior stored state
+  });
+
   const [isRoadmapOpen, setIsRoadmapOpen] = useState<boolean>(false);
   const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(false);
-  const [roomCode, setRoomCode] = useState<string>(roomSync.getRoomCode());
+  const [roomCode, setRoomCode] = useState<string>(() => roomSync.getRoomCode());
   const [displayName, setDisplayName] = useState<string>(() => roomSync.getPeerName());
   const [connectionStatus, setConnectionStatus] = useState<string>(() => roomSync.getConnectionStatus().status);
 
@@ -46,10 +61,10 @@ export default function App() {
     } catch {}
   }, []);
 
-  // Keep roomSync updated when role changes locally
+  // Keep roomSync updated when role or room code changes
   useEffect(() => {
-    roomSync.configure(roomCode, roomSync.getPeerName(), isDm);
-  }, [isDm, roomCode]);
+    roomSync.configure(roomCode, displayName, isDm);
+  }, [isDm, roomCode, displayName]);
 
   // Handle safe switch to DM mode with single-DM role enforcement
   const handleSwitchToDm = () => {
@@ -61,7 +76,7 @@ export default function App() {
       return;
     }
     setIsDm(true);
-    roomSync.configure(roomCode, roomSync.getPeerName(), true);
+    roomSync.configure(roomCode, displayName, true);
   };
 
   return (
@@ -76,6 +91,7 @@ export default function App() {
             handleSwitchToDm();
           } else {
             setIsDm(false);
+            roomSync.configure(roomCode, displayName, false);
           }
         }}
         onOpenRoadmap={() => setIsRoadmapOpen(true)}

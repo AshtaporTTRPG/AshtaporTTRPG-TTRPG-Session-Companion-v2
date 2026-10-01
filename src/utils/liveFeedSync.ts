@@ -45,8 +45,7 @@ export interface UnifiedFeedItem {
 
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
 
-const STORAGE_KEY = 'ttrpg_unified_live_feed';
-const CLEARED_KEY = 'ttrpg_live_feed_cleared_at';
+const LEGACY_STORAGE_KEY = 'ttrpg_unified_live_feed';
 
 function formatFormula(count: number, die: string, mod: number): string {
   const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '';
@@ -57,19 +56,46 @@ class LiveFeedSyncManager {
   private items: UnifiedFeedItem[] = [];
   private listeners: Set<FeedListener> = new Set();
   private initialized = false;
+  private clearedAt: number = 0;
+  private currentRole: 'dm' | 'player' = 'dm';
 
   constructor() {
     this.init();
+  }
+
+  private getStorageKey(): string {
+    return roomSync.getIsDm() ? 'ttrpg_unified_live_feed_dm' : 'ttrpg_unified_live_feed_player';
+  }
+
+  private getClearedKey(): string {
+    return roomSync.getIsDm() ? 'ttrpg_live_feed_cleared_at_dm' : 'ttrpg_live_feed_cleared_at_player';
   }
 
   private init() {
     if (this.initialized) return;
     this.initialized = true;
 
+    this.currentRole = roomSync.getIsDm() ? 'dm' : 'player';
+
+    // Load cleared timestamp for this client/role
+    try {
+      const savedCleared =
+        localStorage.getItem(this.getClearedKey()) ||
+        sessionStorage.getItem(this.getClearedKey());
+      if (savedCleared) {
+        this.clearedAt = parseInt(savedCleared, 10) || 0;
+      }
+    } catch {}
+
     // Load persisted feed
     let hasSavedData = false;
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const key = this.getStorageKey();
+      let saved = localStorage.getItem(key) || sessionStorage.getItem(key);
+      if (saved === null) {
+        // Fallback to legacy key on first migration if available
+        saved = localStorage.getItem(LEGACY_STORAGE_KEY);
+      }
       if (saved !== null) {
         hasSavedData = true;
         const parsed = JSON.parse(saved);
@@ -79,7 +105,7 @@ class LiveFeedSyncManager {
       }
     } catch {}
 
-    const hasBeenCleared = localStorage.getItem(CLEARED_KEY) !== null;
+    const hasBeenCleared = this.clearedAt > 0;
 
     // Only populate initial welcome item if completely fresh and never cleared
     if (!hasSavedData && !hasBeenCleared && this.items.length === 0) {
@@ -93,13 +119,13 @@ class LiveFeedSyncManager {
         },
       ];
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.items));
+        localStorage.setItem(this.getStorageKey(), JSON.stringify(this.items));
       } catch {}
     }
 
-    // Storage event listener for multi-tab sync of live feed & clear operations
+    // Storage event listener for multi-tab sync strictly within the SAME role
     window.addEventListener('storage', (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) {
+      if (e.key === this.getStorageKey()) {
         try {
           if (e.newValue) {
             const parsed = JSON.parse(e.newValue);
@@ -112,17 +138,46 @@ class LiveFeedSyncManager {
             this.notifyListeners();
           }
         } catch {}
-      } else if (e.key === CLEARED_KEY) {
-        this.items = [];
-        this.notifyListeners();
+      }
+    });
+
+    // Listen to local presence/role change to switch storage scope if role toggles locally
+    roomSync.subscribePresence(() => {
+      const newRole = roomSync.getIsDm() ? 'dm' : 'player';
+      if (newRole !== this.currentRole) {
+        this.currentRole = newRole;
+        try {
+          const savedCleared =
+            localStorage.getItem(this.getClearedKey()) ||
+            sessionStorage.getItem(this.getClearedKey());
+          this.clearedAt = savedCleared ? parseInt(savedCleared, 10) || 0 : 0;
+          const key = this.getStorageKey();
+          let saved = localStorage.getItem(key) || sessionStorage.getItem(key);
+          if (saved === null) {
+            saved = localStorage.getItem(LEGACY_STORAGE_KEY);
+          }
+          if (saved !== null) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              this.items = parsed;
+              this.notifyListeners();
+            }
+          }
+        } catch {}
       }
     });
 
     // Subscribe to roomSync messages
     roomSync.subscribe((msg: RoomMessage) => {
-      // Clear feed broadcast
+      // NOTE: We intentionally DO NOT clear the feed on incoming FEED_CLEAR messages.
+      // Clear Log is strictly localized to the local client's current session view.
       if (msg.type === 'FEED_CLEAR') {
-        this.clearFeed(false);
+        return;
+      }
+
+      // Initial state sync snapshot from DM host
+      if (msg.type === 'INITIAL_STATE_SYNC' && msg.payload?.feed) {
+        this.mergeIncomingSnapshot(msg.payload.feed);
         return;
       }
 
@@ -228,10 +283,37 @@ class LiveFeedSyncManager {
     });
   }
 
+  public mergeIncomingSnapshot(snapshot: UnifiedFeedItem[]): void {
+    if (!Array.isArray(snapshot) || snapshot.length === 0) return;
+
+    const cutoff = this.clearedAt;
+    const existingIds = new Set(this.items.map((it) => it.id));
+    const toAdd = snapshot.filter((item) => {
+      if (!item || !item.id) return false;
+      if (existingIds.has(item.id)) return false;
+      if (cutoff > 0 && item.timestamp && item.timestamp <= cutoff) return false;
+      return true;
+    });
+
+    if (toAdd.length > 0) {
+      this.items = [...this.items, ...toAdd]
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+        .slice(-80);
+      try {
+        localStorage.setItem(this.getStorageKey(), JSON.stringify(this.items));
+      } catch {}
+      this.notifyListeners();
+    }
+  }
+
   private appendItem(item: UnifiedFeedItem, broadcast = false) {
+    if (this.clearedAt > 0 && item.timestamp && item.timestamp < this.clearedAt) {
+      return;
+    }
+
     this.items = [...this.items.slice(-79), item];
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.items));
+      localStorage.setItem(this.getStorageKey(), JSON.stringify(this.items));
     } catch {}
 
     this.notifyListeners(item);
@@ -389,23 +471,20 @@ class LiveFeedSyncManager {
   }
 
   /**
-   * Globally clears the live room feed log.
-   * Persists an explicit empty array to localStorage so that switching tabs or
-   * re-rendering never re-injects default sample feed items.
-   * Broadcasts to all connected peers and open tabs.
+   * Localized Live Feed Log Clearing (Client-Side Only).
+   * Scopes the "Clear Log" action strictly to the local client's current session view.
+   * Does NOT broadcast a global clear event across WebRTC data channels or to other peers.
+   * Each participant (DM and individual players) retains independent control over their own feed.
    */
-  public clearFeed(broadcast = true): void {
+  public clearFeed(): void {
     this.items = [];
+    this.clearedAt = Date.now();
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-      localStorage.setItem(CLEARED_KEY, String(Date.now()));
+      localStorage.setItem(this.getStorageKey(), JSON.stringify([]));
+      sessionStorage.setItem(this.getStorageKey(), JSON.stringify([]));
+      localStorage.setItem(this.getClearedKey(), String(this.clearedAt));
+      sessionStorage.setItem(this.getClearedKey(), String(this.clearedAt));
     } catch {}
-
-    if (broadcast) {
-      roomSync.broadcast('FEED_CLEAR', {
-        clearedAt: Date.now(),
-      });
-    }
 
     this.notifyListeners();
   }

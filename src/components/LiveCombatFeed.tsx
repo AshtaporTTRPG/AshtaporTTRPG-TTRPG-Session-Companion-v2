@@ -75,9 +75,9 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
     setChatInput('');
   };
 
-  // Clear Feed Log globally for both DM and Players
+  // Clear Feed Log strictly locally for this client
   const handleClearLog = () => {
-    liveFeedSync.clearFeed(true);
+    liveFeedSync.clearFeed();
   };
 
   return (
@@ -103,7 +103,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
               type="button"
               onClick={handleClearLog}
               className="text-slate-400 hover:text-rose-300 text-xs px-2 py-0.5 rounded bg-slate-950/80 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-800/60 transition cursor-pointer flex items-center gap-1 shadow-sm"
-              title="Clear Room Feed Log (persists globally for all tabs and peers)"
+              title="Clear Local Feed Log (clears only your view, does not affect others)"
             >
               <Trash2 className="w-3 h-3 text-slate-400 group-hover:text-rose-400" />
               <span>Clear Log</span>
