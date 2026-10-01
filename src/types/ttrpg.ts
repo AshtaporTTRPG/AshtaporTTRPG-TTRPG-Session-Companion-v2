@@ -36,7 +36,20 @@ export interface Combatant {
     failures: number;
   };
   notes?: string;
-  hidden?: boolean; // Per-combatant DM visibility toggle (Fog of War)
+  hidden?: boolean; // Per-combatant DM visibility toggle (completely hidden from initiative)
+  fogOfWar?: boolean; // Fog of War toggle (conceals active conditions, status badges, exact HP, and damage numbers)
+}
+
+/**
+ * Returns true if a combatant is considered under Fog of War.
+ * - If fogOfWar is explicitly set, it respects that boolean.
+ * - If hidden is true, it is under Fog of War.
+ * - Otherwise, monsters, bosses, and custom environmental entities default to Fog of War.
+ */
+export function isCombatantFoW(combatant: Combatant): boolean {
+  if (combatant.fogOfWar !== undefined) return combatant.fogOfWar;
+  if (combatant.hidden) return true;
+  return combatant.type === 'monster' || combatant.type === 'boss' || combatant.type === 'custom';
 }
 
 export type DieType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20' | 'd100';

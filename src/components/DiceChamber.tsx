@@ -418,10 +418,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
 
   // Filter rolls based on player/DM view
   const visibleRolls = diceHistory.filter((roll) => {
-    // If it's a DM secret roll: visible to DM or the roller themselves
-    if (roll.isSecret && !isDm && roll.sender !== userName) {
-      return false;
-    }
     // If it's a self roll: only visible to the user who rolled it
     if (roll.visibility === 'self' && roll.sender !== userName) {
       return false;
@@ -1021,6 +1017,33 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
                 minute: '2-digit',
                 second: '2-digit',
               });
+
+              const isSecretRoll = roll.visibility === 'dm' || !!roll.isSecret;
+              const canSeeSecretDetails = isDm || roll.sender === userName;
+
+              // Secret DM Dice Rolls: Other players must only see a generic log notice
+              if (isSecretRoll && !canSeeSecretDetails) {
+                return (
+                  <div
+                    key={roll.id}
+                    className="p-3.5 rounded-xl border border-purple-800/60 bg-purple-950/30 text-xs space-y-1.5 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-purple-200">{roll.sender}</span>
+                        <span className="text-[10px] text-purple-300 font-medium px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800/80 flex items-center gap-0.5">
+                          <EyeOff className="w-2.5 h-2.5" />
+                          Secret Roll
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 tabular-nums font-mono">{dateStr}</span>
+                    </div>
+                    <p className="text-slate-300 font-medium italic">
+                      {roll.sender} rolled a secret check to the DM.
+                    </p>
+                  </div>
+                );
+              }
 
               const typeCfg = roll.rollType ? ROLL_TYPE_CONFIG.find((c) => c.type === roll.rollType) : null;
 

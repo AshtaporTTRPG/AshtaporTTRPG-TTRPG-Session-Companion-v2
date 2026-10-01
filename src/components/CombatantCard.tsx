@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Combatant, CombatantType, Condition } from '../types/ttrpg';
+import { Combatant, CombatantType, Condition, isCombatantFoW } from '../types/ttrpg';
 import { getHealthThreshold } from '../utils/combatHealth';
+import { isConcentrating, calculateConcentrationDC } from '../utils/concentration';
 import {
   Shield,
   Heart,
@@ -15,6 +16,7 @@ import {
   X,
   Sliders,
   Check,
+  Cloud,
 } from 'lucide-react';
 
 interface CombatantCardProps {
@@ -23,7 +25,7 @@ interface CombatantCardProps {
   isDm: boolean;
   onUpdate: (updated: Partial<Combatant>) => void;
   onDelete: () => void;
-  onAddLog?: (message: string) => void;
+  onAddLog?: (dmMessage: string, playerMessage?: string) => void;
 }
 
 const CONDITIONS_LIST: { name: Condition; color: string }[] = [
@@ -61,11 +63,13 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
   onDelete,
   onAddLog,
 }) => {
-  // ROLE-BASED ACCESS CONTROL (RBAC):
-  // DM has unrestricted edit access across all combatants.
-  // Players ONLY have edit access on Player (PC) and Ally / NPC.
-  // Monsters, Bosses, and Custom entities are strictly Read-Only for players with stats concealed.
-  const canEditCombatant = isDm || combatant.type === 'player' || combatant.type === 'ally';
+  // FOG OF WAR & ROLE-BASED ACCESS CONTROL (RBAC):
+  // 1. Fog of War: If marked with FoW (or monster/boss/custom default), conceal conditions, status badges, stats, and numerical damage from players.
+  // 2. Permission Rules: Players may ONLY edit stats & toggle conditions on non-FoW "Player (PC)" and "NPC / Ally" combatants.
+  // 3. Enemies and FoW combatants are strictly DM-editable.
+  const isFoW = isCombatantFoW(combatant);
+  const isPlayerOrAlly = combatant.type === 'player' || combatant.type === 'ally';
+  const canEditCombatant = isDm || (isPlayerOrAlly && !isFoW);
 
   // HP Delta form state
   const [hpDelta, setHpDelta] = useState<string>('');
@@ -103,12 +107,34 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
     }
     const newHp = Math.max(0, combatant.hpCurrent - remainingDamage);
     onUpdate({ hpCurrent: newHp, hpTemp: newTemp });
-    onAddLog &&
-      onAddLog(
-        `⚔️ ${combatant.name} took ${amount} damage! (${newHp}/${combatant.hpMax} HP${
+
+    // Damage Obfuscation:
+    // DM view: "[Name] took [X] damage."
+    // Player view: "[Name] took damage." (no numerical damage or HP for FoW combatants)
+    const dmMessage = `⚔️ ${combatant.name} took ${amount} damage! (${newHp}/${combatant.hpMax} HP${
+      newTemp > 0 ? `, +${newTemp} temp` : ''
+    })`;
+    const playerMessage = isFoW
+      ? `⚔️ ${combatant.name} took damage.`
+      : `⚔️ ${combatant.name} took ${amount} damage! (${newHp}/${combatant.hpMax} HP${
           newTemp > 0 ? `, +${newTemp} temp` : ''
-        })`
-      );
+        })`;
+
+    if (onAddLog) {
+      onAddLog(dmMessage, playerMessage);
+    }
+
+    // Concentration DC check (Standard 5e: DC = Math.max(10, Math.floor(damage / 2)))
+    if (isConcentrating(combatant)) {
+      const dc = calculateConcentrationDC(amount);
+      const concDmMessage = `⚡ ${combatant.name} took ${amount} damage while concentrating! DC ${dc} Constitution saving throw required.`;
+      const concPlayerMessage = isFoW
+        ? `⚔️ ${combatant.name} took damage.`
+        : concDmMessage;
+      if (onAddLog) {
+        onAddLog(concDmMessage, concPlayerMessage);
+      }
+    }
   };
 
   // Quick Heal (+1, +5) - adds to Current HP, capped at Max HP
@@ -116,7 +142,13 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
     if (!canEditCombatant) return;
     const newHp = Math.min(combatant.hpMax, combatant.hpCurrent + amount);
     onUpdate({ hpCurrent: newHp });
-    onAddLog && onAddLog(`💚 ${combatant.name} healed for ${amount} HP! (${newHp}/${combatant.hpMax} HP)`);
+    const dmMessage = `💚 ${combatant.name} healed for ${amount} HP! (${newHp}/${combatant.hpMax} HP)`;
+    const playerMessage = isFoW
+      ? `💚 ${combatant.name} healed.`
+      : `💚 ${combatant.name} healed for ${amount} HP! (${newHp}/${combatant.hpMax} HP)`;
+    if (onAddLog) {
+      onAddLog(dmMessage, playerMessage);
+    }
   };
 
   // Custom Amount Damage / Heal
@@ -147,10 +179,14 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
       armorClass: Math.max(0, acDraft),
     });
 
-    onAddLog &&
-      onAddLog(
-        `⚙️ ${combatant.name} stats updated: Init ${initDraft}, HP ${hpCurrDraft}/${hpMaxDraft} (+${hpTempDraft} temp), AC ${acDraft}`
-      );
+    const dmMessage = `⚙️ ${combatant.name} stats updated: Init ${initDraft}, HP ${hpCurrDraft}/${hpMaxDraft} (+${hpTempDraft} temp), AC ${acDraft}`;
+    const playerMessage = isFoW
+      ? `⚙️ ${combatant.name} stats updated.`
+      : dmMessage;
+
+    if (onAddLog) {
+      onAddLog(dmMessage, playerMessage);
+    }
 
     setIsEditingStats(false);
   };
@@ -288,17 +324,25 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                   : roleStyle.label}
               </span>
 
-              {/* Dynamic Health Threshold Badge (Homebrew: Hurt, Bloodied, Critical, Defeated - ALWAYS visible to players) */}
-              <span
-                className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${healthInfo.badgeClass}`}
-                title={`Health Status: ${healthInfo.status}`}
-              >
-                {healthInfo.badgeLabel}
-              </span>
+              {/* Dynamic Health Threshold Badge: Hidden from player view when combatant is marked with Fog of War */}
+              {(isDm || !isFoW) && (
+                <span
+                  className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${healthInfo.badgeClass}`}
+                  title={`Health Status: ${healthInfo.status}`}
+                >
+                  {healthInfo.badgeLabel}
+                </span>
+              )}
 
               {isActive && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 animate-pulse">
                   ACTIVE TURN
+                </span>
+              )}
+
+              {isFoW && isDm && (
+                <span className="text-[10px] text-purple-300 bg-purple-950/80 border border-purple-700 px-1.5 py-0.5 rounded flex items-center gap-1 font-semibold">
+                  <Cloud className="w-3 h-3 text-purple-400" /> FoW Active
                 </span>
               )}
 
@@ -326,6 +370,22 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
             >
               <Sliders className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Edit Stats</span>
+            </button>
+          )}
+
+          {/* DM Fog of War Privacy Toggle */}
+          {isDm && (
+            <button
+              type="button"
+              onClick={() => onUpdate({ fogOfWar: !isFoW })}
+              title={isFoW ? 'Disable Fog of War (Reveal status & conditions to players)' : 'Enable Fog of War (Conceal status & conditions from players)'}
+              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                isFoW
+                  ? 'bg-purple-950 border-purple-500 text-purple-300 shadow-sm'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-purple-300 hover:border-purple-800'
+              }`}
+            >
+              <Cloud className="w-4 h-4" />
             </button>
           )}
 
@@ -607,150 +667,158 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
             </div>
           </div>
         ) : (
-          /* FOG OF WAR (Players looking at Monster, Boss, or Custom - Read-Only with Stats Concealed) */
+          /* FOG OF WAR (Players looking at Monster, Boss, Custom, or FoW entity - Read-Only with Stats Concealed) */
           <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-400 italic">
-                Tactical stats concealed by Fog of War.
+                Tactical stats &amp; condition status concealed by Fog of War.
               </span>
             </div>
-            <div className="text-right">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Condition Status:</span>
-              <span className={`text-xs font-bold ${healthInfo.textColor}`}>
-                {healthInfo.status}
+            {isDm ? (
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Condition Status:</span>
+                <span className={`text-xs font-bold ${healthInfo.textColor}`}>
+                  {healthInfo.status}
+                </span>
+              </div>
+            ) : (
+              <span className="text-[10px] text-purple-400 bg-purple-950/60 border border-purple-800/60 px-2 py-0.5 rounded font-mono">
+                Concealed
               </span>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Conditions Section */}
-        <div className="space-y-2 pt-2 border-t border-slate-800/80">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mr-1">
-              Conditions:
-            </span>
+        {/* Conditions Section: When a combatant is marked with Fog of War, hide all active conditions on Player view (visible only to DM) */}
+        {(isDm || !isFoW) && (
+          <div className="space-y-2 pt-2 border-t border-slate-800/80">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mr-1">
+                Conditions:
+              </span>
 
-            {combatant.conditions.length === 0 && !isAddingCondition && (
-              <span className="text-[11px] text-slate-500 italic">None active</span>
-            )}
+              {combatant.conditions.length === 0 && !isAddingCondition && (
+                <span className="text-[11px] text-slate-500 italic">None active</span>
+              )}
 
-            {combatant.conditions.map((cond) => {
-              const condCfg = CONDITIONS_LIST.find(
-                (c) => c.name.toLowerCase() === cond.name.toLowerCase()
-              );
-              return (
-                <span
-                  key={cond.name}
-                  className={`text-[11px] px-2 py-0.5 rounded-lg border font-medium flex items-center gap-1.5 shadow-sm transition-all ${
-                    condCfg ? condCfg.color : 'text-amber-300 bg-amber-950/70 border-amber-800/80'
-                  }`}
+              {combatant.conditions.map((cond) => {
+                const condCfg = CONDITIONS_LIST.find(
+                  (c) => c.name.toLowerCase() === cond.name.toLowerCase()
+                );
+                return (
+                  <span
+                    key={cond.name}
+                    className={`text-[11px] px-2 py-0.5 rounded-lg border font-medium flex items-center gap-1.5 shadow-sm transition-all ${
+                      condCfg ? condCfg.color : 'text-amber-300 bg-amber-950/70 border-amber-800/80'
+                    }`}
+                  >
+                    <span>{cond.name}</span>
+                    {canEditCombatant && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCondition(cond.name)}
+                        className="hover:text-rose-400 p-0.5 text-slate-400 transition cursor-pointer"
+                        title={`Remove condition "${cond.name}"`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+
+              {/* Lightweight "Add Condition" Button (Guarded by RBAC permissions: PC and Ally only for players) */}
+              {canEditCombatant && !isAddingCondition && (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingCondition(true)}
+                  className="flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-dashed border-slate-700 hover:border-amber-400 text-slate-400 hover:text-amber-300 transition cursor-pointer"
+                  title="Add a custom condition or status effect"
                 >
-                  <span>{cond.name}</span>
-                  {canEditCombatant && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveCondition(cond.name)}
-                      className="hover:text-rose-400 p-0.5 text-slate-400 transition cursor-pointer"
-                      title={`Remove condition "${cond.name}"`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </span>
-              );
-            })}
+                  <Plus className="w-3 h-3" />
+                  <span>Add Condition</span>
+                </button>
+              )}
+            </div>
 
-            {/* Lightweight "Add Condition" Button (Guarded by RBAC permissions) */}
-            {canEditCombatant && !isAddingCondition && (
-              <button
-                type="button"
-                onClick={() => setIsAddingCondition(true)}
-                className="flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-dashed border-slate-700 hover:border-amber-400 text-slate-400 hover:text-amber-300 transition cursor-pointer"
-                title="Add a custom condition or status effect"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Add Condition</span>
-              </button>
-            )}
-          </div>
-
-          {/* Lightweight Inline Popover / Input for Custom Condition Tagging */}
-          {canEditCombatant && isAddingCondition && (
-            <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 space-y-2 shadow-inner">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  placeholder="Type custom condition (e.g. Hexed, Grappled, Bane -1d4)"
-                  value={customConditionInput}
-                  onChange={(e) => setCustomConditionInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddCondition();
-                    } else if (e.key === 'Escape') {
+            {/* Lightweight Inline Popover / Input for Custom Condition Tagging */}
+            {canEditCombatant && isAddingCondition && (
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 space-y-2 shadow-inner">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Type custom condition (e.g. Hexed, Grappled, Bane -1d4)"
+                    value={customConditionInput}
+                    onChange={(e) => setCustomConditionInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCondition();
+                      } else if (e.key === 'Escape') {
+                        setIsAddingCondition(false);
+                        setCustomConditionInput('');
+                      }
+                    }}
+                    autoFocus
+                    className="flex-1 px-2.5 py-1 text-xs rounded-lg bg-slate-900 border border-slate-700 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-amber-400 font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddCondition()}
+                    disabled={!customConditionInput.trim()}
+                    className="px-3 py-1 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg cursor-pointer transition disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
                       setIsAddingCondition(false);
                       setCustomConditionInput('');
-                    }
-                  }}
-                  autoFocus
-                  className="flex-1 px-2.5 py-1 text-xs rounded-lg bg-slate-900 border border-slate-700 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-amber-400 font-medium"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleAddCondition()}
-                  disabled={!customConditionInput.trim()}
-                  className="px-3 py-1 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg cursor-pointer transition disabled:opacity-40"
-                >
-                  Add
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAddingCondition(false);
-                    setCustomConditionInput('');
-                  }}
-                  className="p-1 text-slate-400 hover:text-slate-200 text-xs cursor-pointer rounded"
-                  title="Cancel"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-200 text-xs cursor-pointer rounded"
+                    title="Cancel"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
-              {/* Quick Suggestions / Common Tags */}
-              <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                <span className="text-[10px] text-slate-500 mr-1 font-medium">Quick Suggestions:</span>
-                {[
-                  'Grappled',
-                  'Hexed',
-                  'Bane (-1d4)',
-                  'Bless (+1d4)',
-                  'Prone',
-                  'Stunned',
-                  'Invisible',
-                  'Concentration',
-                  'Frightened',
-                  'Poisoned',
-                  'Restrained',
-                ].map((preset) => {
-                  const alreadyHas = combatant.conditions.some(
-                    (c) => c.name.toLowerCase() === preset.toLowerCase()
-                  );
-                  if (alreadyHas) return null;
-                  return (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => handleAddCondition(preset)}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-amber-300 hover:border-amber-400 transition cursor-pointer"
-                    >
-                      +{preset}
-                    </button>
-                  );
-                })}
+                {/* Quick Suggestions / Common Tags */}
+                <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                  <span className="text-[10px] text-slate-500 mr-1 font-medium">Quick Suggestions:</span>
+                  {[
+                    'Grappled',
+                    'Hexed',
+                    'Bane (-1d4)',
+                    'Bless (+1d4)',
+                    'Prone',
+                    'Stunned',
+                    'Invisible',
+                    'Concentration',
+                    'Frightened',
+                    'Poisoned',
+                    'Restrained',
+                  ].map((preset) => {
+                    const alreadyHas = combatant.conditions.some(
+                      (c) => c.name.toLowerCase() === preset.toLowerCase()
+                    );
+                    if (alreadyHas) return null;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => handleAddCondition(preset)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-amber-300 hover:border-amber-400 transition cursor-pointer"
+                      >
+                        +{preset}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Combatant, CombatantType } from '../types/ttrpg';
+import { Combatant, CombatantType, isCombatantFoW } from '../types/ttrpg';
 import { ChevronUp, ChevronDown, Eye, EyeOff, Shield, Swords, Sparkles, Flame, User, Skull } from 'lucide-react';
 
 interface QuickGlanceInitiativeProps {
@@ -64,7 +64,8 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
               ? combatant.id === activeCombatantId
               : originalIndex === activeTurnIndex;
             const roleCfg = ROLE_BADGE_CONFIG[combatant.type] || ROLE_BADGE_CONFIG.player;
-            const isDefeated = combatant.hpCurrent <= 0 && combatant.hpMax > 0;
+            const isFoW = isCombatantFoW(combatant);
+            const isDefeated = (isDm || !isFoW) && combatant.hpCurrent <= 0 && combatant.hpMax > 0;
 
             return (
               <div

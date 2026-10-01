@@ -17,6 +17,9 @@ export interface UnifiedFeedItem {
   sender: string;
   isDm?: boolean;
   message: string;
+  playerMessage?: string; // Obfuscated or generic message for player view (e.g. FoW damage or secret roll notices)
+  isSecretRoll?: boolean;
+  secretSender?: string;
   timestamp: number;
   rollDetails?: {
     formula: string;
@@ -32,6 +35,7 @@ export interface UnifiedFeedItem {
     isFumble?: boolean;
     rollType?: RollTypeCategory;
     visibility?: RollVisibility;
+    isSecret?: boolean;
     label?: string;
     displayMode?: RollDisplayMode;
     poolBreakdown?: DieGroupRoll[];
@@ -112,12 +116,19 @@ class LiveFeedSyncManager {
           ? `rolled ${formula} for a total of ${roll.total}! (${pairedSummary})`
           : `rolled ${formula} for a total of ${roll.total}!`;
 
+        const isSecret = roll.visibility === 'dm' || !!roll.isSecret;
+        const senderName = roll.sender || msg.senderName;
+        const secretNotice = `${senderName} rolled a secret check to the DM.`;
+
         const newItem: UnifiedFeedItem = {
           id: roll.id || `dice-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           type: 'dice',
-          sender: roll.sender || msg.senderName,
+          sender: senderName,
           isDm: roll.isDm ?? msg.isDm,
           message: msgText,
+          playerMessage: isSecret ? secretNotice : undefined,
+          isSecretRoll: isSecret,
+          secretSender: senderName,
           timestamp: roll.timestamp || msg.timestamp || Date.now(),
           rollDetails: {
             formula,
@@ -133,6 +144,7 @@ class LiveFeedSyncManager {
             isFumble,
             rollType: roll.rollType,
             visibility: roll.visibility,
+            isSecret,
             label: roll.label,
             displayMode: roll.displayMode || 'sum',
             poolBreakdown: roll.poolBreakdown,
@@ -260,12 +272,19 @@ class LiveFeedSyncManager {
       ? `rolled ${formula} for a total of ${roll.total}! (${pairedSummary})`
       : `rolled ${formula} for a total of ${roll.total}!`;
 
+    const isSecret = roll.visibility === 'dm' || !!roll.isSecret;
+    const senderName = roll.sender || roomSync.getPeerName();
+    const secretNotice = `${senderName} rolled a secret check to the DM.`;
+
     const item: UnifiedFeedItem = {
       id: roll.id || `dice-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       type: 'dice',
-      sender: roll.sender || roomSync.getPeerName(),
+      sender: senderName,
       isDm: roll.isDm,
       message: msgText,
+      playerMessage: isSecret ? secretNotice : undefined,
+      isSecretRoll: isSecret,
+      secretSender: senderName,
       timestamp: roll.timestamp || Date.now(),
       rollDetails: {
         formula,
@@ -281,6 +300,7 @@ class LiveFeedSyncManager {
         isFumble,
         rollType: roll.rollType,
         visibility: roll.visibility,
+        isSecret,
         label: roll.label,
         displayMode: roll.displayMode || 'sum',
         poolBreakdown: roll.poolBreakdown,
@@ -304,12 +324,13 @@ class LiveFeedSyncManager {
     return item;
   }
 
-  public recordCombatLog(message: string, broadcast = true): UnifiedFeedItem {
+  public recordCombatLog(message: string, broadcast = true, playerMessage?: string): UnifiedFeedItem {
     const item: UnifiedFeedItem = {
       id: `combat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       type: 'combat',
       sender: 'Combat Tracker',
       message,
+      playerMessage: playerMessage || message,
       timestamp: Date.now(),
     };
     this.appendItem(item, broadcast);

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Combatant, CombatantType } from '../types/ttrpg';
+import React, { useState, useEffect, useRef } from 'react';
+import { Combatant, CombatantType, isCombatantFoW } from '../types/ttrpg';
 import { QuickGlanceInitiative } from './QuickGlanceInitiative';
 import { CombatantCard } from './CombatantCard';
 import { LiveCombatFeed } from './LiveCombatFeed';
@@ -70,6 +70,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
   // Turn Announcement Alert Banner (Floating, non-layout-shifting)
   const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
 
+  // Floating Damage Alert Toast: Obfuscated for FoW combatants on player view
+  const [damageToastAlert, setDamageToastAlert] = useState<string | null>(null);
+  const damageToastTimerRef = useRef<any>(null);
+
   // Add Combatant Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -138,26 +142,37 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         }
         if (typeof msg.payload.round === 'number') setRound(msg.payload.round);
       }
+
+      // Sync real-time damage toast alert across peers
+      if (msg.type === 'COMBAT_FEED_EVENT' && msg.payload?.event) {
+        const evt = msg.payload.event;
+        if (evt.type === 'combat') {
+          const alertMsg = !isDm && evt.playerMessage ? evt.playerMessage : evt.message;
+          if (alertMsg && (alertMsg.includes('took') || alertMsg.includes('damage'))) {
+            setDamageToastAlert(alertMsg.replace(/^[⚔️💚⚡⚙️✨💀➕]\s*/u, ''));
+            if (damageToastTimerRef.current) clearTimeout(damageToastTimerRef.current);
+            damageToastTimerRef.current = setTimeout(() => setDamageToastAlert(null), 4000);
+          }
+        }
+      }
     });
     return () => unsub();
-  }, []);
+  }, [isDm]);
 
-  // Broadcast combat updates when DM modifies state
+  // Broadcast combat updates when state is modified (DM and authorized player PC/Ally updates)
   const broadcastCombat = (
     updatedCombatants: Combatant[],
     updatedTurn: number,
     updatedRound: number,
     updatedActiveCombatantId?: string | null
   ) => {
-    if (isDm) {
-      roomSync.broadcast('COMBAT_SYNC', {
-        combatants: updatedCombatants,
-        activeTurnIndex: updatedTurn,
-        activeCombatantId:
-          updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
-        round: updatedRound,
-      });
-    }
+    roomSync.broadcast('COMBAT_SYNC', {
+      combatants: updatedCombatants,
+      activeTurnIndex: updatedTurn,
+      activeCombatantId:
+        updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
+      round: updatedRound,
+    });
   };
 
   // Scroll position preservation helper to eliminate layout jump and unwanted auto-scroll
@@ -171,9 +186,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     });
   };
 
-  // Helper to log into unified live feed
-  const addFeedLog = (message: string) => {
-    liveFeedSync.recordCombatLog(message, true);
+  // Helper to log into unified live feed and trigger damage toast alert
+  const addFeedLog = (dmMessage: string, playerMessage?: string) => {
+    liveFeedSync.recordCombatLog(dmMessage, true, playerMessage);
+    const alertMsg = !isDm && playerMessage ? playerMessage : dmMessage;
+    if (alertMsg.includes('took') || alertMsg.includes('damage')) {
+      setDamageToastAlert(alertMsg.replace(/^[⚔️💚⚡⚙️✨💀➕]\s*/u, ''));
+      if (damageToastTimerRef.current) clearTimeout(damageToastTimerRef.current);
+      damageToastTimerRef.current = setTimeout(() => setDamageToastAlert(null), 4000);
+    }
   };
 
   // ADVANCE TURN LOGIC & PLAYER TURN NOTIFICATION (Zero layout shift & scroll jump)
@@ -363,15 +384,24 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId);
   };
 
-  // UPDATE COMBATANT
+  // UPDATE COMBATANT (Permission Enforced: Players can ONLY edit non-FoW Player and Ally combatants)
   const handleUpdateCombatant = (id: string, updates: Partial<Combatant>) => {
+    const target = combatants.find((c) => c.id === id);
+    if (!target) return;
+    const isTargetFoW = isCombatantFoW(target);
+    const isTargetPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    if (!isDm && (!isTargetPlayerOrAlly || isTargetFoW)) {
+      return;
+    }
+
     const updated = combatants.map((c) => (c.id === id ? { ...c, ...updates } : c));
     setCombatants(updated);
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId);
   };
 
-  // DELETE COMBATANT
+  // DELETE COMBATANT (DM only)
   const handleDeleteCombatant = (id: string) => {
+    if (!isDm) return;
     const target = combatants.find((c) => c.id === id);
     const updated = combatants.filter((c) => c.id !== id);
     setCombatants(updated);
@@ -396,23 +426,31 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     broadcastCombat(updated, nextActiveIdx, round, nextActiveId);
   };
 
-  // ADD COMBATANT FORM SUBMISSION
+  // ADD COMBATANT FORM SUBMISSION (Players can add "Player (PC)" and "NPC / Ally")
   const handleSaveNewCombatant = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
 
+    // Enforce role permission: players may ONLY add Player (PC) or Ally / NPC
+    const allowedType: CombatantType =
+      !isDm && newType !== 'player' && newType !== 'ally' ? 'player' : newType;
+
+    const isFoWCombatant =
+      isDm && (newHidden || allowedType === 'monster' || allowedType === 'boss' || allowedType === 'custom');
+
     const newCombatant: Combatant = {
       id: `combatant-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: newName.trim(),
-      type: newType,
-      customRoleLabel: newType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined,
+      type: allowedType,
+      customRoleLabel: isDm && allowedType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined,
       initiative: newInitiative,
       armorClass: newAc,
       hpCurrent: newHp,
       hpMax: newHp,
       hpTemp: 0,
       conditions: [],
-      hidden: newHidden,
+      hidden: isDm ? newHidden : false,
+      fogOfWar: isFoWCombatant,
     };
 
     const updated = [...combatants, newCombatant];
@@ -429,7 +467,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     }
 
     liveFeedSync.recordCombatLog(
-      `➕ Added ${newCombatant.name} (${newCombatant.type.toUpperCase()}) with Initiative ${newCombatant.initiative}.`,
+      `➕ Added ${newCombatant.name} (${newCombatant.type === 'player' ? 'Player (PC)' : newCombatant.type === 'ally' ? 'NPC / Ally' : newCombatant.type.toUpperCase()}) with Initiative ${newCombatant.initiative}.`,
       true
     );
     broadcastCombat(updated, targetActiveIndex, round, targetActiveId);
@@ -474,6 +512,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
           <span className="text-xs font-sans font-semibold opacity-90 hidden sm:inline">
             — Ready your Action, Bonus Action, and Movement!
           </span>
+        </div>
+      )}
+
+      {/* FLOATING DAMAGE TOAST ALERT: Obfuscated for FoW combatants on Player view */}
+      {damageToastAlert && (
+        <div className="fixed top-28 left-1/2 -translate-x-1/2 z-50 pointer-events-none px-5 py-2.5 rounded-2xl bg-rose-950/95 border border-rose-600/80 text-rose-200 font-sans font-semibold text-xs shadow-2xl backdrop-blur-md flex items-center gap-2 animate-fadeIn ring-1 ring-rose-500/40">
+          <Swords className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>{damageToastAlert}</span>
         </div>
       )}
 
@@ -552,7 +598,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
             </button>
           )}
 
-          {/* New Feature: Clear Combat / Blank Slate Button (DM Only) */}
+          {/* Clear Combat / Blank Slate Button (DM Only) */}
           {isDm && (
             <button
               type="button"
@@ -565,17 +611,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
             </button>
           )}
 
-          {/* Add Combatant Trigger */}
-          {isDm && (
-            <button
-              type="button"
-              onClick={() => setIsAddModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition cursor-pointer shadow"
-            >
-              <Plus className="w-3.5 h-3.5 stroke-[3]" />
-              <span>Add Combatant</span>
-            </button>
-          )}
+          {/* Add Combatant Trigger (Available to DM and Players for PC / Ally) */}
+          <button
+            type="button"
+            onClick={() => {
+              setNewType('player');
+              setIsAddModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition cursor-pointer shadow"
+            title={isDm ? 'Add combatant to encounter' : 'Add Player (PC) or NPC / Ally to encounter'}
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[3]" />
+            <span>{isDm ? 'Add Combatant' : 'Add PC / Ally'}</span>
+          </button>
         </div>
       </div>
 
@@ -619,15 +667,18 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                   ? 'Click "+ Add Combatant" above to spawn players, monsters, bosses, or custom environmental initiatives.'
                   : 'Waiting for the Dungeon Master to reveal active combatants.'}
               </p>
-              {isDm && combatants.length === 0 && (
+              {combatants.length === 0 && (
                 <div className="pt-2 flex items-center justify-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsAddModalOpen(true)}
+                    onClick={() => {
+                      setNewType('player');
+                      setIsAddModalOpen(true);
+                    }}
                     className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl cursor-pointer transition shadow"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add First Combatant</span>
+                    <span>{isDm ? 'Add First Combatant' : 'Add First PC / Ally'}</span>
                   </button>
                 </div>
               )}
@@ -668,7 +719,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
               <div className="flex items-center gap-2">
                 <Plus className="w-5 h-5 text-amber-400" />
                 <h3 className="text-base font-bold text-slate-100 font-display">
-                  Add Combatant to Encounter
+                  {isDm ? 'Add Combatant to Encounter' : 'Add PC / Ally to Encounter'}
                 </h3>
               </div>
               <button
@@ -688,7 +739,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Goblin Archer, Valerius, Lair Collapse"
+                  placeholder={isDm ? "e.g. Goblin Archer, Valerius, Lair Collapse" : "e.g. Valerius, Sir Gareth, Ranger Companion"}
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
@@ -697,7 +748,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                 />
               </div>
 
-              {/* Role Type Selection */}
+              {/* Role Type Selection: Players only have access to Player (PC) and NPC / Ally */}
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
                   Entity Role / Type *
@@ -708,15 +759,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 cursor-pointer font-medium"
                 >
                   <option value="player">Player (PC) - Full Details Visible</option>
-                  <option value="ally">Ally / NPC - Full Details Visible</option>
-                  <option value="monster">Monster - Fog of War (Stats Hidden)</option>
-                  <option value="boss">Boss - Fog of War (Stats Hidden)</option>
-                  <option value="custom">Custom (Lair Action, Hazard, Event) - Fog of War</option>
+                  <option value="ally">NPC / Ally - Full Details Visible</option>
+                  {isDm && (
+                    <>
+                      <option value="monster">Monster - Fog of War (Stats Hidden)</option>
+                      <option value="boss">Boss - Fog of War (Stats Hidden)</option>
+                      <option value="custom">Custom (Lair Action, Hazard, Event) - Fog of War</option>
+                    </>
+                  )}
                 </select>
               </div>
 
-              {/* Free-text field for CUSTOM role label */}
-              {newType === 'custom' && (
+              {/* Free-text field for CUSTOM role label (DM only) */}
+              {isDm && newType === 'custom' && (
                 <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-600/40 space-y-1">
                   <label className="text-xs font-semibold text-amber-300 block">
                     Custom Initiative Label (Free-text)
@@ -775,23 +830,25 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                 </div>
               </div>
 
-              {/* Fog of War Toggle: Hidden from Players initially */}
-              <label className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newHidden}
-                  onChange={(e) => setNewHidden(e.target.checked)}
-                  className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-0"
-                />
-                <div className="text-xs">
-                  <span className="font-semibold text-slate-200 block">
-                    Conceal from Player View (Stealth / Unrevealed)
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    Will remain completely hidden until revealed with the eye toggle.
-                  </span>
-                </div>
-              </label>
+              {/* Fog of War Toggle: Hidden from Players initially (DM Only) */}
+              {isDm && (
+                <label className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newHidden}
+                    onChange={(e) => setNewHidden(e.target.checked)}
+                    className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-0"
+                  />
+                  <div className="text-xs">
+                    <span className="font-semibold text-slate-200 block">
+                      Conceal from Player View (Stealth / Unrevealed)
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      Will remain completely hidden until revealed with the eye toggle.
+                    </span>
+                  </div>
+                </label>
+              )}
 
               {/* Modal Buttons */}
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">

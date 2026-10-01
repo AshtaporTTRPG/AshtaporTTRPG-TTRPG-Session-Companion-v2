@@ -138,6 +138,35 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
 
             // Dice Roll event - Unified with Dice Chamber
             if (evt.type === 'dice') {
+              const currentUserName = roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player');
+              const isSecretRoll =
+                evt.rollDetails?.visibility === 'dm' || evt.rollDetails?.isSecret || evt.isSecretRoll;
+              const canSeeSecretRoll = isDm || evt.sender === currentUserName;
+
+              // Secret DM Dice Rolls: Other players must only see a generic log notice
+              if (isSecretRoll && !canSeeSecretRoll) {
+                return (
+                  <div
+                    key={evt.id}
+                    className="p-2.5 rounded-xl bg-purple-950/30 border border-purple-800/60 text-xs space-y-1 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-purple-300 flex items-center gap-1.5 flex-wrap">
+                        <Dices className="w-3.5 h-3.5 text-purple-400" />
+                        <span>{evt.sender}</span>
+                        <span className="text-[9px] text-purple-300 font-semibold px-1.5 py-0.2 rounded bg-purple-950 border border-purple-700/70">
+                          Secret Roll
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">{time}</span>
+                    </div>
+                    <p className="text-slate-300 font-medium italic">
+                      {evt.sender} rolled a secret check to the DM.
+                    </p>
+                  </div>
+                );
+              }
+
               const isNat20 = evt.rollDetails?.isCrit || evt.rollDetails?.total === 20;
               const isNat1 = evt.rollDetails?.isFumble || evt.rollDetails?.total === 1;
               const rollType = evt.rollDetails?.rollType;
@@ -159,6 +188,8 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                       ? 'bg-amber-950/40 border-amber-500/70 shadow-amber-950/30'
                       : isNat1
                       ? 'bg-rose-950/40 border-rose-500/60 shadow-rose-950/30'
+                      : isSecretRoll
+                      ? 'bg-purple-950/30 border-purple-800/60'
                       : 'bg-slate-950 border-slate-800'
                   }`}
                 >
@@ -169,6 +200,11 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                       {evt.isDm && (
                         <span className="text-[9px] text-amber-400 font-semibold px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/60">
                           DM
+                        </span>
+                      )}
+                      {isSecretRoll && (
+                        <span className="text-[9px] text-purple-300 font-semibold px-1.5 py-0.2 rounded bg-purple-950/80 border border-purple-700/70">
+                          Secret to DM
                         </span>
                       )}
                       {rollType && rollType !== 'Straight roll' && (
@@ -358,8 +394,9 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
 
             // Combat action log (Damage, Healing, Conditions)
             if (evt.type === 'combat') {
-              const isDamage = evt.message.includes('took');
-              const isHeal = evt.message.includes('healed');
+              const displayMessage = !isDm && evt.playerMessage ? evt.playerMessage : evt.message;
+              const isDamage = displayMessage.includes('took');
+              const isHeal = displayMessage.includes('healed');
 
               return (
                 <div
@@ -376,7 +413,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                     <span className="font-semibold text-slate-300">{evt.sender}</span>
                     <span className="text-[10px] text-slate-500 font-mono">{time}</span>
                   </div>
-                  <p className="font-medium">{evt.message}</p>
+                  <p className="font-medium">{displayMessage}</p>
                 </div>
               );
             }
