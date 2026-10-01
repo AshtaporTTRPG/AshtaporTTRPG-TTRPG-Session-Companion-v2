@@ -3,15 +3,13 @@ import { liveFeedSync, UnifiedFeedItem } from '../utils/liveFeedSync';
 import { roomSync } from '../utils/roomSync';
 import { playDiceRollSound } from '../utils/audio';
 import { executeDiceRoll } from '../utils/dice';
-import { DiceRollResult, DieType } from '../types/ttrpg';
+import { DieType } from '../types/ttrpg';
 import {
   Radio,
   Dices,
   Swords,
   Send,
-  Zap,
   Trash2,
-  Sparkles,
 } from 'lucide-react';
 
 interface LiveCombatFeedProps {
@@ -35,7 +33,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
         if (scrollContainerRef.current) {
           scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
-      }, 20);
+      }, 25);
     });
 
     return () => unsub();
@@ -77,8 +75,13 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
     setChatInput('');
   };
 
+  // Clear Feed Log globally for both DM and Players
+  const handleClearLog = () => {
+    liveFeedSync.clearFeed(true);
+  };
+
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col h-full space-y-3">
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg flex flex-col h-full space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
         <div className="flex items-center gap-2">
@@ -86,19 +89,24 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
           <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display">
             Live Room Feed
           </h3>
+          <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
+            ({feedItems.length})
+          </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-full">
             Room {roomCode}
           </span>
-          {isDm && feedItems.length > 0 && (
+          {/* Clear Log button consistently available across all tabs for BOTH DM and Players */}
+          {feedItems.length > 0 && (
             <button
               type="button"
-              onClick={() => liveFeedSync.clearFeed()}
-              className="text-slate-500 hover:text-slate-300 p-0.5 transition"
-              title="Clear Room Feed"
+              onClick={handleClearLog}
+              className="text-slate-400 hover:text-rose-300 text-xs px-2 py-0.5 rounded bg-slate-950/80 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-800/60 transition cursor-pointer flex items-center gap-1 shadow-sm"
+              title="Clear Room Feed Log (persists globally for all tabs and peers)"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3 h-3 text-slate-400 group-hover:text-rose-400" />
+              <span>Clear Log</span>
             </button>
           )}
         </div>
@@ -107,11 +115,11 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
       {/* Internal Scrollable Message Container - ONLY this element scrolls */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[320px] max-h-[500px]"
+        className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[260px] sm:min-h-[320px] max-h-[460px] sm:max-h-[500px]"
       >
         {feedItems.length === 0 ? (
           <div className="text-center p-8 text-slate-500 text-xs italic">
-            No events logged yet. Rolls, turn announcements, and callouts will appear here live.
+            Feed is clear. Rolls, combat logs, and callouts will appear here live.
           </div>
         ) : (
           feedItems.map((evt) => {
@@ -178,7 +186,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
               const poolBreakdown = evt.rollDetails?.poolBreakdown;
               const modifier = evt.rollDetails?.modifier;
               const pairedRolls = evt.rollDetails?.pairedRolls;
-              const advantageMode = evt.rollDetails?.advantageMode;
+              const advantageModeVal = evt.rollDetails?.advantageMode;
 
               return (
                 <div
@@ -228,13 +236,11 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                   )}
 
                   {isIndividual ? (
-                    /* Individual Mode: Displays each die result separately by die type without adding them together */
                     <div className="space-y-1.5 pt-0.5 border-t border-slate-800/60">
-                      {/* Paired Breakdown if Advantage/Disadvantage */}
                       {pairedRolls && pairedRolls.length > 0 && (
                         <div className="space-y-1">
                           <div className="text-[10px] font-semibold text-amber-300 font-mono">
-                            d20 ({advantageMode || 'contested'}):
+                            d20 ({advantageModeVal || 'contested'}):
                           </div>
                           <div className="flex flex-wrap items-center gap-1.5">
                             {pairedRolls.map((pair) => (
@@ -267,7 +273,6 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                         </div>
                       )}
 
-                      {/* Other non-d20 die groups if present, or all groups if normal roll */}
                       <div className="flex flex-wrap items-center gap-1.5">
                         {(poolBreakdown && poolBreakdown.length > 0
                           ? pairedRolls && pairedRolls.length > 0
@@ -313,10 +318,9 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                       </div>
                     </div>
                   ) : (
-                    /* Sum Mode (Default): Grand total + breakdown in small text */
                     <div className="space-y-1 pt-0.5">
                       <div className="flex items-baseline justify-between">
-                        <div className="text-[11px] font-mono text-slate-400">
+                        <div className="text-[11px] font-mono text-slate-400 truncate max-w-[200px] sm:max-w-none">
                           {formula || evt.message}
                           {rolls && rolls.length > 0 && (
                             <span className="text-slate-500 ml-1">
@@ -325,7 +329,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           {isNat20 && (
                             <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-bold text-[9px] tracking-wider animate-pulse">
                               NAT 20
@@ -352,11 +356,10 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                         </div>
                       </div>
 
-                      {/* Paired Breakdown in Sum Mode if Advantage/Disadvantage was active */}
                       {pairedRolls && pairedRolls.length > 0 && (
                         <div className="pt-1 border-t border-slate-800/60 flex flex-wrap items-center gap-1 text-[11px] font-mono">
                           <span className="text-[9px] uppercase font-bold text-amber-300">
-                            {advantageMode || 'pairs'}:
+                            {advantageModeVal || 'pairs'}:
                           </span>
                           {pairedRolls.map((pair) => (
                             <span
@@ -476,7 +479,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
           </div>
         </div>
 
-        {/* Dice buttons */}
+        {/* Dice buttons - responsive grid */}
         <div className="grid grid-cols-6 gap-1">
           {[20, 12, 10, 8, 6, 4].map((sides) => (
             <button
@@ -502,7 +505,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
         />
         <button
           type="submit"
-          className="p-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer"
+          className="p-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shrink-0"
           title="Send Callout to Room"
         >
           <Send className="w-4 h-4" />

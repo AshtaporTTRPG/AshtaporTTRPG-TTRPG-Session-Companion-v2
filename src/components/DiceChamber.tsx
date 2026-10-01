@@ -11,6 +11,12 @@ import { executeDiceRoll, parseDiceFormula } from '../utils/dice';
 import { roomSync } from '../utils/roomSync';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import {
+  loadCustomMacros,
+  addCustomMacro,
+  deleteCustomMacro,
+  resetCustomMacrosToDefault,
+} from '../utils/macroStorage';
+import {
   Dices,
   Sparkles,
   Eye,
@@ -185,18 +191,9 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [rollingAnimation, setRollingAnimation] = useState<boolean>(false);
 
-  // Custom Macros State (Persisted in localStorage for the session)
+  // Custom Macros State (Persisted in localStorage across reloads and future sessions)
   const [customMacros, setCustomMacros] = useState<CustomMacro[]>(() => {
-    try {
-      const saved = localStorage.getItem('ttrpg_custom_macros');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // fallback
-    }
-    return DEFAULT_INITIAL_MACROS;
+    return loadCustomMacros();
   });
 
   // Modal / form state for adding a custom macro
@@ -206,18 +203,15 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
   const [newMacroType, setNewMacroType] = useState<RollTypeCategory>('Straight roll');
   const [macroError, setMacroError] = useState<string>('');
 
-  // Save custom macros to localStorage whenever changed
-  useEffect(() => {
-    try {
-      localStorage.setItem('ttrpg_custom_macros', JSON.stringify(customMacros));
-    } catch {
-      // ignore
-    }
-  }, [customMacros]);
-
   useEffect(() => {
     // Subscribe to unified live feed so rolls made in Combat Tracker or by room peers sync here
     const unsubFeed = liveFeedSync.subscribe((items, newItem) => {
+      // When feed is globally cleared, immediately wipe dice history too
+      if (items.length === 0) {
+        setDiceHistory([]);
+        return;
+      }
+
       if (newItem && newItem.type === 'dice' && newItem.rollDetails) {
         const rollObj: DiceRollResult = {
           id: newItem.id,
@@ -378,7 +372,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
     handleRoll(parsed.pool, parsed.modifier, typeToUse, macro.name);
   };
 
-  // Add custom macro
+  // Add custom macro with persistent storage
   const handleCreateMacro = (e: React.FormEvent) => {
     e.preventDefault();
     setMacroError('');
@@ -392,14 +386,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
       return;
     }
 
-    const newMacro: CustomMacro = {
-      id: `macro-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      name: newMacroName.trim(),
-      formula: newMacroFormula.trim(),
-      rollType: newMacroType,
-    };
-
-    setCustomMacros((prev) => [...prev, newMacro]);
+    addCustomMacro(newMacroName, newMacroFormula, newMacroType);
+    setCustomMacros(loadCustomMacros());
     setNewMacroName('');
     setNewMacroFormula('');
     setIsAddingMacro(false);
@@ -407,7 +395,13 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
 
   const handleDeleteMacro = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setCustomMacros((prev) => prev.filter((m) => m.id !== id));
+    const updated = deleteCustomMacro(id);
+    setCustomMacros(updated);
+  };
+
+  const handleResetMacros = () => {
+    const defaults = resetCustomMacrosToDefault();
+    setCustomMacros(defaults);
   };
 
   const handleCopyRoom = () => {
@@ -844,18 +838,29 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
                   Session Custom Quick Macros ({customMacros.length}):
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Click any macro to roll it instantly for the rest of your session
+                  Custom rolls, formulas, and buttons persist across page reloads and future sessions
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsAddingMacro(true)}
-                className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shadow-sm"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ Add Custom Macro</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleResetMacros}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition cursor-pointer shadow-sm"
+                  title="Reset custom macros back to starter defaults"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset Defaults</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingMacro(true)}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add Custom Macro</span>
+                </button>
+              </div>
             </div>
 
             {/* Add Custom Macro Form (Inline) */}
@@ -990,12 +995,18 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
             <h3 className="text-sm font-semibold text-slate-200 font-display">Live Room Feed</h3>
             <span className="text-xs text-slate-500">({visibleRolls.length} rolls)</span>
           </div>
-          {diceHistory.length > 0 && (
+          {visibleRolls.length > 0 && (
             <button
-              onClick={() => setDiceHistory([])}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer px-2 py-0.5 rounded hover:bg-slate-800"
+              type="button"
+              onClick={() => {
+                liveFeedSync.clearFeed(true);
+                setDiceHistory([]);
+              }}
+              className="text-slate-400 hover:text-rose-300 text-xs px-2.5 py-1 rounded bg-slate-950/80 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-800/60 transition cursor-pointer flex items-center gap-1 shadow-sm"
+              title="Clear Live Feed Log (persists globally for all tabs and peers)"
             >
-              Clear Log
+              <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+              <span>Clear Log</span>
             </button>
           )}
         </div>

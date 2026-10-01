@@ -26,6 +26,19 @@ export default function App() {
     roomSync.connect(roomCode, roomSync.getPeerName(), isDm);
   }, [isDm, roomCode]);
 
+  // Handle safe switch to DM mode with single-DM role enforcement
+  const handleSwitchToDm = () => {
+    const check = roomSync.canClaimDm();
+    if (!check.allowed) {
+      alert(
+        `Cannot switch to DM Mode: ${check.existingDmName || 'Another DM'} is already hosting as the Dungeon Master in room ${roomCode}. Only one DM is permitted per room.`
+      );
+      return;
+    }
+    setIsDm(true);
+    roomSync.hostRoom();
+  };
+
   return (
     <div className="min-h-screen bg-[#0b0f17] text-slate-200 flex flex-col selection:bg-amber-500/30 selection:text-amber-200">
       {/* Top Bar Navigation */}
@@ -33,23 +46,29 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isDm={isDm}
-        setIsDm={setIsDm}
+        setIsDm={(newDmState) => {
+          if (newDmState) {
+            handleSwitchToDm();
+          } else {
+            setIsDm(false);
+          }
+        }}
         onOpenRoadmap={() => setIsRoadmapOpen(true)}
         roomCode={roomCode}
         onOpenRoomModal={() => setIsRoomModalOpen(true)}
       />
 
       {/* Main Viewport Container */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
         {/* Quick Mode Status Banner if in Player Mode */}
         {!isDm && (
-          <div className="mb-4 px-4 py-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-xs text-cyan-300 flex items-center justify-between">
+          <div className="mb-4 px-3.5 sm:px-4 py-2.5 rounded-xl bg-cyan-950/40 border border-cyan-800/40 text-xs text-cyan-300 flex flex-wrap items-center justify-between gap-2 shadow-sm">
             <span>
               <strong>Player Companion View:</strong> Monster exact HP &amp; secret DM notes on pins are currently hidden.
             </span>
             <button
-              onClick={() => setIsDm(true)}
-              className="text-xs text-amber-400 hover:text-amber-300 font-semibold cursor-pointer underline underline-offset-2"
+              onClick={handleSwitchToDm}
+              className="text-xs text-amber-400 hover:text-amber-300 font-semibold cursor-pointer underline underline-offset-2 shrink-0"
             >
               Switch to DM Mode
             </button>

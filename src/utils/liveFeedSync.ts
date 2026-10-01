@@ -46,6 +46,7 @@ export interface UnifiedFeedItem {
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
 
 const STORAGE_KEY = 'ttrpg_unified_live_feed';
+const CLEARED_KEY = 'ttrpg_live_feed_cleared_at';
 
 function formatFormula(count: number, die: string, mod: number): string {
   const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '';
@@ -66,9 +67,11 @@ class LiveFeedSyncManager {
     this.initialized = true;
 
     // Load persisted feed
+    let hasSavedData = false;
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
+      if (saved !== null) {
+        hasSavedData = true;
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           this.items = parsed;
@@ -76,7 +79,10 @@ class LiveFeedSyncManager {
       }
     } catch {}
 
-    if (this.items.length === 0) {
+    const hasBeenCleared = localStorage.getItem(CLEARED_KEY) !== null;
+
+    // Only populate initial welcome item if completely fresh and never cleared
+    if (!hasSavedData && !hasBeenCleared && this.items.length === 0) {
       this.items = [
         {
           id: 'init-1',
@@ -86,10 +92,40 @@ class LiveFeedSyncManager {
           timestamp: Date.now() - 30000,
         },
       ];
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.items));
+      } catch {}
     }
+
+    // Storage event listener for multi-tab sync of live feed & clear operations
+    window.addEventListener('storage', (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY) {
+        try {
+          if (e.newValue) {
+            const parsed = JSON.parse(e.newValue);
+            if (Array.isArray(parsed)) {
+              this.items = parsed;
+              this.notifyListeners();
+            }
+          } else {
+            this.items = [];
+            this.notifyListeners();
+          }
+        } catch {}
+      } else if (e.key === CLEARED_KEY) {
+        this.items = [];
+        this.notifyListeners();
+      }
+    });
 
     // Subscribe to roomSync messages
     roomSync.subscribe((msg: RoomMessage) => {
+      // Clear feed broadcast
+      if (msg.type === 'FEED_CLEAR') {
+        this.clearFeed(false);
+        return;
+      }
+
       // 1. Live Dice Roll from any peer or tab
       if (msg.type === 'DICE_ROLL' && msg.payload?.roll) {
         const roll: DiceRollResult = msg.payload.roll;
@@ -182,25 +218,27 @@ class LiveFeedSyncManager {
     });
   }
 
+  private notifyListeners(newItem?: UnifiedFeedItem) {
+    this.listeners.forEach((listener) => {
+      try {
+        listener(this.items, newItem);
+      } catch (err) {
+        console.error('Feed listener error:', err);
+      }
+    });
+  }
+
   private appendItem(item: UnifiedFeedItem, broadcast = false) {
     this.items = [...this.items.slice(-79), item];
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.items));
     } catch {}
 
-    // Notify local subscribers
-    this.listeners.forEach((listener) => {
-      try {
-        listener(this.items, item);
-      } catch (err) {
-        console.error('Feed listener error:', err);
-      }
-    });
+    this.notifyListeners(item);
 
     // Broadcast if requested
     if (broadcast) {
       if (item.type === 'dice' && item.rollDetails) {
-        // Broadcast as DICE_ROLL
         const rollObj: DiceRollResult = {
           id: item.id,
           timestamp: item.timestamp,
@@ -350,12 +388,26 @@ class LiveFeedSyncManager {
     return item;
   }
 
-  public clearFeed(): void {
+  /**
+   * Globally clears the live room feed log.
+   * Persists an explicit empty array to localStorage so that switching tabs or
+   * re-rendering never re-injects default sample feed items.
+   * Broadcasts to all connected peers and open tabs.
+   */
+  public clearFeed(broadcast = true): void {
     this.items = [];
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      localStorage.setItem(CLEARED_KEY, String(Date.now()));
     } catch {}
-    this.listeners.forEach((listener) => listener([]));
+
+    if (broadcast) {
+      roomSync.broadcast('FEED_CLEAR', {
+        clearedAt: Date.now(),
+      });
+    }
+
+    this.notifyListeners();
   }
 
   public subscribe(listener: FeedListener): () => void {
