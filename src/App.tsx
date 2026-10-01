@@ -20,6 +20,14 @@ export default function App() {
   const [isRoadmapOpen, setIsRoadmapOpen] = useState<boolean>(false);
   const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(false);
   const [roomCode, setRoomCode] = useState<string>(roomSync.getRoomCode());
+  const [connectionStatus, setConnectionStatus] = useState<string>(() => roomSync.getConnectionStatus().status);
+
+  useEffect(() => {
+    const unsub = roomSync.subscribePresence((state) => {
+      setConnectionStatus(state.status);
+    });
+    return () => unsub();
+  }, []);
 
   // Handle joining via URL parameters (e.g. ?room=DRAGON-77)
   useEffect(() => {
@@ -30,14 +38,15 @@ export default function App() {
         const clean = queryRoom.trim().toUpperCase();
         setRoomCode(clean);
         setIsDm(false); // Joining via shareable link defaults to Player Mode
-        roomSync.connect(clean, roomSync.getPeerName(), false);
+        roomSync.configure(clean, roomSync.getPeerName(), false);
+        setIsRoomModalOpen(true); // Open modal with prefilled code for 1-click Join
       }
     } catch {}
   }, []);
 
-  // Keep roomSync updated when role changes
+  // Keep roomSync updated when role changes locally
   useEffect(() => {
-    roomSync.connect(roomCode, roomSync.getPeerName(), isDm);
+    roomSync.configure(roomCode, roomSync.getPeerName(), isDm);
   }, [isDm, roomCode]);
 
   // Handle safe switch to DM mode with single-DM role enforcement
@@ -50,7 +59,7 @@ export default function App() {
       return;
     }
     setIsDm(true);
-    roomSync.hostRoom();
+    roomSync.configure(roomCode, roomSync.getPeerName(), true);
   };
 
   return (
@@ -109,9 +118,34 @@ export default function App() {
           <div className="flex items-center gap-4 text-[11px] text-slate-400">
             <button
               onClick={() => setIsRoomModalOpen(true)}
-              className="text-emerald-400 hover:text-emerald-300 font-mono transition-colors cursor-pointer flex items-center gap-1"
+              className="text-slate-400 hover:text-amber-300 font-mono transition-colors cursor-pointer flex items-center gap-1.5"
             >
-              <span>Room {roomCode} (Online)</span>
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  connectionStatus === 'hosting' || connectionStatus === 'connected'
+                    ? 'bg-emerald-400'
+                    : connectionStatus === 'connecting'
+                    ? 'bg-amber-400 animate-pulse'
+                    : connectionStatus === 'disconnected' || connectionStatus === 'error'
+                    ? 'bg-rose-400'
+                    : 'bg-slate-500'
+                }`}
+              />
+              <span>
+                Room {roomCode} ({
+                  connectionStatus === 'hosting'
+                    ? 'Hosting Live'
+                    : connectionStatus === 'connected'
+                    ? 'Connected'
+                    : connectionStatus === 'connecting'
+                    ? 'Connecting'
+                    : connectionStatus === 'disconnected'
+                    ? 'Disconnected'
+                    : connectionStatus === 'error'
+                    ? 'Error'
+                    : 'Offline'
+                })
+              </span>
             </button>
             <span>·</span>
             <button

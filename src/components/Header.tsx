@@ -13,6 +13,8 @@ import {
   BookOpen,
   AlertCircle,
   X,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from '../utils/audio';
 import { roomSync } from '../utils/roomSync';
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isHosted, setIsHosted] = useState<boolean>(() => roomSync.isRoomHosted());
   const [connectionStatus, setConnectionStatus] = useState<string>(() => roomSync.getConnectionStatus().status);
   const [roleError, setRoleError] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     const unsub = roomSync.subscribePresence((state) => {
@@ -67,13 +70,22 @@ export const Header: React.FC<HeaderProps> = ({
     }
     setRoleError(null);
     setIsDm(true);
-    roomSync.hostRoom();
+    roomSync.configure(roomCode, roomSync.getPeerName(), true);
   };
 
   const handleSelectPlayerMode = () => {
     if (!isDm) return; // Already player
     setRoleError(null);
     setIsDm(false);
+    roomSync.configure(roomCode, roomSync.getPeerName(), false);
+  };
+
+  const handleCopyJoinLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const joinLink = roomSync.getShareableJoinLink();
+    navigator.clipboard?.writeText(joinLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   return (
@@ -146,62 +158,85 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Zone: Session Button, Distinct Mode Buttons, Audio, Guide */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Session Button with Connected Player Count & Real-Time Connection Status */}
-            <button
-              onClick={onOpenRoomModal}
-              title={`Room ${roomCode} - ${connectionStatus === 'connected' ? 'Session Connected & Live' : connectionStatus === 'connecting' ? 'Connecting to Room...' : connectionStatus === 'disconnected' ? 'Host Disconnected' : 'Room Offline'}`}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-mono font-bold rounded-lg border transition-all cursor-pointer shadow-sm ${
-                connectionStatus === 'connected' || (isDm && isHosted)
-                  ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300 hover:bg-emerald-900/90 hover:border-emerald-400'
-                  : connectionStatus === 'connecting'
-                  ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 hover:bg-amber-900/90'
-                  : connectionStatus === 'disconnected'
-                  ? 'bg-rose-950/80 border-rose-600/70 text-rose-300 hover:bg-rose-900/90'
-                  : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:text-slate-300'
-              }`}
-            >
-              <span className="relative flex h-2 w-2">
-                {(connectionStatus === 'connected' || (isDm && isHosted)) && (
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                )}
-                {connectionStatus === 'connecting' && (
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                )}
-                <span
-                  className={`relative inline-flex rounded-full h-2 w-2 ${
-                    connectionStatus === 'connected' || (isDm && isHosted)
-                      ? 'bg-emerald-400'
-                      : connectionStatus === 'connecting'
-                      ? 'bg-amber-400'
-                      : connectionStatus === 'disconnected'
-                      ? 'bg-rose-500'
-                      : 'bg-slate-500'
-                  }`}
-                ></span>
-              </span>
-              <span className="truncate max-w-[130px] sm:max-w-none">
-                Session ({connectedCount})
-              </span>
-              <span
-                className={`text-[9px] uppercase px-1.5 py-0.2 rounded font-bold tracking-wider ${
-                  connectionStatus === 'connected' || (isDm && isHosted)
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+            {/* Session Indicator with Explicit Status & 1-click Copy Join Link */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onOpenRoomModal}
+                title={`Room ${roomCode} - ${
+                  connectionStatus === 'hosting'
+                    ? `Hosting: Room ${roomCode}`
+                    : connectionStatus === 'connected'
+                    ? 'Connected to DM'
                     : connectionStatus === 'connecting'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                    ? 'Connecting to broker...'
                     : connectionStatus === 'disconnected'
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    ? 'Disconnected / Host Closed'
+                    : connectionStatus === 'error'
+                    ? 'Connection Failed - Click to Retry'
+                    : 'Offline'
+                }`}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-mono font-bold rounded-lg border transition-all cursor-pointer shadow-sm ${
+                  connectionStatus === 'hosting' || connectionStatus === 'connected'
+                    ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300 hover:bg-emerald-900/90 hover:border-emerald-400'
+                    : connectionStatus === 'connecting'
+                    ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 hover:bg-amber-900/90'
+                    : connectionStatus === 'disconnected' || connectionStatus === 'error'
+                    ? 'bg-rose-950/80 border-rose-600/70 text-rose-300 hover:bg-rose-900/90'
+                    : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:text-slate-300'
                 }`}
               >
-                {connectionStatus === 'connected' || (isDm && isHosted)
-                  ? 'LIVE'
-                  : connectionStatus === 'connecting'
-                  ? 'CONNECTING...'
-                  : connectionStatus === 'disconnected'
-                  ? 'DISCONNECTED'
-                  : 'OFFLINE'}
-              </span>
-            </button>
+                <span className="relative flex h-2 w-2 shrink-0">
+                  {(connectionStatus === 'hosting' || connectionStatus === 'connected') && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  )}
+                  {connectionStatus === 'connecting' && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  )}
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${
+                      connectionStatus === 'hosting' || connectionStatus === 'connected'
+                        ? 'bg-emerald-400'
+                        : connectionStatus === 'connecting'
+                        ? 'bg-amber-400'
+                        : connectionStatus === 'disconnected' || connectionStatus === 'error'
+                        ? 'bg-rose-500'
+                        : 'bg-slate-500'
+                    }`}
+                  ></span>
+                </span>
+                <span className="truncate max-w-[130px] sm:max-w-none">
+                  {connectionStatus === 'hosting'
+                    ? `Hosting: Room ${roomCode}`
+                    : connectionStatus === 'connected'
+                    ? 'Connected to DM'
+                    : connectionStatus === 'connecting'
+                    ? 'Connecting to broker...'
+                    : connectionStatus === 'disconnected'
+                    ? 'Disconnected / Host Closed'
+                    : connectionStatus === 'error'
+                    ? 'Connection Failed'
+                    : 'Offline'}
+                </span>
+                {(connectionStatus === 'hosting' || connectionStatus === 'connected') && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    {connectedCount}
+                  </span>
+                )}
+              </button>
+
+              {/* 1-Click Copy Join Link Button when Hosting */}
+              {connectionStatus === 'hosting' && (
+                <button
+                  type="button"
+                  onClick={handleCopyJoinLink}
+                  title="1-click Copy Join Link for players"
+                  className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition-colors cursor-pointer flex items-center gap-1 text-xs"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span className="hidden xl:inline text-[11px] font-mono">{copiedLink ? 'Copied' : 'Copy Link'}</span>
+                </button>
+              )}
+            </div>
 
             {/* TWO DISTINCT MODE BUTTONS: DM MODE & PLAYER MODE */}
             <div className="inline-flex rounded-lg p-0.5 bg-slate-900/90 border border-slate-800 shadow-inner">

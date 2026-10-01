@@ -41,8 +41,8 @@ export const RoomModal: React.FC<RoomModalProps> = ({
   const [connectedCount, setConnectedCount] = useState<number>(1);
   const [isHosted, setIsHosted] = useState<boolean>(false);
   const [hostName, setHostName] = useState<string | undefined>(undefined);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
-  const [statusText, setStatusText] = useState<string>('Not Connected');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('offline');
+  const [statusText, setStatusText] = useState<string>('Offline');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,6 +60,9 @@ export const RoomModal: React.FC<RoomModalProps> = ({
       const conn = roomSync.getConnectionStatus();
       setConnectionStatus(conn.status);
       setStatusText(conn.statusText);
+      if (conn.lastError) {
+        setErrorMessage(conn.lastError);
+      }
 
       const unsub = roomSync.subscribePresence((state) => {
         setPeers(state.peers);
@@ -68,6 +71,11 @@ export const RoomModal: React.FC<RoomModalProps> = ({
         setHostName(state.hostName);
         setConnectionStatus(state.status);
         setStatusText(state.statusText);
+        if (state.lastError) {
+          setErrorMessage(state.lastError);
+        } else if (state.status !== 'error') {
+          setErrorMessage(null);
+        }
       });
       return () => unsub();
     }
@@ -92,11 +100,16 @@ export const RoomModal: React.FC<RoomModalProps> = ({
         );
         return;
       }
-      roomSync.connect(cleanRoom, cleanName, true);
-      roomSync.hostRoom();
+      roomSync.configure(cleanRoom, cleanName, true);
+      const res = roomSync.hostRoom();
+      if (!res.success && res.reason) {
+        setErrorMessage(res.reason);
+        return;
+      }
     } else {
-      // Player mode: connect as player directly to DM host via WebRTC
-      roomSync.connect(cleanRoom, cleanName, false);
+      // Player mode: explicit connect to DM host via WebRTC
+      roomSync.configure(cleanRoom, cleanName, false);
+      roomSync.joinRoom();
     }
 
     onUpdateRoom(cleanRoom, cleanName);
@@ -123,12 +136,21 @@ export const RoomModal: React.FC<RoomModalProps> = ({
     setRoomInput(`${prefix}-${num}`);
   };
 
+  // Host Teardown: Stop hosting, destroy peer instance, reset to Offline
   const handleUnhostRoom = () => {
-    roomSync.unhostRoom();
+    roomSync.stopHosting();
     setIsHosted(false);
+    setErrorMessage(null);
+  };
+
+  // Player Teardown: Disconnect / Leave session, destroy peer instance, reset to Offline
+  const handleLeaveRoom = () => {
+    roomSync.disconnect();
+    setErrorMessage(null);
   };
 
   const handleRetry = () => {
+    setErrorMessage(null);
     roomSync.retryConnection();
   };
 
@@ -138,7 +160,17 @@ export const RoomModal: React.FC<RoomModalProps> = ({
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
-            <Radio className={`w-5 h-5 ${isHosted || connectionStatus === 'connected' ? 'text-emerald-400 animate-pulse' : connectionStatus === 'connecting' ? 'text-amber-400 animate-spin' : 'text-slate-400'}`} />
+            <Radio
+              className={`w-5 h-5 ${
+                connectionStatus === 'hosting' || connectionStatus === 'connected'
+                  ? 'text-emerald-400 animate-pulse'
+                  : connectionStatus === 'connecting'
+                  ? 'text-amber-400 animate-spin'
+                  : connectionStatus === 'error' || connectionStatus === 'disconnected'
+                  ? 'text-rose-400'
+                  : 'text-slate-400'
+              }`}
+            />
             <h3 className="text-base sm:text-lg font-bold text-slate-100 font-display">
               {isDm ? 'Host & Manage Session Room' : 'Join Tabletop Session Room'}
             </h3>
@@ -151,21 +183,30 @@ export const RoomModal: React.FC<RoomModalProps> = ({
           </button>
         </div>
 
-        {/* Live Networking & Connection State Status Banner */}
+        {/* Clear UI Status Indicators:
+            1. Offline (Default state)
+            2. Connecting to broker...
+            3. Hosting: Room [CODE] (with a 1-click Copy Join Link button)
+            4. Connected to DM (Player view)
+            5. Disconnected / Host Closed
+            6. Connection Failed - Click to Retry
+        */}
         <div
-          className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
-            connectionStatus === 'connected' || (isDm && isHosted)
+          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            connectionStatus === 'hosting' || connectionStatus === 'connected'
               ? 'bg-emerald-950/60 border-emerald-500/70 text-emerald-200'
               : connectionStatus === 'connecting'
               ? 'bg-amber-950/60 border-amber-500/70 text-amber-200'
               : connectionStatus === 'disconnected'
               ? 'bg-rose-950/60 border-rose-500/70 text-rose-200'
+              : connectionStatus === 'error'
+              ? 'bg-rose-950/80 border-rose-500/80 text-rose-200'
               : 'bg-slate-950/90 border-slate-800 text-slate-400'
           }`}
         >
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="relative flex h-3 w-3 shrink-0">
-              {(connectionStatus === 'connected' || (isDm && isHosted)) && (
+              {(connectionStatus === 'hosting' || connectionStatus === 'connected') && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               )}
               {connectionStatus === 'connecting' && (
@@ -173,89 +214,115 @@ export const RoomModal: React.FC<RoomModalProps> = ({
               )}
               <span
                 className={`relative inline-flex rounded-full h-3 w-3 ${
-                  connectionStatus === 'connected' || (isDm && isHosted)
+                  connectionStatus === 'hosting' || connectionStatus === 'connected'
                     ? 'bg-emerald-400'
                     : connectionStatus === 'connecting'
                     ? 'bg-amber-400'
-                    : connectionStatus === 'disconnected'
+                    : connectionStatus === 'disconnected' || connectionStatus === 'error'
                     ? 'bg-rose-500'
                     : 'bg-slate-500'
                 }`}
               ></span>
             </span>
+
             <div className="min-w-0">
               <div className="text-xs font-bold font-display uppercase tracking-wider flex items-center gap-2 flex-wrap">
                 <span>Status:</span>
                 <span
                   className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
-                    connectionStatus === 'connected' || (isDm && isHosted)
+                    connectionStatus === 'hosting' || connectionStatus === 'connected'
                       ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
                       : connectionStatus === 'connecting'
                       ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50 animate-pulse'
-                      : connectionStatus === 'disconnected'
+                      : connectionStatus === 'disconnected' || connectionStatus === 'error'
                       ? 'bg-rose-500/30 text-rose-300 border border-rose-500/50'
                       : 'bg-slate-800 text-slate-400 border border-slate-700'
                   }`}
                 >
-                  {connectionStatus === 'connected'
-                    ? isDm
-                      ? 'HOSTING LIVE'
-                      : 'CONNECTED'
+                  {connectionStatus === 'hosting'
+                    ? `HOSTING: ROOM ${roomInput}`
+                    : connectionStatus === 'connected'
+                    ? 'CONNECTED TO DM'
                     : connectionStatus === 'connecting'
-                    ? 'CONNECTING...'
+                    ? 'CONNECTING TO BROKER...'
                     : connectionStatus === 'disconnected'
-                    ? 'HOST DISCONNECTED'
+                    ? 'DISCONNECTED / HOST CLOSED'
+                    : connectionStatus === 'error'
+                    ? 'CONNECTION FAILED - CLICK TO RETRY'
                     : 'OFFLINE'}
                 </span>
-                <span className="text-[11px] text-slate-400 font-sans normal-case truncate">
-                  ({statusText})
-                </span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                {isDm
-                  ? isHosted
-                    ? `Hosting remote WebRTC session in room ${roomInput}. Share join link with players.`
-                    : 'Click "Host & Start Room" below to start hosting on any network.'
+              <p className="text-[11px] text-slate-400 mt-1 truncate">
+                {connectionStatus === 'hosting'
+                  ? `Hosting live WebRTC session in room ${roomInput}. Share join link with remote players.`
                   : connectionStatus === 'connected'
-                  ? `Connected to DM (${hostName || 'Host'}). Rolls and combat sync in real time.`
+                  ? `Connected to DM (${hostName || 'Host'}). Combat state and rolls sync in real-time.`
                   : connectionStatus === 'connecting'
-                  ? 'Establishing peer connection to DM host instance...'
+                  ? 'Connecting to broker signaling server...'
                   : connectionStatus === 'disconnected'
-                  ? 'Host is currently disconnected or offline. You can retry anytime.'
-                  : 'Enter the Room Code provided by the DM to join.'}
+                  ? 'Host is currently disconnected or session ended. Click to retry.'
+                  : connectionStatus === 'error'
+                  ? errorMessage || 'Connection failed. Auto-reconnect stopped. Click to Retry.'
+                  : isDm
+                  ? 'Offline (Default state). Click "Host & Start Room" below to initialize PeerJS.'
+                  : 'Offline (Default state). Enter Room Code and click "Join Room" to connect.'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {!isDm && connectionStatus === 'disconnected' && (
+          {/* Quick action buttons in status banner */}
+          <div className="flex items-center gap-2 shrink-0">
+            {connectionStatus === 'hosting' && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                  title="1-click Copy Shareable Join Link for Players"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Link className="w-3.5 h-3.5" />}
+                  <span>{copiedLink ? 'Link Copied!' : 'Copy Join Link'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUnhostRoom}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-600/60 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                  title="Stop Hosting / End Session"
+                >
+                  <Square className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Stop Hosting</span>
+                </button>
+              </>
+            )}
+
+            {connectionStatus === 'connected' && !isDm && (
               <button
                 type="button"
-                onClick={handleRetry}
-                className="text-[10px] font-semibold px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer flex items-center gap-1"
-                title="Retry connecting to host"
+                onClick={handleLeaveRoom}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition cursor-pointer flex items-center gap-1.5"
+                title="Disconnect / Leave Session"
               >
-                <RotateCcw className="w-3 h-3 text-amber-400" />
-                <span>Retry</span>
+                <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+                <span>Leave Session</span>
               </button>
             )}
 
-            {isDm && isHosted && (
+            {(connectionStatus === 'disconnected' || connectionStatus === 'error') && (
               <button
                 type="button"
-                onClick={handleUnhostRoom}
-                className="text-[10px] font-semibold px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer flex items-center gap-1 shrink-0"
-                title="Stop hosting and mark room as offline"
+                onClick={handleRetry}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                title="Retry connecting to host"
               >
-                <Square className="w-3 h-3 text-rose-400" />
-                <span>Unhost</span>
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                <span>Click to Retry</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Error notification if role conflict */}
-        {errorMessage && (
+        {/* Error notification if role conflict or connection error */}
+        {errorMessage && connectionStatus !== 'error' && (
           <div className="p-3 rounded-lg bg-rose-950/80 border border-rose-800 text-xs text-rose-200 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <div className="flex-1">{errorMessage}</div>
@@ -276,8 +343,8 @@ export const RoomModal: React.FC<RoomModalProps> = ({
           </div>
           <p className="text-[11px] text-slate-400">
             {isDm
-              ? 'Host from your laptop. Players join from phones, tablets, or computers from any network. No custom server required.'
-              : 'Directly connects to the DM host instance to sync initiative order, combatants, rolls, and live feed messages.'}
+              ? 'Click "Host & Start Room" to initialize WebRTC hosting. Google STUN servers allow players across different networks and devices to connect.'
+              : 'Enter the Room Code or open the DM join link. Click "Join Room" to connect to the DM host instance and sync initiative, combat, and feed.'}
           </p>
         </div>
 
@@ -375,25 +442,53 @@ export const RoomModal: React.FC<RoomModalProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={`px-5 py-2 text-xs font-bold rounded-lg cursor-pointer transition shadow-md flex items-center gap-1.5 ${
-                isDm
-                  ? 'text-slate-950 bg-amber-400 hover:bg-amber-300'
-                  : 'text-slate-950 bg-cyan-400 hover:bg-cyan-300'
-              }`}
-            >
-              {isDm ? <Crown className="w-3.5 h-3.5" /> : <LogIn className="w-3.5 h-3.5" />}
-              <span>{isDm ? 'Host & Start Room' : 'Join Room'}</span>
-            </button>
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+            <div>
+              {isDm && connectionStatus === 'hosting' ? (
+                <button
+                  type="button"
+                  onClick={handleUnhostRoom}
+                  className="px-3.5 py-2 text-xs font-bold rounded-lg text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 cursor-pointer flex items-center gap-1.5 transition"
+                >
+                  <Square className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Stop Hosting / End Session</span>
+                </button>
+              ) : !isDm && connectionStatus === 'connected' ? (
+                <button
+                  type="button"
+                  onClick={handleLeaveRoom}
+                  className="px-3.5 py-2 text-xs font-bold rounded-lg text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-700/60 cursor-pointer flex items-center gap-1.5 transition"
+                >
+                  <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Leave Session</span>
+                </button>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                {connectionStatus === 'hosting' || connectionStatus === 'connected' ? 'Close' : 'Cancel'}
+              </button>
+
+              {!(isDm && connectionStatus === 'hosting') && !(!isDm && connectionStatus === 'connected') && (
+                <button
+                  type="submit"
+                  className={`px-5 py-2 text-xs font-bold rounded-lg cursor-pointer transition shadow-md flex items-center gap-1.5 ${
+                    isDm
+                      ? 'text-slate-950 bg-amber-400 hover:bg-amber-300'
+                      : 'text-slate-950 bg-cyan-400 hover:bg-cyan-300'
+                  }`}
+                >
+                  {isDm ? <Crown className="w-3.5 h-3.5" /> : <LogIn className="w-3.5 h-3.5" />}
+                  <span>{isDm ? 'Host & Start Room' : 'Join Room'}</span>
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>

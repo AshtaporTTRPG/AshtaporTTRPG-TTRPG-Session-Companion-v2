@@ -1,6 +1,6 @@
 // Reliable Cross-Device WebRTC & Multi-Tab Session Room Synchronization Utility
 // Connects remote devices (phones, tablets, PCs) via PeerJS (WebRTC) using public cloud brokering
-// and public STUN servers, backed by native BroadcastChannel for local multi-tab sync.
+// and Google STUN servers, backed by native BroadcastChannel for local multi-tab sync.
 
 import Peer, { type DataConnection } from 'peerjs';
 
@@ -12,8 +12,9 @@ export interface PeerInfo {
 }
 
 export type ConnectionStatus =
-  | 'idle'
+  | 'offline'
   | 'connecting'
+  | 'hosting'
   | 'connected'
   | 'disconnected'
   | 'error';
@@ -25,6 +26,7 @@ export interface PresenceState {
   hostName?: string;
   status: ConnectionStatus;
   statusText: string;
+  lastError?: string | null;
 }
 
 export interface RoomMessage {
@@ -59,44 +61,44 @@ export interface RoomMessage {
 type MessageCallback = (msg: RoomMessage) => void;
 type PresenceCallback = (state: PresenceState) => void;
 
-// Public STUN servers for WebRTC NAT traversal
-const PEER_ICE_CONFIG = {
+// Public reliable Google STUN servers for WebRTC NAT traversal across remote/carrier networks
+export const PEER_ICE_CONFIG = {
   config: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
     ],
   },
 };
 
-function sanitizeRoomCode(code: string): string {
+export function sanitizeRoomCode(code: string): string {
   return code
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, '-');
 }
 
-function getHostPeerId(roomCode: string): string {
+export function getHostPeerId(roomCode: string): string {
   const sanitized = sanitizeRoomCode(roomCode);
-  return `ashtapor-v1-${sanitized}-host`;
+  return `ashtapor-room-${sanitized}`;
 }
 
-function getPlayerPeerId(roomCode: string): string {
+export function getPlayerPeerId(roomCode: string): string {
   const sanitized = sanitizeRoomCode(roomCode);
   const rand = Math.random().toString(36).substring(2, 8);
-  return `ashtapor-v1-${sanitized}-p-${rand}`;
+  return `ashtapor-player-${sanitized}-${rand}`;
 }
 
 class RoomSyncManager {
   private roomCode: string = 'DRAGON-77';
-  private peerId: string = `peer-${Math.random().toString(36).substring(2, 9)}`;
+  private peerId: string = `local-${Math.random().toString(36).substring(2, 9)}`;
   private peerName: string = 'Adventurer';
   private isDm: boolean = true;
-  private status: ConnectionStatus = 'idle';
-  private statusText: string = 'Not Connected';
+  private status: ConnectionStatus = 'offline';
+  private statusText: string = 'Offline';
+  private lastError: string | null = null;
+  private activeHostName: string | null = null;
 
   // WebRTC PeerJS instances
   private peerInstance: Peer | null = null;
@@ -124,37 +126,22 @@ class RoomSyncManager {
       // ignore
     }
 
-    // Clean up peer on page unload
+    // Default State: The app must start completely Offline / Disconnected.
+    // Do NOT eagerly initialize PeerJS or attempt connection handshakes on page load or tab navigation.
+    this.status = 'offline';
+    this.statusText = 'Offline';
+
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
         this.cleanupPeer();
       });
     }
 
-    this.connect(this.roomCode, this.peerName, this.isDm);
+    // Setup local BroadcastChannel for multi-tab sync without starting WebRTC
+    this.setupLocalChannel();
   }
 
-  public connect(newRoomCode?: string, name?: string, isDmRole?: boolean) {
-    if (newRoomCode) {
-      this.roomCode = newRoomCode.trim().toUpperCase();
-      try {
-        localStorage.setItem('ttrpg_active_room', this.roomCode);
-      } catch {}
-    }
-    if (name) {
-      this.peerName = name.trim();
-      try {
-        localStorage.setItem('ttrpg_player_name', this.peerName);
-      } catch {}
-    }
-    if (isDmRole !== undefined) {
-      this.isDm = isDmRole;
-      try {
-        localStorage.setItem('ttrpg_user_is_dm', String(isDmRole));
-      } catch {}
-    }
-
-    // Reset local BroadcastChannel
+  private setupLocalChannel() {
     if (this.channel) {
       try {
         this.channel.close();
@@ -168,50 +155,100 @@ class RoomSyncManager {
           this.handleIncoming(event.data, false);
         }
       };
-    } catch {
-      // Fallback
-    }
+    } catch {}
 
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', this.handleStorageEvent);
       window.addEventListener('storage', this.handleStorageEvent);
     }
 
-    // Setup heartbeat ping
     if (this.pingInterval) clearInterval(this.pingInterval);
     this.pingInterval = setInterval(() => {
-      this.broadcast('PEER_PING', {
-        online: true,
-        isHosted: this.isRoomHosted(),
-      });
       this.cleanStalePeers();
       this.notifyPresence();
-    }, 4000);
-
-    // If DM and room is marked hosted, host the room via WebRTC
-    // If player, connect to the DM host via WebRTC
-    if (this.isDm) {
-      if (this.isRoomHosted()) {
-        this.startPeerHost();
-      } else {
-        this.status = 'idle';
-        this.statusText = 'Offline (Not Hosting)';
-        this.notifyPresence();
-      }
-    } else {
-      this.startPeerClient();
-    }
+    }, 5000);
   }
 
   /**
-   * DM WebRTC Hosting initialization
+   * Configure room code and user details locally without initiating network connection.
+   */
+  public configure(newRoomCode?: string, name?: string, isDmRole?: boolean): void {
+    let roomChanged = false;
+    if (newRoomCode) {
+      const clean = newRoomCode.trim().toUpperCase();
+      if (clean && clean !== this.roomCode) {
+        this.roomCode = clean;
+        roomChanged = true;
+        try {
+          localStorage.setItem('ttrpg_active_room', this.roomCode);
+        } catch {}
+      }
+    }
+    if (name) {
+      const cleanName = name.trim();
+      if (cleanName && cleanName !== this.peerName) {
+        this.peerName = cleanName;
+        try {
+          localStorage.setItem('ttrpg_player_name', this.peerName);
+        } catch {}
+      }
+    }
+    if (isDmRole !== undefined) {
+      this.isDm = isDmRole;
+      try {
+        localStorage.setItem('ttrpg_user_is_dm', String(isDmRole));
+      } catch {}
+    }
+
+    if (roomChanged) {
+      this.setupLocalChannel();
+    }
+    this.notifyPresence();
+  }
+
+  /**
+   * Backward-compatible alias for configure. Does NOT auto-initiate WebRTC unless hosting is active.
+   */
+  public connect(newRoomCode?: string, name?: string, isDmRole?: boolean): void {
+    this.configure(newRoomCode, name, isDmRole);
+  }
+
+  /**
+   * Host Trigger: Only initialize the PeerJS host instance when the DM explicitly clicks "Host & Start Room".
+   */
+  public hostRoom(): { success: boolean; reason?: string } {
+    if (!this.isDm) {
+      return {
+        success: false,
+        reason: 'Only a Dungeon Master can host/start the session room.',
+      };
+    }
+
+    const check = this.canClaimDm();
+    if (!check.allowed) {
+      return {
+        success: false,
+        reason: `Room already has an active Dungeon Master (${check.existingDmName}). Only one DM is permitted per room.`,
+      };
+    }
+
+    this.startPeerHost();
+    return { success: true };
+  }
+
+  /**
+   * DM WebRTC Hosting initialization with public STUN servers and deterministic host ID
    */
   private startPeerHost() {
     this.cleanupPeer();
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
     this.status = 'connecting';
-    this.statusText = 'Starting DM Host Server...';
+    this.statusText = 'Connecting to broker...';
+    this.lastError = null;
     this.notifyPresence();
 
     const hostId = getHostPeerId(this.roomCode);
@@ -222,9 +259,14 @@ class RoomSyncManager {
 
       peer.on('open', (id) => {
         this.peerId = id;
-        this.status = 'connected';
-        this.statusText = 'Hosting Live (Waiting for players)';
+        this.status = 'hosting';
+        this.statusText = `Hosting: Room ${this.roomCode}`;
+        this.lastError = null;
         this.claimRoomHostLocally();
+        this.broadcast('ROOM_HOST_CLAIM', {
+          hostPeerId: this.peerId,
+          hostName: this.peerName,
+        });
         this.notifyPresence();
       });
 
@@ -233,43 +275,59 @@ class RoomSyncManager {
       });
 
       peer.on('error', (err: any) => {
-        console.warn('PeerJS Host Error:', err);
-        if (err.type === 'unavailable-id') {
-          this.status = 'connecting';
-          this.statusText = 'Host ID clearing. Reconnecting in 2s...';
-          this.notifyPresence();
-          this.reconnectTimer = setTimeout(() => {
-            if (this.isDm && this.isRoomHosted()) {
-              this.startPeerHost();
-            }
-          }, 2500);
-        } else {
-          this.status = 'error';
-          this.statusText = `Host error: ${err.message || err.type}`;
-          this.notifyPresence();
+        console.error('PeerJS Host Error:', err);
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
         }
+        // Stop runaway retry loops! Do not auto-reconnect on unavailable-id or broker errors.
+        this.status = 'error';
+        const errorDetail =
+          err?.type === 'unavailable-id'
+            ? 'Room host ID already registered on broker. Wait a moment or choose another code, then Click to Retry.'
+            : err?.message || err?.type || 'Broker connection failed';
+        this.lastError = errorDetail;
+        this.statusText = 'Connection Failed - Click to Retry';
+        this.notifyPresence();
       });
 
       peer.on('disconnected', () => {
-        if (!peer.destroyed) {
-          peer.reconnect();
+        console.warn('PeerJS Host disconnected from broker signaling server');
+        if (this.peerInstance && !this.peerInstance.destroyed) {
+          try {
+            this.peerInstance.reconnect();
+          } catch {}
+        }
+      });
+
+      peer.on('close', () => {
+        if (this.status === 'hosting') {
+          this.status = 'disconnected';
+          this.statusText = 'Disconnected / Host Closed';
+          this.notifyPresence();
         }
       });
     } catch (err: any) {
+      console.error('Failed to instantiate Host PeerJS:', err);
       this.status = 'error';
-      this.statusText = `Host failed: ${err.message || 'Error'}`;
+      this.statusText = 'Connection Failed - Click to Retry';
+      this.lastError = err?.message || 'Failed to initialize peer';
       this.notifyPresence();
     }
   }
 
   /**
-   * Setup incoming player data connection on DM host
+   * Setup incoming player data connection on DM host:
+   * DM binds peer.on('connection', ...) and tracks active client data connections in state,
+   * listening for data, close, and error. Pushes full state sync immediately on open.
    */
   private setupHostDataConnection(conn: DataConnection) {
-    conn.on('open', () => {
+    const handleOpen = () => {
       this.clientConnections.set(conn.peer, conn);
 
-      // Send initial combat & feed snapshot immediately to the connecting player
+      // Full State Sync on Join:
+      // When a player's data channel successfully opens, the DM host must
+      // immediately push the current combat tracker state, initiative list, and feed history
       const initialPayload = {
         combat: this.getCombatSnapshot(),
         feed: this.getFeedSnapshot(),
@@ -277,36 +335,44 @@ class RoomSyncManager {
         peers: this.getPeers(),
       };
 
-      conn.send({
-        type: 'INITIAL_STATE_SYNC',
-        senderId: this.peerId,
-        senderName: this.peerName,
-        isDm: true,
-        roomCode: this.roomCode,
-        timestamp: Date.now(),
-        payload: initialPayload,
-      });
+      try {
+        conn.send({
+          type: 'INITIAL_STATE_SYNC',
+          senderId: this.peerId,
+          senderName: this.peerName,
+          isDm: true,
+          roomCode: this.roomCode,
+          timestamp: Date.now(),
+          payload: initialPayload,
+        });
+      } catch (err) {
+        console.error('Error sending initial state sync to peer:', err);
+      }
 
-      this.statusText = `Hosting Live (${this.clientConnections.size} connected)`;
+      this.broadcastPresenceToPeers();
+      this.statusText = `Hosting: Room ${this.roomCode}`;
       this.notifyPresence();
-    });
+    };
+
+    if (conn.open) {
+      handleOpen();
+    } else {
+      conn.on('open', handleOpen);
+    }
 
     conn.on('data', (data: any) => {
       if (!data || typeof data !== 'object') return;
 
       if (data.type === 'PLAYER_HELLO') {
         const pId = data.senderId || conn.peer;
-        const pName = data.senderName || 'Player';
+        const pName = data.senderName || data.payload?.name || 'Player';
         this.peers.set(pId, {
           id: pId,
           name: pName,
           isDm: false,
           lastSeen: Date.now(),
         });
-
-        // Broadcast updated presence to all connected players
         this.broadcastPresenceToPeers();
-        this.statusText = `Hosting Live (${this.clientConnections.size} connected)`;
         this.notifyPresence();
         return;
       }
@@ -328,11 +394,11 @@ class RoomSyncManager {
       this.clientConnections.delete(conn.peer);
       this.peers.delete(conn.peer);
       this.broadcastPresenceToPeers();
-      this.statusText = `Hosting Live (${this.clientConnections.size} connected)`;
       this.notifyPresence();
     });
 
-    conn.on('error', () => {
+    conn.on('error', (err: any) => {
+      console.error('Host connection error with client:', conn.peer, err);
       this.clientConnections.delete(conn.peer);
       this.peers.delete(conn.peer);
       this.broadcastPresenceToPeers();
@@ -341,14 +407,25 @@ class RoomSyncManager {
   }
 
   /**
+   * Player Client Join Trigger: On clicking "Join Room", connects to the DM host via WebRTC
+   */
+  public joinRoom(): void {
+    this.startPeerClient();
+  }
+
+  /**
    * Player WebRTC Client initialization
    */
   private startPeerClient() {
     this.cleanupPeer();
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
     this.status = 'connecting';
-    this.statusText = 'Connecting to Dungeon Master...';
+    this.statusText = 'Connecting to broker...';
+    this.lastError = null;
     this.notifyPresence();
 
     const playerId = getPlayerPeerId(this.roomCode);
@@ -360,34 +437,57 @@ class RoomSyncManager {
 
       peer.on('open', (id) => {
         this.peerId = id;
+        this.statusText = 'Connecting to broker...';
         this.connectToHost(peer, hostId);
       });
 
       peer.on('error', (err: any) => {
-        console.warn('PeerJS Player Client Error:', err);
+        console.error('PeerJS Player Client Error:', err);
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
         if (err.type === 'peer-unavailable') {
           this.status = 'disconnected';
-          this.statusText = 'Host Offline / Room Not Found';
-          this.notifyPresence();
+          this.statusText = 'Disconnected / Host Closed';
+          this.lastError = 'Room host is not currently online';
         } else {
           this.status = 'error';
-          this.statusText = `Connection error: ${err.type || err.message}`;
-          this.notifyPresence();
+          this.statusText = 'Connection Failed - Click to Retry';
+          this.lastError = err?.message || err?.type || 'Connection error';
         }
+        this.notifyPresence();
       });
 
       peer.on('disconnected', () => {
-        if (!peer.destroyed) {
-          peer.reconnect();
+        console.warn('PeerJS Client disconnected from broker signaling server');
+        if (this.peerInstance && !this.peerInstance.destroyed) {
+          try {
+            this.peerInstance.reconnect();
+          } catch {}
+        }
+      });
+
+      peer.on('close', () => {
+        if (this.status === 'connected' || this.status === 'connecting') {
+          this.status = 'disconnected';
+          this.statusText = 'Disconnected / Host Closed';
+          this.notifyPresence();
         }
       });
     } catch (err: any) {
+      console.error('Failed to instantiate Player PeerJS:', err);
       this.status = 'error';
-      this.statusText = 'Failed to initialize peer client';
+      this.statusText = 'Connection Failed - Click to Retry';
+      this.lastError = err?.message || 'Failed to initialize peer client';
       this.notifyPresence();
     }
   }
 
+  /**
+   * Player data channel connection to DM host:
+   * Binds conn.on('open'), conn.on('data'), conn.on('close'), and conn.on('error')
+   */
   private connectToHost(peer: Peer, hostId: string) {
     try {
       const conn = peer.connect(hostId, {
@@ -397,7 +497,8 @@ class RoomSyncManager {
 
       conn.on('open', () => {
         this.status = 'connected';
-        this.statusText = 'Connected to Dungeon Master';
+        this.statusText = 'Connected to DM';
+        this.lastError = null;
 
         // Send Player Hello Handshake
         conn.send({
@@ -416,11 +517,12 @@ class RoomSyncManager {
       conn.on('data', (data: any) => {
         if (!data || typeof data !== 'object') return;
 
-        // Initial State Sync from DM Host
+        // Initial Full State Sync from DM Host
         if (data.type === 'INITIAL_STATE_SYNC' && data.payload) {
           const { combat, feed, hostName, peers } = data.payload;
 
           if (hostName) {
+            this.activeHostName = hostName;
             this.statusText = `Connected to DM (${hostName})`;
           }
 
@@ -470,7 +572,6 @@ class RoomSyncManager {
             try {
               localStorage.setItem('ttrpg_unified_live_feed', JSON.stringify(feed));
             } catch {}
-            // Also notify through feed listener
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new StorageEvent('storage', { key: 'ttrpg_unified_live_feed' }));
             }
@@ -497,7 +598,7 @@ class RoomSyncManager {
         // Host released room
         if (data.type === 'ROOM_HOST_RELEASE') {
           this.status = 'disconnected';
-          this.statusText = 'Host Disconnected';
+          this.statusText = 'Disconnected / Host Closed';
           this.notifyPresence();
           return;
         }
@@ -507,18 +608,22 @@ class RoomSyncManager {
 
       conn.on('close', () => {
         this.status = 'disconnected';
-        this.statusText = 'Host Disconnected';
+        this.statusText = 'Disconnected / Host Closed';
         this.notifyPresence();
       });
 
-      conn.on('error', () => {
-        this.status = 'disconnected';
-        this.statusText = 'Host Disconnected';
+      conn.on('error', (err: any) => {
+        console.error('Player connection data channel error:', err);
+        this.status = 'error';
+        this.statusText = 'Connection Failed - Click to Retry';
+        this.lastError = err?.message || 'Data channel error';
         this.notifyPresence();
       });
-    } catch {
+    } catch (err: any) {
+      console.error('Failed to initiate connection to host:', err);
       this.status = 'disconnected';
-      this.statusText = 'Host Offline / Room Not Found';
+      this.statusText = 'Disconnected / Host Closed';
+      this.lastError = err?.message || 'Failed to connect to host';
       this.notifyPresence();
     }
   }
@@ -566,6 +671,68 @@ class RoomSyncManager {
       return feedRaw ? JSON.parse(feedRaw) : [];
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Host Teardown: Properly calls peer.destroy(), clears any pending setTimeout retry timers,
+   * closes all active connections, and resets status back to Offline.
+   */
+  public stopHosting(): void {
+    this.unhostRoom();
+  }
+
+  public unhostRoom(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    try {
+      localStorage.removeItem(`ttrpg_room_host_${this.roomCode}`);
+    } catch {}
+
+    this.broadcast('ROOM_HOST_RELEASE', {
+      hostPeerId: this.peerId,
+    });
+
+    this.cleanupPeer();
+    this.status = 'offline';
+    this.statusText = 'Offline';
+    this.lastError = null;
+    this.peers.clear();
+    this.notifyPresence();
+  }
+
+  /**
+   * Player Disconnect / Leave Session
+   */
+  public disconnect(): void {
+    this.leaveRoom();
+  }
+
+  public leaveRoom(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.cleanupPeer();
+    this.status = 'offline';
+    this.statusText = 'Offline';
+    this.lastError = null;
+    this.peers.clear();
+    this.notifyPresence();
+  }
+
+  /**
+   * Manually trigger a retry (No runaway automated retries)
+   */
+  public retryConnection(): void {
+    if (this.isDm) {
+      this.hostRoom();
+    } else {
+      this.joinRoom();
     }
   }
 
@@ -677,7 +844,7 @@ class RoomSyncManager {
   }
 
   private cleanStalePeers() {
-    const cutoff = Date.now() - 12000;
+    const cutoff = Date.now() - 15000;
     let changed = false;
     for (const [id, peer] of this.peers.entries()) {
       if (peer.lastSeen < cutoff) {
@@ -753,6 +920,7 @@ class RoomSyncManager {
       hostName: hostInfo.hostName,
       status: this.status,
       statusText: this.statusText,
+      lastError: this.lastError,
     });
     return () => this.presenceListeners.delete(cb);
   }
@@ -766,6 +934,7 @@ class RoomSyncManager {
       hostName: hostInfo.hostName,
       status: this.status,
       statusText: this.statusText,
+      lastError: this.lastError,
     };
     this.presenceListeners.forEach((fn) => {
       try {
@@ -792,10 +961,13 @@ class RoomSyncManager {
   }
 
   public getConnectedCount(): number {
-    if (this.isDm) {
+    if (this.status === 'hosting') {
       return this.clientConnections.size + 1;
     }
-    return this.getPeers().length + 1;
+    if (this.status === 'connected') {
+      return this.peers.size + 1;
+    }
+    return 1;
   }
 
   public getActiveDm(): PeerInfo | null {
@@ -817,64 +989,32 @@ class RoomSyncManager {
   }
 
   public isRoomHosted(): boolean {
-    if (this.isDm) {
-      try {
-        const raw = localStorage.getItem(`ttrpg_room_host_${this.roomCode}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          return !!parsed?.isHosted;
-        }
-      } catch {}
-      return false;
-    }
-    const dmPeer = this.getActiveDm();
-    if (dmPeer) return true;
-    try {
-      const raw = localStorage.getItem(`ttrpg_room_host_${this.roomCode}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return !!parsed?.isHosted;
-      }
-    } catch {}
-    return this.status === 'connected';
+    return this.status === 'hosting';
   }
 
   public getHostInfo(): { isHosted: boolean; hostName?: string; hostPeerId?: string } {
     if (this.isDm) {
       return {
-        isHosted: this.isRoomHosted(),
+        isHosted: this.status === 'hosting',
         hostName: this.peerName,
         hostPeerId: this.peerId,
       };
     }
-    const dmPeer = this.getActiveDm();
-    if (dmPeer) {
+    if (this.status === 'connected') {
       return {
         isHosted: true,
-        hostName: dmPeer.name,
-        hostPeerId: dmPeer.id,
+        hostName: this.activeHostName || 'Dungeon Master',
+        hostPeerId: getHostPeerId(this.roomCode),
       };
     }
-    try {
-      const raw = localStorage.getItem(`ttrpg_room_host_${this.roomCode}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.isHosted) {
-          return {
-            isHosted: true,
-            hostName: parsed.hostName || 'Dungeon Master',
-            hostPeerId: parsed.hostPeerId,
-          };
-        }
-      }
-    } catch {}
     return { isHosted: false };
   }
 
-  public getConnectionStatus(): { status: ConnectionStatus; statusText: string } {
+  public getConnectionStatus(): { status: ConnectionStatus; statusText: string; lastError?: string | null } {
     return {
       status: this.status,
       statusText: this.statusText,
+      lastError: this.lastError,
     };
   }
 
@@ -882,68 +1022,6 @@ class RoomSyncManager {
     if (typeof window === 'undefined') return '';
     const base = `${window.location.origin}${window.location.pathname}`;
     return `${base}?room=${encodeURIComponent(this.roomCode)}`;
-  }
-
-  /**
-   * Only the DM can host / start the room.
-   */
-  public hostRoom(): { success: boolean; reason?: string } {
-    if (!this.isDm) {
-      return {
-        success: false,
-        reason: 'Only a Dungeon Master can host/start the session room.',
-      };
-    }
-
-    const check = this.canClaimDm();
-    if (!check.allowed) {
-      return {
-        success: false,
-        reason: `Room already has an active Dungeon Master (${check.existingDmName}). Only one DM is permitted per room.`,
-      };
-    }
-
-    this.claimRoomHostLocally();
-    this.startPeerHost();
-
-    this.broadcast('ROOM_HOST_CLAIM', {
-      hostPeerId: this.peerId,
-      hostName: this.peerName,
-    });
-
-    this.notifyPresence();
-    return { success: true };
-  }
-
-  /**
-   * End or unhost the room.
-   */
-  public unhostRoom(): void {
-    try {
-      localStorage.removeItem(`ttrpg_room_host_${this.roomCode}`);
-    } catch {}
-
-    this.broadcast('ROOM_HOST_RELEASE', {
-      hostPeerId: this.peerId,
-    });
-
-    this.cleanupPeer();
-    this.status = 'idle';
-    this.statusText = 'Offline (Not Hosting)';
-    this.notifyPresence();
-  }
-
-  /**
-   * Manually trigger a reconnect attempt (e.g. if host was restarted or connection dropped)
-   */
-  public retryConnection(): void {
-    if (this.isDm) {
-      if (this.isRoomHosted()) {
-        this.startPeerHost();
-      }
-    } else {
-      this.startPeerClient();
-    }
   }
 }
 
