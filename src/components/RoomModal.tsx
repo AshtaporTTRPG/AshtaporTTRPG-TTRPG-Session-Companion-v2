@@ -167,7 +167,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
               className={`w-5 h-5 ${
                 connectionStatus === 'hosting' || connectionStatus === 'connected'
                   ? 'text-emerald-400 animate-pulse'
-                  : connectionStatus === 'connecting'
+                  : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
                   ? 'text-amber-400 animate-spin'
                   : connectionStatus === 'error' || connectionStatus === 'disconnected'
                   ? 'text-rose-400'
@@ -198,7 +198,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
           className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
             connectionStatus === 'hosting' || connectionStatus === 'connected'
               ? 'bg-emerald-950/60 border-emerald-500/70 text-emerald-200'
-              : connectionStatus === 'connecting'
+              : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
               ? 'bg-amber-950/60 border-amber-500/70 text-amber-200'
               : connectionStatus === 'disconnected'
               ? 'bg-rose-950/60 border-rose-500/70 text-rose-200'
@@ -212,14 +212,14 @@ export const RoomModal: React.FC<RoomModalProps> = ({
               {(connectionStatus === 'hosting' || connectionStatus === 'connected') && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               )}
-              {connectionStatus === 'connecting' && (
+              {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
               )}
               <span
                 className={`relative inline-flex rounded-full h-3 w-3 ${
                   connectionStatus === 'hosting' || connectionStatus === 'connected'
                     ? 'bg-emerald-400'
-                    : connectionStatus === 'connecting'
+                    : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
                     ? 'bg-amber-400'
                     : connectionStatus === 'disconnected' || connectionStatus === 'error'
                     ? 'bg-rose-500'
@@ -235,6 +235,8 @@ export const RoomModal: React.FC<RoomModalProps> = ({
                   className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
                     connectionStatus === 'hosting' || connectionStatus === 'connected'
                       ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
+                      : connectionStatus === 'reconnecting'
+                      ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50 animate-pulse'
                       : connectionStatus === 'connecting'
                       ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50 animate-pulse'
                       : connectionStatus === 'disconnected' || connectionStatus === 'error'
@@ -246,6 +248,8 @@ export const RoomModal: React.FC<RoomModalProps> = ({
                     ? `HOSTING: ROOM ${roomInput}`
                     : connectionStatus === 'connected'
                     ? 'CONNECTED TO DM'
+                    : connectionStatus === 'reconnecting'
+                    ? 'RECONNECTING TO HOST...'
                     : connectionStatus === 'connecting'
                     ? 'CONNECTING TO BROKER...'
                     : connectionStatus === 'disconnected'
@@ -260,6 +264,8 @@ export const RoomModal: React.FC<RoomModalProps> = ({
                   ? `Hosting live WebRTC session in room ${roomInput}. Share join link with remote players.`
                   : connectionStatus === 'connected'
                   ? `Connected to DM (${hostName || 'Host'}). Combat state and rolls sync in real-time.`
+                  : connectionStatus === 'reconnecting'
+                  ? statusText || 'DM tab reload detected. Automatically re-establishing connection...'
                   : connectionStatus === 'connecting'
                   ? 'Connecting to broker signaling server...'
                   : connectionStatus === 'disconnected'
@@ -298,7 +304,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
               </>
             )}
 
-            {connectionStatus === 'connected' && !isDm && (
+            {(connectionStatus === 'connected' || connectionStatus === 'reconnecting') && !isDm && (
               <button
                 type="button"
                 onClick={handleLeaveRoom}
@@ -515,10 +521,10 @@ export const RoomModal: React.FC<RoomModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
               >
-                {connectionStatus === 'hosting' || connectionStatus === 'connected' ? 'Close' : 'Cancel'}
+                {connectionStatus === 'hosting' || connectionStatus === 'connected' || connectionStatus === 'reconnecting' ? 'Close' : 'Cancel'}
               </button>
 
-              {!(isDm && connectionStatus === 'hosting') && !(!isDm && connectionStatus === 'connected') && (
+              {!(isDm && connectionStatus === 'hosting') && !(!isDm && (connectionStatus === 'connected' || connectionStatus === 'reconnecting')) && (
                 <button
                   type="submit"
                   className={`px-5 py-2 text-xs font-bold rounded-lg cursor-pointer transition shadow-md flex items-center gap-1.5 ${

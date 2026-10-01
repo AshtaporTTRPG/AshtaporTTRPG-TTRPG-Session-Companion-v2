@@ -50,13 +50,21 @@ export function executeDiceRoll({
   modifier = 0,
   advantageMode = 'normal',
   displayMode = 'sum',
-  sender = 'Adventurer',
+  sender,
   isDm = false,
   isSecret = false,
   visibility = 'public',
   rollType = 'Straight roll',
   label = '',
 }: ExecuteRollOptions): DiceRollResult {
+  const resolvedSender =
+    sender && sender.trim()
+      ? sender.trim()
+      : typeof window !== 'undefined' && localStorage.getItem('ttrpg_player_name')?.trim()
+      ? localStorage.getItem('ttrpg_player_name')!.trim()
+      : isDm
+      ? 'Dungeon Master'
+      : 'Adventurer';
   // Normalize pool: either use provided pool or single die configuration
   const poolEntries: DicePoolEntry[] = [];
   if (pool && pool.length > 0) {
@@ -201,7 +209,7 @@ export function executeDiceRoll({
   return {
     id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     timestamp: Date.now(),
-    sender,
+    sender: resolvedSender,
     isDm,
     isSecret: isActuallySecret,
     visibility,

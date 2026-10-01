@@ -126,9 +126,11 @@ const DEFAULT_INITIAL_MACROS: CustomMacro[] = [
   { id: 'm-6', name: 'Fate Die', formula: '1d20', rollType: 'Fate' },
 ];
 
-export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
+export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) => {
   const [roomCode, setRoomCode] = useState<string>(() => roomSync.getRoomCode());
-  const [userName, setUserName] = useState<string>(isDm ? 'Dungeon Master' : roomSync.getPeerName() || 'Valerius');
+  const [userName, setUserName] = useState<string>(() => {
+    return playerName?.trim() || roomSync.getPeerName();
+  });
   const [diceHistory, setDiceHistory] = useState<DiceRollResult[]>(() => {
     // Populate directly from shared liveFeedSync history on initial render
     const feed = liveFeedSync.getFeed();
@@ -246,6 +248,31 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
     return () => unsubFeed();
   }, []);
 
+  // Synchronize roller displayName with incoming prop changes or roomSync presence updates
+  useEffect(() => {
+    const current = playerName?.trim() || roomSync.getPeerName();
+    if (current && current !== userName) {
+      setUserName(current);
+    }
+  }, [playerName]);
+
+  useEffect(() => {
+    const unsubPresence = roomSync.subscribePresence(() => {
+      const current = roomSync.getPeerName();
+      if (current && current !== userName) {
+        setUserName(current);
+      }
+    });
+    return () => unsubPresence();
+  }, [userName]);
+
+  const handleRollerNameChange = (newName: string) => {
+    setUserName(newName);
+    if (newName.trim()) {
+      roomSync.configure(roomCode, newName.trim(), isDm);
+    }
+  };
+
   // Total dice count in currently staged pool
   const totalStagedDice = (Object.values(stagedPool) as number[]).reduce((a, b) => a + b, 0);
 
@@ -328,12 +355,13 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
     // Default to 1d20 if pool is empty
     const finalPool = poolToRoll.length > 0 ? poolToRoll : [{ diceType: 'd20' as DieType, count: 1 }];
 
+    const author = userName.trim() || roomSync.getPeerName();
     const result = executeDiceRoll({
       pool: finalPool,
       modifier: mod,
       advantageMode,
       displayMode: customDisplayMode,
-      sender: userName,
+      sender: author,
       isDm,
       isSecret: isSecretRoll,
       visibility,
@@ -454,7 +482,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
             <input
               type="text"
               value={userName}
-              onChange={(e) => setUserName(e.target.value)}
+              onChange={(e) => handleRollerNameChange(e.target.value)}
               className="w-36 px-2.5 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
             />
           </div>

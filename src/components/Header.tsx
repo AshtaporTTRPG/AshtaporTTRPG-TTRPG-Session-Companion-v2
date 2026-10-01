@@ -167,6 +167,8 @@ export const Header: React.FC<HeaderProps> = ({
                     ? `Hosting: Room ${roomCode}`
                     : connectionStatus === 'connected'
                     ? 'Connected to DM'
+                    : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting to Host...'
                     : connectionStatus === 'connecting'
                     ? 'Connecting to broker...'
                     : connectionStatus === 'disconnected'
@@ -178,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-mono font-bold rounded-lg border transition-all cursor-pointer shadow-sm ${
                   connectionStatus === 'hosting' || connectionStatus === 'connected'
                     ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300 hover:bg-emerald-900/90 hover:border-emerald-400'
-                    : connectionStatus === 'connecting'
+                    : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
                     ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 hover:bg-amber-900/90'
                     : connectionStatus === 'disconnected' || connectionStatus === 'error'
                     ? 'bg-rose-950/80 border-rose-600/70 text-rose-300 hover:bg-rose-900/90'
@@ -189,14 +191,14 @@ export const Header: React.FC<HeaderProps> = ({
                   {(connectionStatus === 'hosting' || connectionStatus === 'connected') && (
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   )}
-                  {connectionStatus === 'connecting' && (
+                  {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                   )}
                   <span
                     className={`relative inline-flex rounded-full h-2 w-2 ${
                       connectionStatus === 'hosting' || connectionStatus === 'connected'
                         ? 'bg-emerald-400'
-                        : connectionStatus === 'connecting'
+                        : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
                         ? 'bg-amber-400'
                         : connectionStatus === 'disconnected' || connectionStatus === 'error'
                         ? 'bg-rose-500'
@@ -209,6 +211,8 @@ export const Header: React.FC<HeaderProps> = ({
                     ? `Hosting: Room ${roomCode}`
                     : connectionStatus === 'connected'
                     ? 'Connected to DM'
+                    : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting...'
                     : connectionStatus === 'connecting'
                     ? 'Connecting to broker...'
                     : connectionStatus === 'disconnected'

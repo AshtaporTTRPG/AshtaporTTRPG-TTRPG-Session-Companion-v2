@@ -6,6 +6,7 @@ import { LiveCombatFeed } from './LiveCombatFeed';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import { roomSync, RoomMessage } from '../utils/roomSync';
 import { playTurnSound } from '../utils/audio';
+import { executeDiceRoll } from '../utils/dice';
 import {
   Swords,
   Plus,
@@ -430,7 +431,20 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       const isTargetPlayerOrAlly = target.type === 'player' || target.type === 'ally';
       if (!isDm && (!isTargetPlayerOrAlly || isTargetFoW)) return;
 
-      const roll = Math.floor(Math.random() * 20) + 1;
+      const rollerName = roomSync.getPeerName();
+
+      const rollResult = executeDiceRoll({
+        diceType: 'd20',
+        count: 1,
+        advantageMode: 'normal',
+        sender: rollerName,
+        isDm,
+        visibility: 'public',
+        rollType: 'Straight roll',
+        label: `Initiative (${target.name})`,
+      });
+
+      const roll = rollResult.total;
       const updated = combatants.map((c) =>
         c.id === combatantId ? { ...c, initiative: roll } : c
       );
@@ -447,10 +461,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       setCombatants(sorted);
       setActiveTurnIndex(targetIndex);
 
-      liveFeedSync.recordCombatLog(
-        `🎲 ${target.name} rolled 1d20 for Initiative: ${roll}!`,
-        true
-      );
+      liveFeedSync.recordDiceRoll(rollResult, true);
       broadcastCombat(sorted, targetIndex, round, activeCombatantId, combatStatus);
     });
   };
@@ -460,6 +471,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
   const handleRollAllInitiatives = () => {
     preserveScroll(() => {
       if (!isDm || combatants.length === 0) return;
+
+      const dmRoller = roomSync.getPeerName();
 
       const updated = combatants.map((c) => {
         const roll = Math.floor(Math.random() * 20) + 1;
@@ -487,7 +500,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       if (targetId) setActiveCombatantId(targetId);
 
       liveFeedSync.recordCombatLog(
-        `🎲 All initiatives rolled by the DM and sorted in strict descending order.`,
+        `🎲 All initiatives rolled by ${dmRoller} and sorted in strict descending order.`,
         true
       );
       broadcastCombat(sorted, targetIndex, round, targetId, combatStatus);

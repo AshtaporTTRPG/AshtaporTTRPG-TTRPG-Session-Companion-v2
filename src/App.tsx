@@ -20,11 +20,13 @@ export default function App() {
   const [isRoadmapOpen, setIsRoadmapOpen] = useState<boolean>(false);
   const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(false);
   const [roomCode, setRoomCode] = useState<string>(roomSync.getRoomCode());
+  const [displayName, setDisplayName] = useState<string>(() => roomSync.getPeerName());
   const [connectionStatus, setConnectionStatus] = useState<string>(() => roomSync.getConnectionStatus().status);
 
   useEffect(() => {
     const unsub = roomSync.subscribePresence((state) => {
       setConnectionStatus(state.status);
+      setDisplayName(roomSync.getPeerName());
     });
     return () => unsub();
   }, []);
@@ -100,7 +102,7 @@ export default function App() {
 
         {/* Tab Views */}
         {activeTab === 'combat' && <CombatTracker isDm={isDm} />}
-        {activeTab === 'dice' && <DiceChamber isDm={isDm} />}
+        {activeTab === 'dice' && <DiceChamber isDm={isDm} playerName={displayName} />}
         {activeTab === 'geometry' && <GeometryCalculator />}
         {activeTab === 'map' && <InteractiveMap isDm={isDm} />}
         {activeTab === 'notes' && <NotesAndReference />}
@@ -124,7 +126,7 @@ export default function App() {
                 className={`h-2 w-2 rounded-full ${
                   connectionStatus === 'hosting' || connectionStatus === 'connected'
                     ? 'bg-emerald-400'
-                    : connectionStatus === 'connecting'
+                    : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
                     ? 'bg-amber-400 animate-pulse'
                     : connectionStatus === 'disconnected' || connectionStatus === 'error'
                     ? 'bg-rose-400'
@@ -137,6 +139,8 @@ export default function App() {
                     ? 'Hosting Live'
                     : connectionStatus === 'connected'
                     ? 'Connected'
+                    : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting to Host...'
                     : connectionStatus === 'connecting'
                     ? 'Connecting'
                     : connectionStatus === 'disconnected'
@@ -164,8 +168,9 @@ export default function App() {
         onClose={() => setIsRoomModalOpen(false)}
         isDm={isDm}
         currentRoomCode={roomCode}
-        onUpdateRoom={(newCode) => {
+        onUpdateRoom={(newCode, newName) => {
           setRoomCode(newCode);
+          if (newName) setDisplayName(newName);
         }}
       />
 

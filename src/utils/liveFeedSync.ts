@@ -153,7 +153,7 @@ class LiveFeedSyncManager {
           : `rolled ${formula} for a total of ${roll.total}!`;
 
         const isSecret = roll.visibility === 'dm' || !!roll.isSecret;
-        const senderName = roll.sender || msg.senderName;
+        const senderName = roll.sender?.trim() || msg.senderName?.trim() || roomSync.getPeerName();
         const secretNotice = `${senderName} rolled a secret check to the DM.`;
 
         const newItem: UnifiedFeedItem = {
@@ -311,7 +311,7 @@ class LiveFeedSyncManager {
       : `rolled ${formula} for a total of ${roll.total}!`;
 
     const isSecret = roll.visibility === 'dm' || !!roll.isSecret;
-    const senderName = roll.sender || roomSync.getPeerName();
+    const senderName = roll.sender?.trim() || roomSync.getPeerName();
     const secretNotice = `${senderName} rolled a secret check to the DM.`;
 
     const item: UnifiedFeedItem = {

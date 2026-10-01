@@ -42,7 +42,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
   // Quick Dice Roll Function - Connected to shared liveFeedSync and roomSync
   const handleQuickRoll = (sides: number) => {
     playDiceRollSound();
-    const rollerName = roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player');
+    const rollerName = roomSync.getPeerName();
     const advMode =
       sides === 20
         ? advantageMode === 'adv'
@@ -70,7 +70,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
     e.preventDefault();
     if (!chatInput.trim()) return;
 
-    const senderName = roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player');
+    const senderName = roomSync.getPeerName();
     liveFeedSync.recordChat(senderName, isDm, chatInput.trim(), true);
     setChatInput('');
   };
@@ -146,7 +146,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
 
             // Dice Roll event - Unified with Dice Chamber
             if (evt.type === 'dice') {
-              const currentUserName = roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player');
+              const currentUserName = roomSync.getPeerName();
               const isSecretRoll =
                 evt.rollDetails?.visibility === 'dm' || evt.rollDetails?.isSecret || evt.isSecretRoll;
               const canSeeSecretRoll = isDm || evt.sender === currentUserName;

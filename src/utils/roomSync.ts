@@ -22,6 +22,7 @@ export interface RosterMember {
 export type ConnectionStatus =
   | 'offline'
   | 'connecting'
+  | 'reconnecting'
   | 'hosting'
   | 'connected'
   | 'disconnected'
@@ -115,6 +116,11 @@ class RoomSyncManager {
   private hostConnection: DataConnection | null = null; // Used by players connecting to DM
   private clientConnections: Map<string, DataConnection> = new Map(); // Used by DM host
   private reconnectTimer: any = null;
+  private clientReconnectTimer: any = null;
+  private clientReconnectDeadline: any = null;
+  private wasExplicitLeave: boolean = false;
+  private isAutoRecoveringHost: boolean = false;
+  private hostRecoveryAttempts: number = 0;
 
   // Local multi-tab channel
   private channel: BroadcastChannel | null = null;
@@ -129,26 +135,59 @@ class RoomSyncManager {
       const savedRoom = localStorage.getItem('ttrpg_active_room');
       if (savedRoom) this.roomCode = savedRoom.toUpperCase();
       const savedName = localStorage.getItem('ttrpg_player_name');
-      if (savedName) this.peerName = savedName;
+      if (savedName && savedName.trim()) this.peerName = savedName.trim();
       const savedDm = localStorage.getItem('ttrpg_user_is_dm');
       if (savedDm !== null) this.isDm = savedDm === 'true';
     } catch {
       // ignore
     }
 
-    // Default State: The app must start completely Offline / Disconnected.
-    // Do NOT eagerly initialize PeerJS or attempt connection handshakes on page load or tab navigation.
-    this.status = 'offline';
-    this.statusText = 'Offline';
-
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
+        // If DM is actively hosting, preserve hosting flag across refresh
+        if (this.status === 'hosting' && this.isDm) {
+          try {
+            localStorage.setItem('ttrpg_is_hosting', 'true');
+            sessionStorage.setItem('ttrpg_is_hosting', 'true');
+          } catch {}
+        }
         this.cleanupPeer();
       });
     }
 
     // Setup local BroadcastChannel for multi-tab sync without starting WebRTC
     this.setupLocalChannel();
+
+    // Persistent Host State: Detect if DM was actively hosting before page reload
+    const wasHosting =
+      typeof window !== 'undefined' &&
+      (localStorage.getItem('ttrpg_is_hosting') === 'true' ||
+        sessionStorage.getItem('ttrpg_is_hosting') === 'true');
+
+    if (wasHosting && this.isDm) {
+      this.status = 'connecting';
+      this.statusText = 'Restoring host session...';
+      this.isAutoRecoveringHost = true;
+      setTimeout(() => {
+        this.startPeerHost(true);
+      }, 150);
+    } else {
+      // Player session recovery if player refreshed while connected
+      const wasPlayerJoined =
+        typeof window !== 'undefined' &&
+        sessionStorage.getItem('ttrpg_player_joined') === 'true';
+
+      if (wasPlayerJoined && !this.isDm) {
+        this.status = 'connecting';
+        this.statusText = 'Reconnecting to session...';
+        setTimeout(() => {
+          this.joinRoom();
+        }, 150);
+      } else {
+        this.status = 'offline';
+        this.statusText = 'Offline';
+      }
+    }
   }
 
   private setupLocalChannel() {
@@ -195,7 +234,7 @@ class RoomSyncManager {
         } catch {}
       }
     }
-    if (name) {
+    if (name !== undefined) {
       const cleanName = name.trim();
       if (cleanName && cleanName !== this.peerName) {
         this.peerName = cleanName;
@@ -219,11 +258,11 @@ class RoomSyncManager {
           this.hostConnection.send({
             type: 'PLAYER_HELLO',
             senderId: this.peerId,
-            senderName: this.peerName,
+            senderName: this.getPeerName(),
             isDm: this.isDm,
             timestamp: Date.now(),
             roomCode: this.roomCode,
-            payload: { name: this.peerName },
+            payload: { name: this.getPeerName() },
           });
         } catch {}
       } else if (this.status === 'hosting') {
@@ -263,14 +302,22 @@ class RoomSyncManager {
       };
     }
 
-    this.startPeerHost();
+    try {
+      localStorage.setItem('ttrpg_is_hosting', 'true');
+      sessionStorage.setItem('ttrpg_is_hosting', 'true');
+      localStorage.setItem('ttrpg_active_room', this.roomCode);
+      localStorage.setItem('ttrpg_user_is_dm', 'true');
+    } catch {}
+
+    this.hostRecoveryAttempts = 0;
+    this.startPeerHost(false);
     return { success: true };
   }
 
   /**
    * DM WebRTC Hosting initialization with public STUN servers and deterministic host ID
    */
-  private startPeerHost() {
+  private startPeerHost(isAutoRecovery = false, retryCount = 0) {
     this.cleanupPeer();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -278,7 +325,11 @@ class RoomSyncManager {
     }
 
     this.status = 'connecting';
-    this.statusText = 'Connecting to broker...';
+    this.statusText = isAutoRecovery
+      ? retryCount > 0
+        ? `Rebinding host ID (attempt ${retryCount}/5)...`
+        : 'Restoring host session...'
+      : 'Connecting to broker...';
     this.lastError = null;
     this.notifyPresence();
 
@@ -293,10 +344,16 @@ class RoomSyncManager {
         this.status = 'hosting';
         this.statusText = `Hosting: Room ${this.roomCode}`;
         this.lastError = null;
+        this.isAutoRecoveringHost = false;
+        this.hostRecoveryAttempts = 0;
+        try {
+          localStorage.setItem('ttrpg_is_hosting', 'true');
+          sessionStorage.setItem('ttrpg_is_hosting', 'true');
+        } catch {}
         this.claimRoomHostLocally();
         this.broadcast('ROOM_HOST_CLAIM', {
           hostPeerId: this.peerId,
-          hostName: this.peerName,
+          hostName: this.getPeerName(),
         });
         this.notifyPresence();
       });
@@ -311,7 +368,21 @@ class RoomSyncManager {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
-        // Stop runaway retry loops! Do not auto-reconnect on unavailable-id or broker errors.
+
+        // If ID is still temporarily held by broker after DM tab refresh, retry automatically with backoff
+        if (err?.type === 'unavailable-id' && (isAutoRecovery || retryCount < 5)) {
+          const nextAttempt = retryCount + 1;
+          this.hostRecoveryAttempts = nextAttempt;
+          this.status = 'connecting';
+          this.statusText = `Rebinding host ID (attempt ${nextAttempt}/5)...`;
+          this.notifyPresence();
+          this.reconnectTimer = setTimeout(() => {
+            this.cleanupPeer();
+            this.startPeerHost(isAutoRecovery, nextAttempt);
+          }, 800);
+          return;
+        }
+
         this.status = 'error';
         const errorDetail =
           err?.type === 'unavailable-id'
@@ -450,6 +521,10 @@ class RoomSyncManager {
    * Player Client Join Trigger: On clicking "Join Room", connects to the DM host via WebRTC
    */
   public joinRoom(): void {
+    this.wasExplicitLeave = false;
+    try {
+      sessionStorage.setItem('ttrpg_player_joined', 'true');
+    } catch {}
     this.startPeerClient();
   }
 
@@ -477,7 +552,7 @@ class RoomSyncManager {
 
       peer.on('open', (id) => {
         this.peerId = id;
-        this.statusText = 'Connecting to broker...';
+        this.statusText = 'Connecting to DM...';
         this.connectToHost(peer, hostId);
       });
 
@@ -487,6 +562,12 @@ class RoomSyncManager {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+
+        // If in reconnecting grace period, don't throw terminal error; retry interval will handle it
+        if (this.status === 'reconnecting') {
+          return;
+        }
+
         if (err.type === 'peer-unavailable') {
           this.status = 'disconnected';
           this.statusText = 'Disconnected / Host Closed';
@@ -509,7 +590,9 @@ class RoomSyncManager {
       });
 
       peer.on('close', () => {
-        if (this.status === 'connected' || this.status === 'connecting') {
+        if (!this.wasExplicitLeave && (this.status === 'connected' || this.status === 'reconnecting')) {
+          this.handlePlayerReconnectGracePeriod(hostId);
+        } else if (this.status === 'connected' || this.status === 'connecting') {
           this.status = 'disconnected';
           this.statusText = 'Disconnected / Host Closed';
           this.notifyPresence();
@@ -536,19 +619,29 @@ class RoomSyncManager {
       this.hostConnection = conn;
 
       conn.on('open', () => {
+        // Successfully connected/reconnected! Clear reconnect timers and restore connected state
+        if (this.clientReconnectTimer) {
+          clearInterval(this.clientReconnectTimer);
+          this.clientReconnectTimer = null;
+        }
+        if (this.clientReconnectDeadline) {
+          clearTimeout(this.clientReconnectDeadline);
+          this.clientReconnectDeadline = null;
+        }
+
         this.status = 'connected';
         this.statusText = 'Connected to DM';
         this.lastError = null;
 
-        // Send Player Hello Handshake
+        // Send Player Hello Handshake strictly with configured display name
         conn.send({
           type: 'PLAYER_HELLO',
           senderId: this.peerId,
-          senderName: this.peerName,
+          senderName: this.getPeerName(),
           isDm: false,
           timestamp: Date.now(),
           roomCode: this.roomCode,
-          payload: { name: this.peerName },
+          payload: { name: this.getPeerName() },
         });
 
         this.notifyPresence();
@@ -589,6 +682,9 @@ class RoomSyncManager {
               }
               if (typeof combat.round === 'number') {
                 localStorage.setItem('ttrpg_combat_round', combat.round.toString());
+              }
+              if (combat.combatStatus) {
+                localStorage.setItem('ttrpg_combat_status', combat.combatStatus);
               }
             } catch {}
 
@@ -635,8 +731,17 @@ class RoomSyncManager {
           return;
         }
 
-        // Host released room
+        // Host released room intentionally
         if (data.type === 'ROOM_HOST_RELEASE') {
+          this.wasExplicitLeave = true;
+          if (this.clientReconnectTimer) {
+            clearInterval(this.clientReconnectTimer);
+            this.clientReconnectTimer = null;
+          }
+          if (this.clientReconnectDeadline) {
+            clearTimeout(this.clientReconnectDeadline);
+            this.clientReconnectDeadline = null;
+          }
           this.status = 'disconnected';
           this.statusText = 'Disconnected / Host Closed';
           this.notifyPresence();
@@ -647,20 +752,43 @@ class RoomSyncManager {
       });
 
       conn.on('close', () => {
-        this.status = 'disconnected';
-        this.statusText = 'Disconnected / Host Closed';
-        this.notifyPresence();
+        if (this.wasExplicitLeave) {
+          this.status = 'offline';
+          this.statusText = 'Offline';
+          this.notifyPresence();
+          return;
+        }
+
+        // Client Reconnect Grace Period:
+        // When a player's connection drops due to a DM tab reload, do not instantly kick them to offline screen.
+        // Transition to "Reconnecting to Host..." state with automatic retry window.
+        if (this.status === 'connected' || this.status === 'reconnecting') {
+          this.handlePlayerReconnectGracePeriod(hostId);
+        } else {
+          this.status = 'disconnected';
+          this.statusText = 'Disconnected / Host Closed';
+          this.notifyPresence();
+        }
       });
 
       conn.on('error', (err: any) => {
         console.error('Player connection data channel error:', err);
-        this.status = 'error';
-        this.statusText = 'Connection Failed - Click to Retry';
-        this.lastError = err?.message || 'Data channel error';
-        this.notifyPresence();
+        if (this.status === 'reconnecting') {
+          // Grace period retry interval will handle retrying connection
+          return;
+        }
+        if (this.status === 'connected') {
+          this.handlePlayerReconnectGracePeriod(hostId);
+        } else {
+          this.status = 'error';
+          this.statusText = 'Connection Failed - Click to Retry';
+          this.lastError = err?.message || 'Data channel error';
+          this.notifyPresence();
+        }
       });
     } catch (err: any) {
       console.error('Failed to initiate connection to host:', err);
+      if (this.status === 'reconnecting') return;
       this.status = 'disconnected';
       this.statusText = 'Disconnected / Host Closed';
       this.lastError = err?.message || 'Failed to connect to host';
@@ -668,12 +796,98 @@ class RoomSyncManager {
     }
   }
 
+  /**
+   * Client Reconnect Grace Period:
+   * Retries connection every 1.5s for up to 10s without kicking the player to offline screen.
+   */
+  private handlePlayerReconnectGracePeriod(hostId: string) {
+    if (this.wasExplicitLeave) return;
+
+    if (this.status === 'reconnecting' && this.clientReconnectTimer) {
+      return;
+    }
+
+    this.status = 'reconnecting';
+    this.statusText = 'Reconnecting to Host...';
+    this.lastError = null;
+    this.notifyPresence();
+
+    if (this.clientReconnectTimer) {
+      clearInterval(this.clientReconnectTimer);
+      this.clientReconnectTimer = null;
+    }
+    if (this.clientReconnectDeadline) {
+      clearTimeout(this.clientReconnectDeadline);
+      this.clientReconnectDeadline = null;
+    }
+
+    // 10s automatic retry window
+    const deadlineMs = 10000;
+    let attempt = 0;
+
+    this.clientReconnectDeadline = setTimeout(() => {
+      if (this.status === 'reconnecting') {
+        if (this.clientReconnectTimer) {
+          clearInterval(this.clientReconnectTimer);
+          this.clientReconnectTimer = null;
+        }
+        this.status = 'disconnected';
+        this.statusText = 'Disconnected / Host Closed';
+        this.lastError = 'Host connection timed out. Click to Retry.';
+        this.notifyPresence();
+      }
+    }, deadlineMs);
+
+    const attemptConnect = () => {
+      if (this.status === 'connected' || this.wasExplicitLeave) {
+        if (this.clientReconnectTimer) {
+          clearInterval(this.clientReconnectTimer);
+          this.clientReconnectTimer = null;
+        }
+        return;
+      }
+
+      attempt++;
+      this.statusText = `Reconnecting to Host (attempt ${attempt})...`;
+      this.notifyPresence();
+
+      if (!this.peerInstance || this.peerInstance.destroyed) {
+        const playerId = getPlayerPeerId(this.roomCode);
+        try {
+          const peer = new Peer(playerId, PEER_ICE_CONFIG);
+          this.peerInstance = peer;
+          peer.on('open', (id) => {
+            this.peerId = id;
+            this.connectToHost(peer, hostId);
+          });
+          peer.on('error', (err: any) => {
+            console.warn('Player peer error during reconnect attempt:', err?.type || err);
+          });
+        } catch (err) {
+          console.warn('Failed to re-instantiate peer client during grace period:', err);
+        }
+      } else if (this.peerInstance.disconnected && !this.peerInstance.destroyed) {
+        try {
+          this.peerInstance.reconnect();
+        } catch {}
+      } else if (this.peerInstance.open) {
+        this.connectToHost(this.peerInstance, hostId);
+      }
+    };
+
+    // Immediate attempt
+    attemptConnect();
+
+    // Repeat every 1.5s
+    this.clientReconnectTimer = setInterval(attemptConnect, 1500);
+  }
+
   private broadcastPresenceToPeers() {
     const allPeers = this.getAllPeersList();
     const presenceMsg: RoomMessage = {
       type: 'ROOM_PRESENCE_SYNC',
       senderId: this.peerId,
-      senderName: this.peerName,
+      senderName: this.getPeerName(),
       isDm: this.isDm,
       timestamp: Date.now(),
       roomCode: this.roomCode,
@@ -739,14 +953,18 @@ class RoomSyncManager {
   }
 
   public unhostRoom(): void {
+    try {
+      localStorage.removeItem('ttrpg_is_hosting');
+      sessionStorage.removeItem('ttrpg_is_hosting');
+      localStorage.removeItem(`ttrpg_room_host_${this.roomCode}`);
+    } catch {}
+
+    this.isAutoRecoveringHost = false;
+    this.hostRecoveryAttempts = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-
-    try {
-      localStorage.removeItem(`ttrpg_room_host_${this.roomCode}`);
-    } catch {}
 
     this.broadcast('ROOM_HOST_RELEASE', {
       hostPeerId: this.peerId,
@@ -768,12 +986,26 @@ class RoomSyncManager {
   }
 
   public leaveRoom(): void {
+    this.wasExplicitLeave = true;
+    try {
+      sessionStorage.removeItem('ttrpg_player_joined');
+    } catch {}
+
+    if (this.clientReconnectTimer) {
+      clearInterval(this.clientReconnectTimer);
+      this.clientReconnectTimer = null;
+    }
+    if (this.clientReconnectDeadline) {
+      clearTimeout(this.clientReconnectDeadline);
+      this.clientReconnectDeadline = null;
+    }
+
     if (this.hostConnection && this.hostConnection.open) {
       try {
         this.hostConnection.send({
           type: 'PLAYER_LEAVE',
           senderId: this.peerId,
-          senderName: this.peerName,
+          senderName: this.getPeerName(),
           isDm: this.isDm,
           timestamp: Date.now(),
           roomCode: this.roomCode,
@@ -807,6 +1039,14 @@ class RoomSyncManager {
   }
 
   private cleanupPeer() {
+    if (this.clientReconnectTimer) {
+      clearInterval(this.clientReconnectTimer);
+      this.clientReconnectTimer = null;
+    }
+    if (this.clientReconnectDeadline) {
+      clearTimeout(this.clientReconnectDeadline);
+      this.clientReconnectDeadline = null;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -1030,7 +1270,7 @@ class RoomSyncManager {
     // Local user
     roster.push({
       id: this.peerId,
-      name: this.peerName || (this.isDm ? 'Dungeon Master' : 'Player'),
+      name: this.getPeerName(),
       isDm: this.isDm,
       isLocal: true,
       lastSeen: Date.now(),
@@ -1042,7 +1282,7 @@ class RoomSyncManager {
       if (peer.id !== this.peerId && !roster.some((m) => m.id === peer.id)) {
         roster.push({
           id: peer.id,
-          name: peer.name || (peer.isDm ? 'Dungeon Master' : 'Player'),
+          name: peer.name?.trim() || (peer.isDm ? 'Dungeon Master' : 'Player'),
           isDm: peer.isDm,
           isLocal: false,
           lastSeen: peer.lastSeen,
@@ -1051,7 +1291,7 @@ class RoomSyncManager {
     }
 
     // If connected to DM host and host peer is not yet in peers map, include host
-    if (!this.isDm && this.status === 'connected') {
+    if (!this.isDm && (this.status === 'connected' || this.status === 'reconnecting')) {
       const hostPeerId = getHostPeerId(this.roomCode);
       if (!roster.some((m) => m.isDm)) {
         roster.unshift({
@@ -1094,7 +1334,12 @@ class RoomSyncManager {
   }
 
   public getPeerName(): string {
-    return this.peerName;
+    try {
+      const saved = localStorage.getItem('ttrpg_player_name');
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
+    if (this.peerName && this.peerName.trim()) return this.peerName.trim();
+    return this.isDm ? 'Dungeon Master' : 'Adventurer';
   }
 
   public getPeers(): PeerInfo[] {
@@ -1106,7 +1351,7 @@ class RoomSyncManager {
     if (this.status === 'hosting') {
       return this.clientConnections.size + 1;
     }
-    if (this.status === 'connected') {
+    if (this.status === 'connected' || this.status === 'reconnecting') {
       return this.peers.size + 1;
     }
     return 1;
@@ -1138,11 +1383,11 @@ class RoomSyncManager {
     if (this.isDm) {
       return {
         isHosted: this.status === 'hosting',
-        hostName: this.peerName,
+        hostName: this.getPeerName(),
         hostPeerId: this.peerId,
       };
     }
-    if (this.status === 'connected') {
+    if (this.status === 'connected' || this.status === 'reconnecting') {
       return {
         isHosted: true,
         hostName: this.activeHostName || 'Dungeon Master',
