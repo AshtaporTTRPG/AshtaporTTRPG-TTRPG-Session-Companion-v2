@@ -21,6 +21,20 @@ export default function App() {
   const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(false);
   const [roomCode, setRoomCode] = useState<string>(roomSync.getRoomCode());
 
+  // Handle joining via URL parameters (e.g. ?room=DRAGON-77)
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryRoom = urlParams.get('room');
+      if (queryRoom) {
+        const clean = queryRoom.trim().toUpperCase();
+        setRoomCode(clean);
+        setIsDm(false); // Joining via shareable link defaults to Player Mode
+        roomSync.connect(clean, roomSync.getPeerName(), false);
+      }
+    } catch {}
+  }, []);
+
   // Keep roomSync updated when role changes
   useEffect(() => {
     roomSync.connect(roomCode, roomSync.getPeerName(), isDm);

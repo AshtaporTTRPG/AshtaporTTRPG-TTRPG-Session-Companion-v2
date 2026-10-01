@@ -142,7 +142,7 @@ class LiveFeedSyncManager {
         const pairedSummary =
           roll.pairedRolls && roll.pairedRolls.length > 0
             ? roll.pairedRolls
-                .map((p) => `Pair ${p.pairIndex}: [${p.selected}] (discarded ${p.discarded})`)
+                .map((p) => `[${p.selected}, ~~${p.discarded}~~]`)
                 .join(', ')
             : null;
 
@@ -300,7 +300,7 @@ class LiveFeedSyncManager {
     const pairedSummary =
       roll.pairedRolls && roll.pairedRolls.length > 0
         ? roll.pairedRolls
-            .map((p) => `Pair ${p.pairIndex}: [${p.selected}] (discarded ${p.discarded})`)
+            .map((p) => `[${p.selected}, ~~${p.discarded}~~]`)
             .join(', ')
         : null;
 

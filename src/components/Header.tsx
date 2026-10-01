@@ -39,12 +39,14 @@ export const Header: React.FC<HeaderProps> = ({
   const [soundOn, setSoundOn] = useState(isAudioEnabled());
   const [connectedCount, setConnectedCount] = useState<number>(() => roomSync.getConnectedCount());
   const [isHosted, setIsHosted] = useState<boolean>(() => roomSync.isRoomHosted());
+  const [connectionStatus, setConnectionStatus] = useState<string>(() => roomSync.getConnectionStatus().status);
   const [roleError, setRoleError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = roomSync.subscribePresence((state) => {
       setConnectedCount(state.connectedCount);
       setIsHosted(state.isHosted);
+      setConnectionStatus(state.status);
     });
     return () => unsub();
   }, [roomCode]);
@@ -144,23 +146,36 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Zone: Session Button, Distinct Mode Buttons, Audio, Guide */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap sm:flex-nowrap">
-            {/* Session Button with Connected Player Count & Live vs Offline Distinction */}
+            {/* Session Button with Connected Player Count & Real-Time Connection Status */}
             <button
               onClick={onOpenRoomModal}
-              title={`Room ${roomCode} - ${isHosted ? 'Session Hosted & Live' : 'Room Not Hosted / Offline'}`}
+              title={`Room ${roomCode} - ${connectionStatus === 'connected' ? 'Session Connected & Live' : connectionStatus === 'connecting' ? 'Connecting to Room...' : connectionStatus === 'disconnected' ? 'Host Disconnected' : 'Room Offline'}`}
               className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-mono font-bold rounded-lg border transition-all cursor-pointer shadow-sm ${
-                isHosted
+                connectionStatus === 'connected' || (isDm && isHosted)
                   ? 'bg-emerald-950/80 border-emerald-500/70 text-emerald-300 hover:bg-emerald-900/90 hover:border-emerald-400'
+                  : connectionStatus === 'connecting'
+                  ? 'bg-amber-950/80 border-amber-500/70 text-amber-300 hover:bg-amber-900/90'
+                  : connectionStatus === 'disconnected'
+                  ? 'bg-rose-950/80 border-rose-600/70 text-rose-300 hover:bg-rose-900/90'
                   : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:text-slate-300'
               }`}
             >
               <span className="relative flex h-2 w-2">
-                {isHosted && (
+                {(connectionStatus === 'connected' || (isDm && isHosted)) && (
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                {connectionStatus === 'connecting' && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                 )}
                 <span
                   className={`relative inline-flex rounded-full h-2 w-2 ${
-                    isHosted ? 'bg-emerald-400' : 'bg-slate-500'
+                    connectionStatus === 'connected' || (isDm && isHosted)
+                      ? 'bg-emerald-400'
+                      : connectionStatus === 'connecting'
+                      ? 'bg-amber-400'
+                      : connectionStatus === 'disconnected'
+                      ? 'bg-rose-500'
+                      : 'bg-slate-500'
                   }`}
                 ></span>
               </span>
@@ -169,12 +184,22 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
               <span
                 className={`text-[9px] uppercase px-1.5 py-0.2 rounded font-bold tracking-wider ${
-                  isHosted
+                  connectionStatus === 'connected' || (isDm && isHosted)
                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : connectionStatus === 'connecting'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                    : connectionStatus === 'disconnected'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                     : 'bg-slate-800 text-slate-400 border border-slate-700'
                 }`}
               >
-                {isHosted ? 'LIVE' : 'OFFLINE'}
+                {connectionStatus === 'connected' || (isDm && isHosted)
+                  ? 'LIVE'
+                  : connectionStatus === 'connecting'
+                  ? 'CONNECTING...'
+                  : connectionStatus === 'disconnected'
+                  ? 'DISCONNECTED'
+                  : 'OFFLINE'}
               </span>
             </button>
 

@@ -95,12 +95,11 @@ export function executeDiceRoll({
     totalDiceCount += entry.count;
 
     if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
-      // MULTI-d20 ADVANTAGE / DISADVANTAGE RESOLUTION:
-      // Rolling N d20s evaluates as N independent contested rolls, requiring 2N total dice rolled.
-      // Grouped into N distinct pairs: [(Roll A1, Roll B1), ... (Roll AN, Roll BN)].
-      // Advantage: max(Ak, Bk). Disadvantage: min(Ak, Bk).
-      // Resolved output pool contains exactly N values (the winning/selected die from each pair).
-      const numPairs = Math.max(1, entry.count);
+      // D&D 5e ADVANTAGE / DISADVANTAGE RESOLUTION:
+      // Advantage: Roll 2d20, keep the highest roll: Math.max(die1, die2) + modifier
+      // Disadvantage: Roll 2d20, keep the lowest roll: Math.min(die1, die2) + modifier
+      // Supports N pairs if multi-dice pool specified, but 1 or 2 d20s evaluates as exactly 1 pair (2 dice rolled)
+      const numPairs = entry.count > 2 ? Math.floor(entry.count / 2) : 1;
       for (let k = 0; k < numPairs; k++) {
         const valA = rollSingleDie(20);
         const valB = rollSingleDie(20);
@@ -125,7 +124,7 @@ export function executeDiceRoll({
         if (selected === 1) hasFumble = true;
       }
 
-      // Sum Mode sums ONLY the N winning dice values; discarded values are completely excluded!
+      // Sum Mode sums ONLY the winning dice values; discarded values are completely excluded!
       const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
       sumTotal += groupSum;
     } else {
@@ -157,8 +156,13 @@ export function executeDiceRoll({
 
   const total = sumTotal + modifier;
 
-  // Build formula string, e.g. "2d20 + 1d8 + 2d6 + 4"
-  const formulaParts = poolEntries.map((e) => `${e.count}${e.diceType}`);
+  // Build formula string, e.g. "2d20 + 4 (advantage)"
+  const formulaParts = poolEntries.map((e) => {
+    if (e.diceType === 'd20' && advantageMode !== 'normal') {
+      return '2d20';
+    }
+    return `${e.count}${e.diceType}`;
+  });
   let formula = formulaParts.join(' + ');
   if (modifier !== 0) {
     formula += modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`;
@@ -171,7 +175,7 @@ export function executeDiceRoll({
   const individualParts = poolBreakdown.map((b) => {
     if (b.pairedRolls && b.pairedRolls.length > 0) {
       const pairStrs = b.pairedRolls.map(
-        (p) => `Pair ${p.pairIndex}: [${p.selected}] (discarded ${p.discarded})`
+        (p) => `[${p.selected}, ~~${p.discarded}~~]`
       );
       return `${b.dieType} (${advantageMode}): ${pairStrs.join(', ')}`;
     }

@@ -1216,13 +1216,45 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm }) => {
                       <div className="flex items-baseline justify-between">
                         {/* Breakdown */}
                         <div className="text-xs text-slate-400 font-mono">
-                          <span>{roll.formula || `${roll.count > 1 ? `${roll.count}` : ''}${roll.diceType}`}</span>
-                          {roll.advantageMode !== 'normal' && (
-                            <span className="ml-1 text-[11px] text-amber-300">({roll.advantageMode})</span>
-                          )}
-                          <span>: [ {(roll.rolls || [roll.total]).join(', ')} ]</span>
-                          {roll.modifier !== 0 && (
-                            <span> {roll.modifier > 0 ? `+ ${roll.modifier}` : `- ${Math.abs(roll.modifier)}`}</span>
+                          {roll.pairedRolls && roll.pairedRolls.length > 0 ? (
+                            <span className="inline-flex items-center gap-1 flex-wrap">
+                              {roll.pairedRolls.map((pair) => (
+                                <span key={pair.pairIndex} className="inline-flex items-center gap-0.5">
+                                  <span>[</span>
+                                  <span
+                                    className={
+                                      pair.selected === 20
+                                        ? 'font-bold text-amber-400'
+                                        : pair.selected === 1
+                                        ? 'font-bold text-rose-400'
+                                        : 'font-bold text-slate-200'
+                                    }
+                                  >
+                                    {pair.selected}
+                                  </span>
+                                  <span>, </span>
+                                  <span className="line-through decoration-rose-500 text-slate-500 font-semibold opacity-75">
+                                    {pair.discarded}
+                                  </span>
+                                  <span>]</span>
+                                </span>
+                              ))}
+                              {roll.modifier !== 0 && (
+                                <span> {roll.modifier > 0 ? `+ ${roll.modifier}` : `- ${Math.abs(roll.modifier)}`}</span>
+                              )}
+                              <span> = </span>
+                            </span>
+                          ) : (
+                            <>
+                              <span>{roll.formula || `${roll.count > 1 ? `${roll.count}` : ''}${roll.diceType}`}</span>
+                              {roll.advantageMode !== 'normal' && (
+                                <span className="ml-1 text-[11px] text-amber-300">({roll.advantageMode})</span>
+                              )}
+                              <span>: [ {(roll.rolls || [roll.total]).join(', ')} ]</span>
+                              {roll.modifier !== 0 && (
+                                <span> {roll.modifier > 0 ? `+ ${roll.modifier}` : `- ${Math.abs(roll.modifier)}`}</span>
+                              )}
+                            </>
                           )}
                         </div>
 

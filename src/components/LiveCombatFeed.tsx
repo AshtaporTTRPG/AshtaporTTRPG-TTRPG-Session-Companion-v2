@@ -54,7 +54,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
 
     const rollObj = executeDiceRoll({
       diceType: `d${sides}` as DieType,
-      count: sides === 20 && advMode !== 'normal' ? 2 : 1,
+      count: 1,
       advantageMode: advMode,
       sender: rollerName,
       isDm,
@@ -319,28 +319,46 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                     </div>
                   ) : (
                     <div className="space-y-1 pt-0.5">
-                      <div className="flex items-baseline justify-between">
-                        <div className="text-[11px] font-mono text-slate-400 truncate max-w-[200px] sm:max-w-none">
-                          {formula || evt.message}
-                          {rolls && rolls.length > 0 && (
-                            <span className="text-slate-500 ml-1">
-                              [{rolls.join(', ')}]
-                            </span>
-                          )}
-                        </div>
+                      {pairedRolls && pairedRolls.length > 0 ? (
+                        <div className="flex items-baseline justify-between gap-2">
+                          <div className="text-xs font-mono text-slate-300 flex items-center flex-wrap gap-1.5">
+                            {pairedRolls.map((pair) => (
+                              <span
+                                key={pair.pairIndex}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 shadow-sm"
+                              >
+                                <span>[</span>
+                                <span
+                                  className={`font-bold ${
+                                    pair.selected === 20
+                                      ? 'text-amber-400'
+                                      : pair.selected === 1
+                                      ? 'text-rose-400'
+                                      : 'text-amber-200'
+                                  }`}
+                                  title={`Kept: ${pair.selected}`}
+                                >
+                                  {pair.selected}
+                                </span>
+                                <span className="text-slate-500">,</span>
+                                <span
+                                  className="line-through decoration-rose-500 text-slate-500 font-semibold opacity-75"
+                                  title={`Discarded: ${pair.discarded}`}
+                                >
+                                  {pair.discarded}
+                                </span>
+                                <span>]</span>
+                              </span>
+                            ))}
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {isNat20 && (
-                            <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-bold text-[9px] tracking-wider animate-pulse">
-                              NAT 20
-                            </span>
-                          )}
-                          {isNat1 && (
-                            <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] tracking-wider">
-                              NAT 1
-                            </span>
-                          )}
-                          {typeof total === 'number' && (
+                            {modifier !== undefined && modifier !== 0 && (
+                              <span className="text-slate-400 font-semibold">
+                                {modifier > 0 ? `+ ${modifier}` : `- ${Math.abs(modifier)}`}
+                              </span>
+                            )}
+
+                            <span className="text-slate-400 font-bold">=</span>
+
                             <span
                               className={`text-base font-bold font-mono ${
                                 isNat20
@@ -352,41 +370,61 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                             >
                               {total}
                             </span>
-                          )}
-                        </div>
-                      </div>
 
-                      {pairedRolls && pairedRolls.length > 0 && (
-                        <div className="pt-1 border-t border-slate-800/60 flex flex-wrap items-center gap-1 text-[11px] font-mono">
-                          <span className="text-[9px] uppercase font-bold text-amber-300">
-                            {advantageModeVal || 'pairs'}:
-                          </span>
-                          {pairedRolls.map((pair) => (
-                            <span
-                              key={pair.pairIndex}
-                              className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-slate-900 border border-slate-800 text-[10px]"
-                            >
-                              <span className="text-slate-500">P{pair.pairIndex}:</span>
+                            <span className="text-[10px] font-semibold text-amber-400/90 ml-0.5">
+                              for {advantageModeVal === 'advantage' ? 'Advantage' : 'Disadvantage'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isNat20 && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-bold text-[9px] tracking-wider animate-pulse">
+                                NAT 20
+                              </span>
+                            )}
+                            {isNat1 && (
+                              <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] tracking-wider">
+                                NAT 1
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-baseline justify-between">
+                          <div className="text-[11px] font-mono text-slate-400 truncate max-w-[200px] sm:max-w-none">
+                            {formula || evt.message}
+                            {rolls && rolls.length > 0 && (
+                              <span className="text-slate-500 ml-1">
+                                [{rolls.join(', ')}]
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isNat20 && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-bold text-[9px] tracking-wider animate-pulse">
+                                NAT 20
+                              </span>
+                            )}
+                            {isNat1 && (
+                              <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] tracking-wider">
+                                NAT 1
+                              </span>
+                            )}
+                            {typeof total === 'number' && (
                               <span
-                                className={`font-bold ${
-                                  pair.selected === 20
-                                    ? 'text-amber-400'
-                                    : pair.selected === 1
+                                className={`text-base font-bold font-mono ${
+                                  isNat20
+                                    ? 'text-amber-300'
+                                    : isNat1
                                     ? 'text-rose-400'
-                                    : 'text-amber-200'
+                                    : 'text-slate-100'
                                 }`}
                               >
-                                [{pair.selected}]
+                                {total}
                               </span>
-                              <span className="text-slate-500 flex items-center">
-                                (drop{' '}
-                                <span className="line-through decoration-rose-500 text-slate-400 font-semibold">
-                                  {pair.discarded}
-                                </span>
-                                )
-                              </span>
-                            </span>
-                          ))}
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
