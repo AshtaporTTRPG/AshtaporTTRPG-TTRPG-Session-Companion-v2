@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { roomSync, PeerInfo, ConnectionStatus } from '../utils/roomSync';
+import { roomSync, PeerInfo, RosterMember, ConnectionStatus } from '../utils/roomSync';
 import {
   Users,
   Copy,
@@ -38,6 +38,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [roster, setRoster] = useState<RosterMember[]>(() => roomSync.getConnectedRoster());
   const [connectedCount, setConnectedCount] = useState<number>(1);
   const [isHosted, setIsHosted] = useState<boolean>(false);
   const [hostName, setHostName] = useState<string | undefined>(undefined);
@@ -51,6 +52,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
       setNameInput(roomSync.getPeerName());
       setErrorMessage(null);
       setPeers(roomSync.getPeers());
+      setRoster(roomSync.getConnectedRoster());
       setConnectedCount(roomSync.getConnectedCount());
 
       const hostInfo = roomSync.getHostInfo();
@@ -66,6 +68,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
 
       const unsub = roomSync.subscribePresence((state) => {
         setPeers(state.peers);
+        setRoster(state.roster || roomSync.getConnectedRoster());
         setConnectedCount(state.connectedCount);
         setIsHosted(state.isHosted);
         setHostName(state.hostName);
@@ -411,35 +414,75 @@ export const RoomModal: React.FC<RoomModalProps> = ({
             />
           </div>
 
-          {/* Active Connected Peers List & Counter */}
-          <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+          {/* Dedicated Connected Players Roster */}
+          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5 shadow-inner">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+              <span className="font-semibold text-slate-200 text-xs flex items-center gap-1.5 font-display uppercase tracking-wider">
                 <Users className="w-3.5 h-3.5 text-emerald-400" />
-                Connected in Room ({connectedCount}):
+                Connected Players ({roster.length}):
               </span>
-              <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
-                ● Live Cross-Device Sync
+              <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                </span>
+                <span>Live WebRTC Roster</span>
               </span>
             </div>
 
-            <div className="flex flex-wrap gap-1.5 pt-1 max-h-32 overflow-y-auto">
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-200">
-                {isDm ? <Crown className="w-3 h-3 text-amber-400" /> : <Shield className="w-3 h-3 text-cyan-400" />}
-                <span className="font-semibold">{nameInput || 'You'}</span> (You - {isDm ? 'DM Host' : 'Player'})
-              </span>
-
-              {peers.map((peer) => (
-                <span
-                  key={peer.id}
-                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300"
+            <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
+              {roster.map((member) => (
+                <div
+                  key={member.id}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-colors ${
+                    member.isLocal
+                      ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-200 hover:border-slate-700'
+                  }`}
                 >
-                  {peer.isDm ? <Crown className="w-3 h-3 text-amber-400" /> : <Shield className="w-3 h-3 text-slate-400" />}
-                  <span>{peer.name}</span>
-                  <span className="text-[9px] text-slate-500 font-mono">({peer.isDm ? 'DM' : 'Player'})</span>
-                </span>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0 shadow-sm shadow-emerald-400/50"></span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {member.isDm ? (
+                        <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      ) : (
+                        <Shield className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      )}
+                      <span className="font-bold truncate text-slate-100">
+                        {member.name}
+                      </span>
+                      {member.isLocal && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          You
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider ${
+                        member.isDm
+                          ? 'bg-amber-950 text-amber-300 border border-amber-500/60'
+                          : 'bg-cyan-950 text-cyan-300 border border-cyan-700/60'
+                      }`}
+                    >
+                      {member.isDm ? 'DM (Host)' : 'Player'}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
+
+            {roster.length <= 1 && (
+              <p className="text-[11px] text-slate-500 italic pt-1 border-t border-slate-800/60">
+                {connectionStatus === 'hosting'
+                  ? 'Waiting for players to join with room code... Share your Room Code or direct Join Link above.'
+                  : connectionStatus === 'connected'
+                  ? 'Connected to session room.'
+                  : 'Connect to room to sync live player presence.'}
+              </p>
+            )}
           </div>
 
           {/* Action Buttons */}

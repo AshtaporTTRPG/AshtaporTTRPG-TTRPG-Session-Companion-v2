@@ -11,6 +11,14 @@ export interface PeerInfo {
   lastSeen: number;
 }
 
+export interface RosterMember {
+  id: string;
+  name: string;
+  isDm: boolean;
+  isLocal: boolean;
+  lastSeen?: number;
+}
+
 export type ConnectionStatus =
   | 'offline'
   | 'connecting'
@@ -21,6 +29,7 @@ export type ConnectionStatus =
 
 export interface PresenceState {
   peers: PeerInfo[];
+  roster: RosterMember[];
   connectedCount: number;
   isHosted: boolean;
   hostName?: string;
@@ -47,6 +56,7 @@ export interface RoomMessage {
     | 'ROOM_HOST_CLAIM'
     | 'ROOM_HOST_RELEASE'
     | 'PLAYER_HELLO'
+    | 'PLAYER_LEAVE'
     | 'ROOM_PRESENCE_SYNC'
     | 'INITIAL_STATE_SYNC';
   senderId: string;
@@ -174,6 +184,7 @@ class RoomSyncManager {
    */
   public configure(newRoomCode?: string, name?: string, isDmRole?: boolean): void {
     let roomChanged = false;
+    let nameChanged = false;
     if (newRoomCode) {
       const clean = newRoomCode.trim().toUpperCase();
       if (clean && clean !== this.roomCode) {
@@ -188,6 +199,7 @@ class RoomSyncManager {
       const cleanName = name.trim();
       if (cleanName && cleanName !== this.peerName) {
         this.peerName = cleanName;
+        nameChanged = true;
         try {
           localStorage.setItem('ttrpg_player_name', this.peerName);
         } catch {}
@@ -198,6 +210,25 @@ class RoomSyncManager {
       try {
         localStorage.setItem('ttrpg_user_is_dm', String(isDmRole));
       } catch {}
+    }
+
+    if (nameChanged) {
+      // Broadcast updated display name across WebRTC network immediately
+      if (this.status === 'connected' && this.hostConnection && this.hostConnection.open) {
+        try {
+          this.hostConnection.send({
+            type: 'PLAYER_HELLO',
+            senderId: this.peerId,
+            senderName: this.peerName,
+            isDm: this.isDm,
+            timestamp: Date.now(),
+            roomCode: this.roomCode,
+            payload: { name: this.peerName },
+          });
+        } catch {}
+      } else if (this.status === 'hosting') {
+        this.broadcastPresenceToPeers();
+      }
     }
 
     if (roomChanged) {
@@ -332,7 +363,7 @@ class RoomSyncManager {
         combat: this.getCombatSnapshot(),
         feed: this.getFeedSnapshot(),
         hostName: this.peerName,
-        peers: this.getPeers(),
+        peers: this.getAllPeersList(),
       };
 
       try {
@@ -372,6 +403,15 @@ class RoomSyncManager {
           isDm: false,
           lastSeen: Date.now(),
         });
+        this.broadcastPresenceToPeers();
+        this.notifyPresence();
+        return;
+      }
+
+      if (data.type === 'PLAYER_LEAVE') {
+        const pId = data.senderId || conn.peer;
+        this.clientConnections.delete(pId);
+        this.peers.delete(pId);
         this.broadcastPresenceToPeers();
         this.notifyPresence();
         return;
@@ -629,17 +669,17 @@ class RoomSyncManager {
   }
 
   private broadcastPresenceToPeers() {
-    const peersList = this.getPeers();
-    const presenceMsg = {
+    const allPeers = this.getAllPeersList();
+    const presenceMsg: RoomMessage = {
       type: 'ROOM_PRESENCE_SYNC',
       senderId: this.peerId,
       senderName: this.peerName,
-      isDm: true,
+      isDm: this.isDm,
       timestamp: Date.now(),
       roomCode: this.roomCode,
       payload: {
-        peers: peersList,
-        connectedCount: this.clientConnections.size + 1,
+        peers: allPeers,
+        connectedCount: allPeers.length,
       },
     };
 
@@ -650,6 +690,21 @@ class RoomSyncManager {
         } catch {}
       }
     });
+
+    if (this.channel) {
+      try {
+        this.channel.postMessage(presenceMsg);
+      } catch {}
+    }
+  }
+
+  public getCombatStatus(): 'setup' | 'active' {
+    try {
+      const saved = localStorage.getItem('ttrpg_combat_status');
+      return saved === 'active' ? 'active' : 'setup';
+    } catch {
+      return 'setup';
+    }
   }
 
   private getCombatSnapshot() {
@@ -659,9 +714,10 @@ class RoomSyncManager {
       const activeTurnIndex = parseInt(localStorage.getItem('ttrpg_active_turn_index') || '0', 10);
       const activeCombatantId = localStorage.getItem('ttrpg_active_combatant_id') || null;
       const round = parseInt(localStorage.getItem('ttrpg_combat_round') || '1', 10);
-      return { combatants, activeTurnIndex, activeCombatantId, round };
+      const combatStatus = this.getCombatStatus();
+      return { combatants, activeTurnIndex, activeCombatantId, round, combatStatus };
     } catch {
-      return { combatants: [], activeTurnIndex: 0, activeCombatantId: null, round: 1 };
+      return { combatants: [], activeTurnIndex: 0, activeCombatantId: null, round: 1, combatStatus: 'setup' };
     }
   }
 
@@ -712,6 +768,20 @@ class RoomSyncManager {
   }
 
   public leaveRoom(): void {
+    if (this.hostConnection && this.hostConnection.open) {
+      try {
+        this.hostConnection.send({
+          type: 'PLAYER_LEAVE',
+          senderId: this.peerId,
+          senderName: this.peerName,
+          isDm: this.isDm,
+          timestamp: Date.now(),
+          roomCode: this.roomCode,
+          payload: {},
+        });
+      } catch {}
+    }
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -806,6 +876,10 @@ class RoomSyncManager {
       try {
         localStorage.removeItem(`ttrpg_room_host_${this.roomCode}`);
       } catch {}
+    } else if (data.type === 'PLAYER_LEAVE') {
+      this.peers.delete(data.senderId);
+      this.notifyPresence();
+      return;
     }
 
     // Forward to remote peers if DM host received it via BroadcastChannel
@@ -915,6 +989,7 @@ class RoomSyncManager {
     const hostInfo = this.getHostInfo();
     cb({
       peers: this.getPeers(),
+      roster: this.getConnectedRoster(),
       connectedCount: this.getConnectedCount(),
       isHosted: hostInfo.isHosted,
       hostName: hostInfo.hostName,
@@ -929,6 +1004,7 @@ class RoomSyncManager {
     const hostInfo = this.getHostInfo();
     const state: PresenceState = {
       peers: this.getPeers(),
+      roster: this.getConnectedRoster(),
       connectedCount: this.getConnectedCount(),
       isHosted: hostInfo.isHosted,
       hostName: hostInfo.hostName,
@@ -941,6 +1017,72 @@ class RoomSyncManager {
         fn(state);
       } catch {}
     });
+  }
+
+  /**
+   * Return complete connected session roster listing display names.
+   * Marked with isLocal for self, DM host always placed first, followed by players alphabetically.
+   * Raw Peer IDs are omitted in favor of display names.
+   */
+  public getConnectedRoster(): RosterMember[] {
+    const roster: RosterMember[] = [];
+
+    // Local user
+    roster.push({
+      id: this.peerId,
+      name: this.peerName || (this.isDm ? 'Dungeon Master' : 'Player'),
+      isDm: this.isDm,
+      isLocal: true,
+      lastSeen: Date.now(),
+    });
+
+    // Remote peers
+    this.cleanStalePeers();
+    for (const peer of this.peers.values()) {
+      if (peer.id !== this.peerId && !roster.some((m) => m.id === peer.id)) {
+        roster.push({
+          id: peer.id,
+          name: peer.name || (peer.isDm ? 'Dungeon Master' : 'Player'),
+          isDm: peer.isDm,
+          isLocal: false,
+          lastSeen: peer.lastSeen,
+        });
+      }
+    }
+
+    // If connected to DM host and host peer is not yet in peers map, include host
+    if (!this.isDm && this.status === 'connected') {
+      const hostPeerId = getHostPeerId(this.roomCode);
+      if (!roster.some((m) => m.isDm)) {
+        roster.unshift({
+          id: hostPeerId,
+          name: this.activeHostName || 'Dungeon Master (Host)',
+          isDm: true,
+          isLocal: false,
+          lastSeen: Date.now(),
+        });
+      }
+    }
+
+    // Sort: DM (Host) first, then alphabetical by display name
+    return roster.sort((a, b) => {
+      if (a.isDm && !b.isDm) return -1;
+      if (!a.isDm && b.isDm) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /**
+   * Returns list of all known peers including self for network broadcast
+   */
+  public getAllPeersList(): PeerInfo[] {
+    const roster = this.getConnectedRoster();
+    return roster.map((m) => ({
+      id: m.id,
+      name: m.name,
+      isDm: m.isDm,
+      lastSeen: Date.now(),
+    }));
   }
 
   public getRoomCode(): string {

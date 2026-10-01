@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Combatant, CombatantType, isCombatantFoW } from '../types/ttrpg';
+import { Combatant, CombatantType, isCombatantFoW, sortInitiativeStrictDescending } from '../types/ttrpg';
 import { QuickGlanceInitiative } from './QuickGlanceInitiative';
 import { CombatantCard } from './CombatantCard';
 import { LiveCombatFeed } from './LiveCombatFeed';
@@ -17,6 +17,8 @@ import {
   Sparkles,
   AlertTriangle,
   Trash2,
+  Dices,
+  Play,
 } from 'lucide-react';
 
 interface CombatTrackerProps {
@@ -64,6 +66,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       return saved ? parseInt(saved, 10) : 1;
     } catch {
       return 1;
+    }
+  });
+
+  // Combat Status: 'setup' | 'active'
+  const [combatStatus, setCombatStatus] = useState<'setup' | 'active'>(() => {
+    try {
+      const saved = localStorage.getItem('ttrpg_combat_status');
+      return saved === 'active' ? 'active' : 'setup';
+    } catch {
+      return 'setup';
     }
   });
 
@@ -126,8 +138,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         localStorage.removeItem('ttrpg_active_combatant_id');
       }
       localStorage.setItem('ttrpg_combat_round', round.toString());
+      localStorage.setItem('ttrpg_combat_status', combatStatus);
     } catch {}
-  }, [combatants, activeTurnIndex, activeCombatantId, round]);
+  }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus]);
 
   // Listen for real-time room sync
   useEffect(() => {
@@ -141,6 +154,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
           setActiveTurnIndex(msg.payload.activeTurnIndex);
         }
         if (typeof msg.payload.round === 'number') setRound(msg.payload.round);
+        if (msg.payload.combatStatus) setCombatStatus(msg.payload.combatStatus);
       }
 
       // Sync real-time damage toast alert across peers
@@ -164,14 +178,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     updatedCombatants: Combatant[],
     updatedTurn: number,
     updatedRound: number,
-    updatedActiveCombatantId?: string | null
+    updatedActiveCombatantId?: string | null,
+    updatedCombatStatus?: 'setup' | 'active'
   ) => {
+    const statusToBroadcast = updatedCombatStatus || combatStatus;
     roomSync.broadcast('COMBAT_SYNC', {
       combatants: updatedCombatants,
       activeTurnIndex: updatedTurn,
       activeCombatantId:
         updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
       round: updatedRound,
+      combatStatus: statusToBroadcast,
     });
   };
 
@@ -237,7 +254,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         }
       }
 
-      broadcastCombat(combatants, nextIndex, nextRound, nextId);
+      broadcastCombat(combatants, nextIndex, nextRound, nextId, combatStatus);
     });
   };
 
@@ -265,7 +282,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       setActiveCombatantId(prevId);
       setActiveTurnIndex(prevIndex);
       setRound(prevRound);
-      broadcastCombat(combatants, prevIndex, prevRound, prevId);
+      broadcastCombat(combatants, prevIndex, prevRound, prevId, combatStatus);
     });
   };
 
@@ -274,7 +291,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     preserveScroll(() => {
       setRound(1);
       liveFeedSync.recordCombatLog('🔄 Round counter has been reset to Round 1 by the DM.', true);
-      broadcastCombat(combatants, activeTurnIndex, 1, activeCombatantId);
+      broadcastCombat(combatants, activeTurnIndex, 1, activeCombatantId, combatStatus);
     });
   };
 
@@ -285,6 +302,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       setActiveCombatantId(null);
       setActiveTurnIndex(0);
       setRound(1);
+      setCombatStatus('setup');
       setPlayerTurnAlert(null);
       setIsClearCombatModalOpen(false);
 
@@ -294,17 +312,76 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         localStorage.removeItem('ttrpg_active_combatant_id');
         localStorage.setItem('ttrpg_active_turn_index', '0');
         localStorage.setItem('ttrpg_combat_round', '1');
+        localStorage.setItem('ttrpg_combat_status', 'setup');
       } catch {}
 
       liveFeedSync.recordCombatLog(
         '⚔️ Encounter cleared by the DM. Blank slate prepared for a new battle.',
         true
       );
-      broadcastCombat([], 0, 1, null);
+      broadcastCombat([], 0, 1, null, 'setup');
     });
   };
 
-  // BUG FIX: SORT BY INITIATIVE (Descending - Zero scroll jump, PRESERVES ACTIVE TURN REFERENCE)
+  // DETERMINISTIC FIRST TURN ON "START COMBAT"
+  // When the DM clicks "Start Combat":
+  // 1. Strictly sort descending (b.initiative - a.initiative)
+  // 2. Explicitly set active combatant index to 0
+  // 3. Reset active turn pointers so combat never starts on previous index, random index, or bottom
+  // 4. Lock round counter to Round 1
+  // 5. Highlight, active turn banner, and turn pointer lock onto combatant with highest initiative
+  // 6. Broadcast across peers with combatStatus = 'active'
+  const handleStartCombat = () => {
+    preserveScroll(() => {
+      if (combatants.length === 0) {
+        setIsAddModalOpen(true);
+        return;
+      }
+
+      // 1. Strict Descending Sort: Highest total initiative score at index 0
+      const sorted = sortInitiativeStrictDescending(combatants);
+      const firstCombatant = sorted[0];
+
+      // 2. Deterministic First Turn: Explicitly set active combatant index to 0, round to 1
+      const targetIndex = 0;
+      const targetId = firstCombatant ? firstCombatant.id : null;
+      const targetRound = 1;
+      const targetStatus: 'active' = 'active';
+
+      setCombatants(sorted);
+      setActiveTurnIndex(targetIndex);
+      setActiveCombatantId(targetId);
+      setRound(targetRound);
+      setCombatStatus(targetStatus);
+
+      playTurnSound();
+
+      // 3. Highlight and active turn banner lock onto combatant with highest initiative
+      if (firstCombatant) {
+        if (firstCombatant.type === 'player') {
+          setPlayerTurnAlert(`⚔️ IT IS ${firstCombatant.name.toUpperCase()}'S TURN!`);
+          setTimeout(() => setPlayerTurnAlert(null), 5000);
+        } else {
+          setPlayerTurnAlert(null);
+        }
+
+        liveFeedSync.recordCombatLog(
+          `⚔️ Combat Started! Round 1 begins with ${firstCombatant.name} (Initiative ${firstCombatant.initiative}) taking the first turn.`,
+          true
+        );
+        liveFeedSync.recordTurnAnnouncement(
+          `⚔️ Turn 1/${sorted.length}: It is ${firstCombatant.name}'s turn! (Round 1)`,
+          true
+        );
+      }
+
+      // 4. Broadcast cleanly to all connected peers
+      broadcastCombat(sorted, targetIndex, targetRound, targetId, targetStatus);
+    });
+  };
+
+  // STRICT DESCENDING INITIATIVE SORT (b.initiative - a.initiative)
+  // Enforces highest initiative score at index 0 at the top of the tracker
   const handleSortInitiative = () => {
     preserveScroll(() => {
       if (combatants.length === 0) return;
@@ -314,7 +391,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         activeCombatantId || combatants[activeTurnIndex]?.id || null;
 
       // Reorder strictly in descending order of initiative score
-      const sorted = [...combatants].sort((a, b) => b.initiative - a.initiative);
+      const sorted = sortInitiativeStrictDescending(combatants);
 
       // Find new index of the active combatant in the sorted list
       let newActiveIndex = 0;
@@ -336,10 +413,84 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         : 'Active combatant';
 
       liveFeedSync.recordCombatLog(
-        `⚡ Initiative re-sorted in descending order. Active turn on ${activeName || 'current combatant'} preserved.`,
+        `⚡ Initiative sorted in strict descending order. Active turn on ${activeName || 'current combatant'} preserved.`,
         true
       );
-      broadcastCombat(sorted, newActiveIndex, round, currentActiveId);
+      broadcastCombat(sorted, newActiveIndex, round, currentActiveId, combatStatus);
+    });
+  };
+
+  // ROLL INITIATIVE FOR A SINGLE COMBATANT
+  // Rolls 1d20, modifies initiative, strictly sorts descending, and syncs
+  const handleRollInitiative = (combatantId: string) => {
+    preserveScroll(() => {
+      const target = combatants.find((c) => c.id === combatantId);
+      if (!target) return;
+      const isTargetFoW = isCombatantFoW(target);
+      const isTargetPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+      if (!isDm && (!isTargetPlayerOrAlly || isTargetFoW)) return;
+
+      const roll = Math.floor(Math.random() * 20) + 1;
+      const updated = combatants.map((c) =>
+        c.id === combatantId ? { ...c, initiative: roll } : c
+      );
+
+      // Strict descending sort on roll
+      const sorted = sortInitiativeStrictDescending(updated);
+
+      let targetIndex = activeTurnIndex;
+      if (activeCombatantId) {
+        const found = sorted.findIndex((c) => c.id === activeCombatantId);
+        if (found !== -1) targetIndex = found;
+      }
+
+      setCombatants(sorted);
+      setActiveTurnIndex(targetIndex);
+
+      liveFeedSync.recordCombatLog(
+        `🎲 ${target.name} rolled 1d20 for Initiative: ${roll}!`,
+        true
+      );
+      broadcastCombat(sorted, targetIndex, round, activeCombatantId, combatStatus);
+    });
+  };
+
+  // ROLL ALL INITIATIVES (DM Action)
+  // Rolls 1d20 for all combatants and enforces strict descending sort
+  const handleRollAllInitiatives = () => {
+    preserveScroll(() => {
+      if (!isDm || combatants.length === 0) return;
+
+      const updated = combatants.map((c) => {
+        const roll = Math.floor(Math.random() * 20) + 1;
+        return { ...c, initiative: roll };
+      });
+
+      // Strict descending sort
+      const sorted = sortInitiativeStrictDescending(updated);
+      let targetIndex = 0;
+      let targetId = sorted[0]?.id || null;
+
+      if (combatStatus === 'active' && activeCombatantId) {
+        const found = sorted.findIndex((c) => c.id === activeCombatantId);
+        if (found !== -1) {
+          targetIndex = found;
+          targetId = activeCombatantId;
+        }
+      } else {
+        targetId = sorted[0]?.id || null;
+        targetIndex = 0;
+      }
+
+      setCombatants(sorted);
+      setActiveTurnIndex(targetIndex);
+      if (targetId) setActiveCombatantId(targetId);
+
+      liveFeedSync.recordCombatLog(
+        `🎲 All initiatives rolled by the DM and sorted in strict descending order.`,
+        true
+      );
+      broadcastCombat(sorted, targetIndex, round, targetId, combatStatus);
     });
   };
 
@@ -364,7 +515,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       setCombatants(copy);
       setActiveTurnIndex(newActiveIdx);
       if (currentActiveId) setActiveCombatantId(currentActiveId);
-      broadcastCombat(copy, newActiveIdx, round, currentActiveId);
+      broadcastCombat(copy, newActiveIdx, round, currentActiveId, combatStatus);
     });
   };
 
@@ -381,10 +532,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         true
       );
     }
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId);
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
   // UPDATE COMBATANT (Permission Enforced: Players can ONLY edit non-FoW Player and Ally combatants)
+  // When initiative is modified, enforce strict descending order
   const handleUpdateCombatant = (id: string, updates: Partial<Combatant>) => {
     const target = combatants.find((c) => c.id === id);
     if (!target) return;
@@ -394,9 +546,23 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       return;
     }
 
-    const updated = combatants.map((c) => (c.id === id ? { ...c, ...updates } : c));
+    let updated = combatants.map((c) => (c.id === id ? { ...c, ...updates } : c));
+
+    let targetIndex = activeTurnIndex;
+    let targetId = activeCombatantId;
+
+    // Strict descending sort when initiative is modified
+    if (updates.initiative !== undefined) {
+      updated = sortInitiativeStrictDescending(updated);
+      if (activeCombatantId) {
+        const found = updated.findIndex((c) => c.id === activeCombatantId);
+        if (found !== -1) targetIndex = found;
+      }
+    }
+
     setCombatants(updated);
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId);
+    setActiveTurnIndex(targetIndex);
+    broadcastCombat(updated, targetIndex, round, targetId, combatStatus);
   };
 
   // DELETE COMBATANT (DM only)
@@ -423,7 +589,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
 
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextActiveIdx);
-    broadcastCombat(updated, nextActiveIdx, round, nextActiveId);
+    broadcastCombat(updated, nextActiveIdx, round, nextActiveId, combatStatus);
   };
 
   // ADD COMBATANT FORM SUBMISSION (Players can add "Player (PC)" and "NPC / Ally")
@@ -453,7 +619,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       fogOfWar: isFoWCombatant,
     };
 
-    const updated = [...combatants, newCombatant];
+    // Strictly sort descending by initiative
+    const updated = sortInitiativeStrictDescending([...combatants, newCombatant]);
     setCombatants(updated);
 
     // If this was the first combatant added to an empty slate, make it active immediately
@@ -464,13 +631,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       targetActiveIndex = 0;
       setActiveCombatantId(newCombatant.id);
       setActiveTurnIndex(0);
+    } else if (activeCombatantId) {
+      const found = updated.findIndex((c) => c.id === activeCombatantId);
+      if (found !== -1) targetActiveIndex = found;
+      setActiveTurnIndex(targetActiveIndex);
     }
 
     liveFeedSync.recordCombatLog(
       `➕ Added ${newCombatant.name} (${newCombatant.type === 'player' ? 'Player (PC)' : newCombatant.type === 'ally' ? 'NPC / Ally' : newCombatant.type.toUpperCase()}) with Initiative ${newCombatant.initiative}.`,
       true
     );
-    broadcastCombat(updated, targetActiveIndex, round, targetActiveId);
+    broadcastCombat(updated, targetActiveIndex, round, targetActiveId, combatStatus);
 
     // Reset Form
     setIsAddModalOpen(false);
@@ -539,6 +710,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-950 border border-amber-500/60 text-amber-300">
                 Round {round}
               </span>
+              {combatStatus === 'active' ? (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950 border border-emerald-500/60 text-emerald-300 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  In Combat
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-800 border border-slate-700 text-slate-400">
+                  Setup
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400">
               {combatants.length > 0
@@ -550,6 +731,20 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Start Combat Trigger (DM Only - Locks Turn 1 to highest initiative roller) */}
+          {isDm && (
+            <button
+              type="button"
+              onClick={handleStartCombat}
+              disabled={combatants.length === 0}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-slate-950 transition cursor-pointer shadow-md"
+              title="Start combat: sort descending by initiative, lock Turn 1 onto highest score, reset round to 1"
+            >
+              <Swords className="w-4 h-4 stroke-[2.5]" />
+              <span>Start Combat</span>
+            </button>
+          )}
+
           {/* Previous Turn */}
           <button
             type="button"
@@ -572,16 +767,31 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
             <ArrowRight className="w-4 h-4 stroke-[3]" />
           </button>
 
-          {/* Sort by Initiative */}
+          {/* Sort by Initiative (Strict descending order) */}
           {isDm && (
             <button
               type="button"
               onClick={handleSortInitiative}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition cursor-pointer"
-              title="Sort all combatants by initiative score"
+              disabled={combatants.length === 0}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-amber-300 transition cursor-pointer disabled:opacity-40"
+              title="Sort all combatants in strict descending initiative order"
             >
               <ArrowUpDown className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Sort</span>
+            </button>
+          )}
+
+          {/* Roll All Initiatives (DM Only) */}
+          {isDm && (
+            <button
+              type="button"
+              onClick={handleRollAllInitiatives}
+              disabled={combatants.length === 0}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-amber-300 transition cursor-pointer disabled:opacity-40"
+              title="Roll 1d20 initiative for all combatants and sort descending"
+            >
+              <Dices className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Roll All</span>
             </button>
           )}
 
@@ -643,7 +853,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                 const selectedId = id || combatants[idx]?.id || null;
                 if (selectedId) {
                   setActiveCombatantId(selectedId);
-                  broadcastCombat(combatants, idx, round, selectedId);
+                  broadcastCombat(combatants, idx, round, selectedId, combatStatus);
                 }
               })
             }
@@ -654,6 +864,33 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
 
         {/* COLUMN 2: CENTER - MAIN COMBATANT CARDS VIEW (6/12 cols) - ACTIVE TURN ANCHORED AT TOP */}
         <div className="lg:col-span-6 space-y-3.5">
+          {/* Setup Banner if Encounter Ready but Combat not started */}
+          {combatStatus === 'setup' && combatants.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/50 text-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-2.5">
+                <Swords className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <h4 className="text-xs font-bold font-display text-amber-300 uppercase tracking-wider">
+                    Encounter Prepared ({combatants.length} Combatant{combatants.length > 1 ? 's' : ''})
+                  </h4>
+                  <p className="text-[11px] text-slate-300">
+                    Ready to begin? Click &ldquo;Start Combat&rdquo; to sort initiative strictly descending and lock Turn 1 onto the highest score.
+                  </p>
+                </div>
+              </div>
+              {isDm && (
+                <button
+                  type="button"
+                  onClick={handleStartCombat}
+                  className="px-4 py-1.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl transition cursor-pointer shadow flex items-center gap-1.5"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Start Combat</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {visibleCombatants.length === 0 ? (
             <div className="p-12 text-center rounded-2xl bg-slate-900/60 border-2 border-dashed border-slate-800 space-y-3">
               <Swords className="w-10 h-10 text-slate-500 mx-auto opacity-40" />
@@ -696,6 +933,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                   onUpdate={(updates) => handleUpdateCombatant(combatant.id, updates)}
                   onDelete={() => handleDeleteCombatant(combatant.id)}
                   onAddLog={addFeedLog}
+                  onRollInitiative={() => handleRollInitiative(combatant.id)}
                 />
               );
             })

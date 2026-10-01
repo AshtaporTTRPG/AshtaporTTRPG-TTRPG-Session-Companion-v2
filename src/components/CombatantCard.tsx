@@ -17,6 +17,7 @@ import {
   Sliders,
   Check,
   Cloud,
+  Dices,
 } from 'lucide-react';
 
 interface CombatantCardProps {
@@ -26,6 +27,7 @@ interface CombatantCardProps {
   onUpdate: (updated: Partial<Combatant>) => void;
   onDelete: () => void;
   onAddLog?: (dmMessage: string, playerMessage?: string) => void;
+  onRollInitiative?: () => void;
 }
 
 const CONDITIONS_LIST: { name: Condition; color: string }[] = [
@@ -62,6 +64,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
   onUpdate,
   onDelete,
   onAddLog,
+  onRollInitiative,
 }) => {
   // FOG OF WAR & ROLE-BASED ACCESS CONTROL (RBAC):
   // 1. Fog of War: If marked with FoW (or monster/boss/custom default), conceal conditions, status badges, stats, and numerical damage from players.
@@ -241,22 +244,34 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
       {/* Top Header Row */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          {/* Initiative Badge (Click to quick edit for authorized users) */}
-          <button
-            type="button"
-            onClick={canEditCombatant ? handleOpenStatEditor : undefined}
-            disabled={!canEditCombatant}
-            title={canEditCombatant ? 'Click to edit initiative and stats' : `Initiative: ${combatant.initiative}`}
-            className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-bold text-sm shadow-sm shrink-0 transition ${
-              canEditCombatant ? 'cursor-pointer hover:ring-2 hover:ring-amber-400' : 'cursor-default'
-            } ${
-              isActive
-                ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-300'
-                : 'bg-slate-800 text-slate-200 border border-slate-700'
-            }`}
-          >
-            {combatant.initiative}
-          </button>
+          {/* Initiative Badge & Quick Roll (Click to quick edit for authorized users) */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={canEditCombatant ? handleOpenStatEditor : undefined}
+              disabled={!canEditCombatant}
+              title={canEditCombatant ? 'Click to edit initiative and stats' : `Initiative: ${combatant.initiative}`}
+              className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-bold text-sm shadow-sm transition ${
+                canEditCombatant ? 'cursor-pointer hover:ring-2 hover:ring-amber-400' : 'cursor-default'
+              } ${
+                isActive
+                  ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-300'
+                  : 'bg-slate-800 text-slate-200 border border-slate-700'
+              }`}
+            >
+              {combatant.initiative}
+            </button>
+            {canEditCombatant && onRollInitiative && (
+              <button
+                type="button"
+                onClick={onRollInitiative}
+                title={`Roll 1d20 Initiative for ${combatant.name}`}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 border border-transparent hover:border-slate-700 transition cursor-pointer"
+              >
+                <Dices className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
           {/* Name & Role */}
           <div className="min-w-0">

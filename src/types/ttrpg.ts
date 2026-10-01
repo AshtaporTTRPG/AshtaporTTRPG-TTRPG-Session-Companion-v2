@@ -52,6 +52,20 @@ export function isCombatantFoW(combatant: Combatant): boolean {
   return combatant.type === 'monster' || combatant.type === 'boss' || combatant.type === 'custom';
 }
 
+/**
+ * Strict descending initiative sort (b.initiative - a.initiative).
+ * Enforces highest total initiative score at index 0.
+ * Maintains stable insertion order as tie-breaker.
+ */
+export function sortInitiativeStrictDescending(combatants: Combatant[]): Combatant[] {
+  return [...combatants].sort((a, b) => {
+    if (b.initiative !== a.initiative) {
+      return b.initiative - a.initiative;
+    }
+    return 0; // Stable tie-breaker: preserves existing insertion order
+  });
+}
+
 export type DieType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20' | 'd100';
 
 export type RollVisibility = 'public' | 'dm' | 'self';
