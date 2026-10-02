@@ -32,10 +32,10 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
   onMoveCombatant,
   onToggleVisibility,
 }) => {
-  // Filter for player view: completely hide if combatant.hidden and not DM
+  // Filter for player view: completely filter out and hide if hidden or secret
   const visibleItems = combatants
     .map((c, originalIndex) => ({ combatant: c, originalIndex }))
-    .filter(({ combatant }) => isDm || !combatant.hidden);
+    .filter(({ combatant }) => isDm || (!combatant.hidden && !combatant.isSecret));
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col h-full space-y-3">
@@ -122,9 +122,9 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
                           : roleCfg.label}
                       </span>
 
-                      {combatant.hidden && isDm && (
-                        <span className="text-[9px] text-purple-400 flex items-center gap-0.5">
-                          <EyeOff className="w-2.5 h-2.5" /> Hidden
+                      {(combatant.hidden || combatant.isSecret) && isDm && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-purple-950/90 text-purple-300 border border-purple-600/80 flex items-center gap-1 shadow-sm">
+                          <EyeOff className="w-2.5 h-2.5 text-purple-400" /> Hidden / Secret
                         </span>
                       )}
                     </div>
@@ -141,12 +141,12 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
                     <button
                       type="button"
                       onClick={() => onToggleVisibility && onToggleVisibility(combatant.id)}
-                      title={combatant.hidden ? 'Reveal to players' : 'Hide from players'}
-                      className={`p-1 rounded hover:bg-slate-800 transition ${
-                        combatant.hidden ? 'text-purple-400' : 'text-slate-400 hover:text-slate-200'
+                      title={combatant.hidden || combatant.isSecret ? 'Reveal to players' : 'Hide from players'}
+                      className={`p-1 rounded hover:bg-slate-800 transition cursor-pointer ${
+                        combatant.hidden || combatant.isSecret ? 'text-purple-400' : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      {combatant.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      {combatant.hidden || combatant.isSecret ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
 
                     {/* Move Up */}

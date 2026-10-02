@@ -1,26 +1,13 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { calculate3DDistance } from '../utils/geometry';
+import React, { useState, useMemo } from 'react';
 import {
   Ruler,
   Compass,
   Crosshair,
-  CheckCircle2,
-  AlertCircle,
+  ShieldAlert,
   Activity,
   ArrowUpRight,
-  ShieldAlert,
-  Zap,
-  Swords,
-  Sparkles,
-  Check,
+  Layers,
 } from 'lucide-react';
-import { SliderWithNumberInput } from './SliderWithNumberInput';
-import {
-  WEAPON_RANGE_PRESETS,
-  SPELL_RANGE_PRESETS,
-  WeaponRangePreset,
-  SpellRangePreset,
-} from '../utils/rangePresets';
 
 const COMMON_FALL_PRESETS = [
   { label: '10ft', ft: 10, note: 'Roof' },
@@ -31,17 +18,27 @@ const COMMON_FALL_PRESETS = [
   { label: '300ft', ft: 300, note: 'Max Cap' },
 ];
 
-// Expanded 500 ft x 500 ft milestones for 3D Pythagorean Cheat Table
-const CHEAT_TABLE_GROUND = [25, 50, 75, 100, 150, 200, 250, 300, 400, 500];
-const CHEAT_TABLE_HEIGHT = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500];
-
 export const GeometryCalculator: React.FC = () => {
-  // 3D Distance State (0 to 500 ft range)
-  const [horizontalDist, setHorizontalDist] = useState<number>(40);
-  const [sourceElev, setSourceElev] = useState<number>(0);
-  const [targetElev, setTargetElev] = useState<number>(60);
-  const [rangeLimit, setRangeLimit] = useState<number>(60);
-  const [presetCategory, setPresetCategory] = useState<'weapons' | 'spells' | 'all'>('weapons');
+  // Streamlined Interactive 3D Range Finder State (Direct 2-field numeric inputs)
+  const [groundInput, setGroundInput] = useState<string>('40');
+  const [altitudeInput, setAltitudeInput] = useState<string>('60');
+
+  // Parsed numeric values
+  const groundDistance = Math.max(0, parseFloat(groundInput) || 0);
+  const altitudeDiff = Math.max(0, parseFloat(altitudeInput) || 0);
+
+  // Exact 3D Euclidean Distance & 5e Tactical Grid Increments
+  const trueDistance = Math.sqrt(groundDistance * groundDistance + altitudeDiff * altitudeDiff);
+  const tactical5eRange = Math.ceil(trueDistance / 5) * 5;
+  const gridSquares = tactical5eRange / 5;
+  const formattedTrueDistance = Number.isInteger(trueDistance)
+    ? trueDistance.toString()
+    : trueDistance.toFixed(2);
+
+  // Trajectory elevation pitch angle (degrees)
+  const pitchAngleDegrees = groundDistance === 0
+    ? (altitudeDiff > 0 ? 90 : 0)
+    : Math.round(Math.atan2(altitudeDiff, groundDistance) * (180 / Math.PI));
 
   // Homebrew Fall Damage Calculator State (Scale up to 300 ft)
   const [fallFeet, setFallFeet] = useState<number>(30);
@@ -52,12 +49,6 @@ export const GeometryCalculator: React.FC = () => {
   const [strScore, setStrScore] = useState<number>(14);
   const [dexScore, setDexScore] = useState<number>(16);
   const [moveSpeed, setMoveSpeed] = useState<number>(30);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  const handleSelectPresetRange = (range: number) => {
-    setRangeLimit(range);
-  };
 
   // Handle Fall Height manual and slider inputs up to 300 ft
   const handleFallFeetChange = (valStr: string) => {
@@ -88,37 +79,8 @@ export const GeometryCalculator: React.FC = () => {
     setFallFeetInput(clamped.toString());
   };
 
-  // 3D Distance calculations
-  const distanceResults = useMemo(() => {
-    return calculate3DDistance({
-      horizontalDistance: horizontalDist,
-      sourceElevation: sourceElev,
-      targetElevation: targetElev,
-      rangeLimit,
-    });
-  }, [horizontalDist, sourceElev, targetElev, rangeLimit]);
-
-  const deltaElevation = Math.abs(targetElev - sourceElev);
-  const isInRange = distanceResults.euclideanDistance <= rangeLimit;
-  const standard5eDist = Math.max(horizontalDist, deltaElevation);
-  const alternateDiagonalDist = distanceResults.alternateDiagonalDistance;
-
-  // Closest milestones in the 500ft x 500ft Cheat Matrix for active cell highlighting
-  const closestGround = useMemo(() => {
-    return CHEAT_TABLE_GROUND.reduce((prev, curr) =>
-      Math.abs(curr - horizontalDist) < Math.abs(prev - horizontalDist) ? curr : prev
-    );
-  }, [horizontalDist]);
-
-  const closestHeight = useMemo(() => {
-    return CHEAT_TABLE_HEIGHT.reduce((prev, curr) =>
-      Math.abs(curr - deltaElevation) < Math.abs(prev - deltaElevation) ? curr : prev
-    );
-  }, [deltaElevation]);
-
   // Fall damage calculation
   // Rule: 1 flat damage per foot fallen beyond 15 feet. Incapacitated takes 1 damage per foot from 0 feet.
-  // Scales smoothly up to 300 ft without truncation.
   const calculatedFallDamage = isFallIncapacitated
     ? Math.max(0, fallFeet)
     : Math.max(0, fallFeet - 15);
@@ -128,9 +90,6 @@ export const GeometryCalculator: React.FC = () => {
   const raw5eAvgDmg = raw5eD6Count * 3.5;
 
   // Jump distance calculation
-  // Rule: No check required; limited by total movement speed.
-  // Standing: 5 ft. + STR or DEX modifier (whichever is higher).
-  // Running (10-ft lead): 10 ft. + STR or DEX modifier (whichever is higher).
   const strMod = Math.floor((strScore - 10) / 2);
   const dexMod = Math.floor((dexScore - 10) / 2);
   const higherMod = Math.max(strMod, dexMod);
@@ -138,162 +97,54 @@ export const GeometryCalculator: React.FC = () => {
   const rawStandingJump = Math.max(0, 5 + higherMod);
   const rawRunningJump = Math.max(0, 10 + higherMod);
 
-  // Cap at remaining movement speed (for running jump, uses 10 ft of movement for lead)
   const standingJumpCapped = Math.min(moveSpeed, rawStandingJump);
   const runningJumpCapped = Math.min(Math.max(0, moveSpeed - 10), rawRunningJump);
 
-  // Canvas visualizer for 3D elevation vector diagram
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // Dynamic SVG Proportional Triangle Coordinates Calculation
+  const svgGeometry = useMemo(() => {
+    const svgWidth = 560;
+    const svgHeight = 320;
+    const originX = 75;
+    const originY = 255;
+    const maxDrawWidth = 320;
+    const maxDrawHeight = 190;
 
-    let animId: number;
-    animId = requestAnimationFrame(() => {
-      const width = canvas.width;
-      const height = canvas.height;
-      ctx.clearRect(0, 0, width, height);
+    const maxDim = Math.max(groundDistance, altitudeDiff, 1);
+    const scale = Math.min(maxDrawWidth / maxDim, maxDrawHeight / maxDim);
 
-      // Subtle tactical grid background to eliminate dead empty space
-      ctx.strokeStyle = '#1e293b';
-      ctx.lineWidth = 1;
-      const gridStep = 45;
-      for (let x = 0; x < width; x += gridStep) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += gridStep) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
+    let legX = groundDistance * scale;
+    let legY = altitudeDiff * scale;
 
-      // Origin and dynamic scaling
-      const originX = 65;
-      const originY = height - 45;
-      const maxDim = Math.max(horizontalDist, deltaElevation, rangeLimit > 0 ? rangeLimit : 50, 50);
-      const scale = Math.min((width - 130) / maxDim, (height - 90) / maxDim);
+    // Minimum visual size for readability if > 0
+    if (groundDistance > 0 && legX < 50) legX = 50;
+    if (altitudeDiff > 0 && legY < 50) legY = 50;
 
-      const targetX = originX + horizontalDist * scale;
-      const targetY = originY - (targetElev - sourceElev) * scale;
+    const cornerX = originX + legX;
+    const cornerY = originY;
+    const targetX = cornerX;
+    const targetY = originY - legY;
 
-      // Draw Range Sphere / Arc (Weapon / Spell Max Range Coverage)
-      if (rangeLimit > 0) {
-        const radiusPx = rangeLimit * scale;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(originX, originY, radiusPx, 0, -Math.PI / 2, true);
-        ctx.strokeStyle = isInRange ? 'rgba(52, 211, 153, 0.4)' : 'rgba(239, 68, 68, 0.4)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([5, 4]);
-        ctx.stroke();
-        ctx.fillStyle = isInRange ? 'rgba(52, 211, 153, 0.04)' : 'rgba(239, 68, 68, 0.04)';
-        ctx.lineTo(originX, originY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+    // Midpoints for labels
+    const midHypotenuseX = (originX + targetX) / 2;
+    const midHypotenuseY = (originY + targetY) / 2;
+    const midGroundX = (originX + cornerX) / 2;
+    const midAltitudeY = (cornerY + targetY) / 2;
 
-        // Label for Range Arc
-        ctx.fillStyle = isInRange ? '#34d399' : '#f87171';
-        ctx.font = 'bold 9px system-ui, sans-serif';
-        const labelAngle = -Math.PI / 4;
-        const arcLabelX = originX + Math.cos(labelAngle) * Math.min(radiusPx, width - 110);
-        const arcLabelY = originY + Math.sin(labelAngle) * Math.min(radiusPx, height - 80);
-        if (arcLabelX > 20 && arcLabelY > 15) {
-          ctx.fillText(`Max Range: ${rangeLimit}ft`, arcLabelX - 25, arcLabelY - 5);
-        }
-      }
-
-      // Draw Ground / Baseline
-      ctx.strokeStyle = '#475569';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(20, originY);
-      ctx.lineTo(width - 20, originY);
-      ctx.stroke();
-
-      // Horizontal Distance Line (Dashed)
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(originX, originY);
-      ctx.lineTo(targetX, originY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Vertical Altitude Line
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(targetX, originY);
-      ctx.lineTo(targetX, targetY);
-      ctx.stroke();
-
-      // Hypotenuse (True 3D Direct Line of Sight)
-      ctx.strokeStyle = isInRange ? '#10b981' : '#ef4444';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(originX, originY);
-      ctx.lineTo(targetX, targetY);
-      ctx.stroke();
-
-      // Source point (Shooter / Caster)
-      ctx.fillStyle = '#10b981';
-      ctx.beginPath();
-      ctx.arc(originX, originY, 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#064e3b';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Target point (Flying Creature / High Ground)
-      ctx.fillStyle = isInRange ? '#10b981' : '#ef4444';
-      ctx.beginPath();
-      ctx.arc(targetX, targetY, 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = isInRange ? '#064e3b' : '#7f1d1d';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Text Annotations
-      ctx.fillStyle = '#cbd5e1';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.fillText(`Origin (${sourceElev}ft)`, originX - 45, originY + 22);
-      ctx.fillText(`Target (${targetElev}ft)`, targetX - 35, targetY - 12);
-
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '11px system-ui, sans-serif';
-      ctx.fillText(`Ground: ${horizontalDist}ft`, (originX + targetX) / 2 - 30, originY + 16);
-      ctx.fillText(`Height Δ: ${deltaElevation}ft`, targetX + 10, (originY + targetY) / 2);
-
-      // True 3D Distance Label on the Hypotenuse
-      const midX = (originX + targetX) / 2;
-      const midY = (originY + targetY) / 2;
-      ctx.fillStyle = isInRange ? '#34d399' : '#f87171';
-      ctx.font = 'bold 12px system-ui, sans-serif';
-      ctx.fillText(`3D: ${distanceResults.euclideanDistance}ft`, midX - 30, midY - 10);
-
-      // Angle Arc
-      if (deltaElevation > 0 && horizontalDist > 0) {
-        const angleRad = distanceResults.pitchAngleDegrees * (Math.PI / 180);
-        ctx.strokeStyle = '#fbbf24';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(originX, originY, 28, 0, targetElev >= sourceElev ? -angleRad : angleRad, targetElev >= sourceElev);
-        ctx.stroke();
-        ctx.fillStyle = '#fbbf24';
-        ctx.font = 'bold 10px system-ui, sans-serif';
-        ctx.fillText(`${distanceResults.pitchAngleDegrees}°`, originX + 32, originY - 6);
-      }
-    });
-
-    return () => cancelAnimationFrame(animId);
-  }, [horizontalDist, sourceElev, targetElev, rangeLimit, distanceResults, deltaElevation, isInRange]);
+    return {
+      svgWidth,
+      svgHeight,
+      originX,
+      originY,
+      cornerX,
+      cornerY,
+      targetX,
+      targetY,
+      midHypotenuseX,
+      midHypotenuseY,
+      midGroundX,
+      midAltitudeY,
+    };
+  }, [groundDistance, altitudeDiff]);
 
   return (
     <div className="space-y-6">
@@ -311,511 +162,479 @@ export const GeometryCalculator: React.FC = () => {
           </p>
         </div>
 
-        {/* In Range / Out of Range Badge */}
-        <div
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl border font-bold text-xs shadow-md ${
-            isInRange
-              ? 'bg-emerald-950/80 border-emerald-500/80 text-emerald-200'
-              : 'bg-red-950/80 border-red-500/80 text-red-200'
-          }`}
-        >
-          {isInRange ? (
-            <>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>3D TARGET IN RANGE ({distanceResults.euclideanDistance}ft ≤ {rangeLimit}ft)</span>
-            </>
-          ) : (
-            <>
-              <AlertCircle className="w-4 h-4 text-red-400" />
-              <span>TARGET OUT OF RANGE ({distanceResults.euclideanDistance}ft &gt; {rangeLimit}ft)</span>
-            </>
-          )}
+        <div className="flex items-center gap-2 text-xs font-mono px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300">
+          <Layers className="w-4 h-4 text-cyan-400" />
+          <span>Tactical 5e Grid Increments: <strong className="text-cyan-300 font-bold">{tactical5eRange} ft ({gridSquares} sq)</strong></span>
         </div>
       </div>
 
-      {/* TOP ROW: 3D Triangulation & Elevation Vector Controls */}
+      {/* TOP ROW: Streamlined 3D Range Finder & Dynamic Triangle Diagram */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Elevation & Range Inputs */}
+        
+        {/* Left Column: Clean Two-Field Input Card & Tactical Outputs */}
         <div className="lg:col-span-5 space-y-5">
-          {/* Controls Card */}
+          {/* Two-Field Input Card */}
           <div className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-4 shadow-sm">
-            <h3 className="text-xs font-bold text-amber-300 uppercase tracking-wider font-display">
-              Elevation &amp; Range Inputs
-            </h3>
-
-            {/* Horizontal Ground Distance (0 to 500 ft) */}
-            <SliderWithNumberInput
-              label="Horizontal Ground Distance"
-              helperText="Target distance on the 2D battle grid"
-              min={0}
-              max={500}
-              step={5}
-              unit="ft"
-              value={horizontalDist}
-              onChange={setHorizontalDist}
-              accentColor="amber"
-              quickPresets={[30, 60, 100, 150, 300, 500]}
-            />
-
-            {/* Origin & Target Elevation Dual Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-              <SliderWithNumberInput
-                label="Origin Elevation"
-                helperText="Attacker / Caster altitude"
-                min={0}
-                max={500}
-                step={5}
-                unit="ft"
-                value={sourceElev}
-                onChange={setSourceElev}
-                accentColor="emerald"
-                quickPresets={[0, 10, 20, 50, 100]}
-              />
-
-              <SliderWithNumberInput
-                label="Target Elevation"
-                helperText="Flying / High ground altitude"
-                min={0}
-                max={500}
-                step={5}
-                unit="ft"
-                value={targetElev}
-                onChange={setTargetElev}
-                accentColor="cyan"
-                quickPresets={[0, 30, 60, 120, 300, 500]}
-              />
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-amber-400" />
+                <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider font-display">
+                  3D Range Finder
+                </h3>
+              </div>
+              <span className="text-[11px] font-mono text-cyan-300 font-semibold px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-700/60">
+                Pythagorean Engine
+              </span>
             </div>
 
-            {/* Range / AOE Dual Control */}
-            <div className="pt-2 border-t border-slate-800 space-y-2">
-              <SliderWithNumberInput
-                label="Range / AOE"
-                helperText="Maximum effective weapon reach, spell range, or AOE radius"
-                min={0}
-                max={600}
-                step={5}
-                unit="ft"
-                value={rangeLimit}
-                onChange={setRangeLimit}
-                accentColor="amber"
-                quickPresets={[5, 30, 60, 120, 150, 300, 600]}
-              />
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Enter the horizontal battle grid distance and target vertical elevation difference to calculate true direct line-of-sight and 5e grid increments.
+            </p>
 
-              {/* Matched preset indicator */}
-              {(() => {
-                const matchedWeapon = WEAPON_RANGE_PRESETS.find(
-                  (p) => p.normalRange === rangeLimit || p.longRange === rangeLimit
-                );
-                const matchedSpell = SPELL_RANGE_PRESETS.find((p) => p.range === rangeLimit);
-                if (matchedWeapon) {
-                  const isLong = matchedWeapon.longRange === rangeLimit;
-                  return (
-                    <div className="flex items-center gap-1.5 text-[11px] text-amber-300 font-mono bg-amber-950/40 px-2 py-1 rounded border border-amber-800/40">
-                      <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>
-                        Preset: <strong>{matchedWeapon.classification}</strong> {isLong ? '(Max)' : '(Normal)'} — {matchedWeapon.items.join(', ')}
-                      </span>
-                    </div>
-                  );
-                }
-                if (matchedSpell) {
-                  return (
-                    <div className="flex items-center gap-1.5 text-[11px] text-cyan-300 font-mono bg-cyan-950/40 px-2 py-1 rounded border border-cyan-800/40">
-                      <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span>
-                        Preset: <strong>{matchedSpell.classification} ({matchedSpell.range}ft)</strong> — {matchedSpell.items.join(', ')}
-                      </span>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-
-              {/* Standardized Quick Range Presets */}
-              <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+            <div className="space-y-4 pt-1">
+              {/* Field 1: Ground Distance (ft) */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-300">Standardized Range Presets</span>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    Ascending range • Alphabetical items
+                  <label htmlFor="ground-distance-input" className="text-xs font-semibold text-slate-200">
+                    Ground Distance (ft)
+                  </label>
+                  <span className="text-[10px] font-mono text-amber-400/80">Horizontal Leg</span>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    id="ground-distance-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={groundInput}
+                    onChange={(e) => setGroundInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-base font-mono font-bold rounded-lg bg-slate-900 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400/30 transition-all pr-12"
+                    placeholder="e.g. 40"
+                  />
+                  <span className="absolute right-3.5 text-xs font-mono font-semibold text-slate-400 pointer-events-none">
+                    ft
                   </span>
                 </div>
-
-                {/* Category Switcher Tabs */}
-                <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-slate-950 border border-slate-800 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPresetCategory('weapons')}
-                    className={`flex items-center justify-center gap-1.5 py-1 px-2 rounded-md font-medium transition-colors cursor-pointer text-[11px] ${
-                      presetCategory === 'weapons'
-                        ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
-                    }`}
-                  >
-                    <Swords className="w-3 h-3 text-amber-400" />
-                    <span>Weapons</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPresetCategory('spells')}
-                    className={`flex items-center justify-center gap-1.5 py-1 px-2 rounded-md font-medium transition-colors cursor-pointer text-[11px] ${
-                      presetCategory === 'spells'
-                        ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3 text-cyan-400" />
-                    <span>Spells</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPresetCategory('all')}
-                    className={`flex items-center justify-center py-1 px-2 rounded-md font-medium transition-colors cursor-pointer text-[11px] ${
-                      presetCategory === 'all'
-                        ? 'bg-slate-800 text-slate-100 font-bold border border-slate-700 shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
-                    }`}
-                  >
-                    <span>All Presets</span>
-                  </button>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] text-slate-500 font-mono">Quick:</span>
+                  {[15, 30, 60, 120].map((ft) => (
+                    <button
+                      key={ft}
+                      type="button"
+                      onClick={() => setGroundInput(ft.toString())}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded border transition cursor-pointer ${
+                        groundDistance === ft
+                          ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      {ft}ft
+                    </button>
+                  ))}
                 </div>
+              </div>
 
-                {/* Presets List in Ascending Order */}
-                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-                  {/* Category A: Weapons & Attacks */}
-                  {(presetCategory === 'weapons' || presetCategory === 'all') && (
-                    <div className="space-y-1.5">
-                      {presetCategory === 'all' && (
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-400 uppercase tracking-wider pt-1">
-                          <Swords className="w-3 h-3" />
-                          <span>Weapons &amp; Attacks</span>
-                        </div>
-                      )}
-                      {WEAPON_RANGE_PRESETS.map((p) => {
-                        const isNormalActive = rangeLimit === p.normalRange;
-                        const isLongActive = p.longRange !== undefined && rangeLimit === p.longRange;
-                        const isAnyActive = isNormalActive || isLongActive;
-
-                        return (
-                          <div
-                            key={p.id}
-                            className={`p-2 rounded-lg border transition-all text-xs ${
-                              isAnyActive
-                                ? 'bg-amber-950/40 border-amber-500/60 shadow-sm'
-                                : 'bg-slate-950/70 border-slate-800/80 hover:border-slate-700 hover:bg-slate-950'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                  {p.rangeLabel}
-                                </span>
-                                <span className="font-semibold text-slate-200 text-[11px]">
-                                  {p.classification}
-                                </span>
-                              </div>
-
-                              {/* Range selection buttons for dual-range or single-range */}
-                              {p.longRange !== undefined ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSelectPresetRange(p.normalRange)}
-                                    title={`Set normal range: ${p.normalRange} ft`}
-                                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border transition-colors cursor-pointer ${
-                                      isNormalActive
-                                        ? 'bg-amber-400 text-slate-950 font-bold border-amber-300 shadow-sm'
-                                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-400/50 hover:text-amber-200'
-                                    }`}
-                                  >
-                                    Normal ({p.normalRange}ft)
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSelectPresetRange(p.longRange!)}
-                                    title={`Set max / long range: ${p.longRange} ft`}
-                                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border transition-colors cursor-pointer ${
-                                      isLongActive
-                                        ? 'bg-amber-400 text-slate-950 font-bold border-amber-300 shadow-sm'
-                                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-400/50 hover:text-amber-200'
-                                    }`}
-                                  >
-                                    Max ({p.longRange}ft)
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSelectPresetRange(p.normalRange)}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border transition-colors cursor-pointer ${
-                                    isNormalActive
-                                      ? 'bg-amber-400 text-slate-950 font-bold border-amber-300 shadow-sm'
-                                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-400/50 hover:text-amber-200'
-                                  }`}
-                                >
-                                  Select ({p.normalRange}ft)
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Alphabetical list of examples */}
-                            <div className="mt-1.5 flex flex-wrap gap-1 items-center">
-                              <span className="text-[10px] text-slate-400 font-medium">Examples:</span>
-                              {p.items.map((item) => (
-                                <span
-                                  key={item}
-                                  className="text-[10px] px-1.5 py-0.2 rounded bg-slate-900/90 text-slate-300 border border-slate-800 font-sans"
-                                >
-                                  {item}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Category B: Spells & Magical Effects */}
-                  {(presetCategory === 'spells' || presetCategory === 'all') && (
-                    <div className="space-y-1.5 pt-1">
-                      {presetCategory === 'all' && (
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-cyan-400 uppercase tracking-wider pt-1">
-                          <Sparkles className="w-3 h-3" />
-                          <span>Spells &amp; Magical Effects</span>
-                        </div>
-                      )}
-                      {SPELL_RANGE_PRESETS.map((p) => {
-                        const isActive = rangeLimit === p.range;
-
-                        return (
-                          <div
-                            key={p.id}
-                            className={`p-2 rounded-lg border transition-all text-xs ${
-                              isActive
-                                ? 'bg-cyan-950/40 border-cyan-500/60 shadow-sm'
-                                : 'bg-slate-950/70 border-slate-800/80 hover:border-slate-700 hover:bg-slate-950'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                                  {p.rangeLabel}
-                                </span>
-                                <span className="font-semibold text-slate-200 text-[11px]">
-                                  {p.classification}
-                                </span>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => handleSelectPresetRange(p.range)}
-                                className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border transition-colors cursor-pointer ${
-                                  isActive
-                                    ? 'bg-cyan-400 text-slate-950 font-bold border-cyan-300 shadow-sm'
-                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-400/50 hover:text-cyan-200'
-                                }`}
-                              >
-                                Select ({p.range}ft)
-                              </button>
-                            </div>
-
-                            {/* Alphabetical list of spells */}
-                            <div className="mt-1.5 flex flex-wrap gap-1 items-center">
-                              <span className="text-[10px] text-slate-400 font-medium">Spells:</span>
-                              {p.items.map((item) => (
-                                <span
-                                  key={item}
-                                  className="text-[10px] px-1.5 py-0.2 rounded bg-slate-900/90 text-cyan-200/90 border border-slate-800 font-sans"
-                                >
-                                  {item}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+              {/* Field 2: Target Altitude Difference (ft) */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="altitude-diff-input" className="text-xs font-semibold text-slate-200">
+                    Target Altitude Difference (ft)
+                  </label>
+                  <span className="text-[10px] font-mono text-cyan-400/80">Vertical Leg</span>
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    id="altitude-diff-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={altitudeInput}
+                    onChange={(e) => setAltitudeInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-base font-mono font-bold rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 transition-all pr-12"
+                    placeholder="e.g. 60"
+                  />
+                  <span className="absolute right-3.5 text-xs font-mono font-semibold text-slate-400 pointer-events-none">
+                    ft
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] text-slate-500 font-mono">Quick:</span>
+                  {[10, 30, 60, 100].map((ft) => (
+                    <button
+                      key={ft}
+                      type="button"
+                      onClick={() => setAltitudeInput(ft.toString())}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded border transition cursor-pointer ${
+                        altitudeDiff === ft
+                          ? 'bg-cyan-400 text-slate-950 font-bold border-cyan-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      {ft}ft
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Results Summary Card */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3 shadow-sm">
-            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display">
-              Calculated 3D Metrics
-            </h3>
+          {/* Tactical Output Prominently Displayed Beneath Inputs */}
+          <div className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-4 shadow-sm">
+            <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display flex items-center gap-2">
+              <Crosshair className="w-3.5 h-3.5 text-emerald-400" />
+              Tactical Output
+            </h4>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 block">True 3D Line of Sight</span>
-                <span className="text-xl font-bold font-mono text-amber-300 tabular-nums">
-                  {distanceResults.euclideanDistance} ft
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* True Distance */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-amber-500/40 space-y-1.5 shadow-sm">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block font-mono">
+                  True Distance
                 </span>
-                <span className="text-[10px] text-slate-500 block mt-0.5">Euclidean hypotenuse</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold font-mono text-amber-300 tabular-nums">
+                    {formattedTrueDistance}
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-slate-400">ft</span>
+                </div>
+                <span className="text-[10px] text-slate-500 block font-mono">
+                  Math.sqrt({groundDistance}² + {altitudeDiff}²) ft
+                </span>
               </div>
 
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Standard 5e (RAW)</span>
-                <span className="text-xl font-bold font-mono text-cyan-300 tabular-nums">
-                  {standard5eDist} ft
+              {/* Tactical 5e Range */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-cyan-500/40 space-y-1.5 shadow-sm">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block font-mono">
+                  Tactical 5e Range
                 </span>
-                <span className="text-[10px] text-slate-500 block mt-0.5">max(ground, height)</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold font-mono text-cyan-300 tabular-nums">
+                    {tactical5eRange}
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-slate-400">ft</span>
+                  <span className="text-[10px] font-sans font-medium text-cyan-400/90 ml-1">
+                    ({gridSquares} sq)
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-500 block font-mono">
+                  Rounded up to 5-foot grid increments
+                </span>
               </div>
+            </div>
 
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Altitude Delta (ΔZ)</span>
-                <span className="text-xl font-bold font-mono text-slate-200 tabular-nums">
-                  {deltaElevation} ft
+            {/* Tactical Reference Summary */}
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Trajectory Pitch: <strong className="text-amber-300">{pitchAngleDegrees}°</strong>
                 </span>
-                <span className="text-[10px] text-slate-500 block mt-0.5">Vertical displacement</span>
               </div>
-
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Trajectory Pitch</span>
-                <span className="text-xl font-bold font-mono text-amber-400 tabular-nums">
-                  {distanceResults.pitchAngleDegrees}°
-                </span>
-                <span className="text-[10px] text-slate-500 block mt-0.5">Elevation angle</span>
+              <div className="text-[11px] text-slate-400 font-mono">
+                Standard 5e RAW: <strong className="text-slate-200">{Math.max(groundDistance, altitudeDiff)} ft</strong> (Cube rule)
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Visualizer Canvas & Reference Table */}
+        {/* Right Column: Dynamic 3D Triangle Diagram */}
         <div className="lg:col-span-7 space-y-5">
           <div className="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Crosshair className="w-4 h-4 text-amber-400" />
+                <ArrowUpRight className="w-4 h-4 text-emerald-400" />
                 <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display">
-                  3D Triangulation Vector Diagram
+                  Dynamic 3D Triangle Diagram
                 </h3>
               </div>
               <span className="text-[11px] text-slate-400 font-mono">
-                {isInRange ? '🟢 Line of Sight Clear' : '🔴 Out of Range'}
+                Live Proportional Projection
               </span>
             </div>
 
-            <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center p-2">
-              <canvas
-                ref={canvasRef}
-                width={560}
-                height={270}
-                className="w-full max-w-full h-auto block"
-              />
+            <p className="text-xs text-slate-400">
+              Visualizes the horizontal leg, elevation altitude leg, and calculated hypotenuse scaled to exact proportions.
+            </p>
+
+            {/* SVG Visualizer */}
+            <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center p-3 relative">
+              <svg
+                viewBox={`0 0 ${svgGeometry.svgWidth} ${svgGeometry.svgHeight}`}
+                className="w-full h-auto max-h-[360px] block select-none"
+              >
+                <defs>
+                  {/* Tactical Grid Background Pattern */}
+                  <pattern id="tactical-grid-pattern" width="25" height="25" patternUnits="userSpaceOnUse">
+                    <path d="M 25 0 L 0 0 0 25" fill="none" stroke="#1e293b" strokeWidth="0.8" />
+                  </pattern>
+
+                  {/* Linear Gradient for Hypotenuse Glow */}
+                  <linearGradient id="hypotenuse-glow" x1="0%" y1="100%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#10b981" />
+                    <stop offset="100%" stopColor="#34d399" />
+                  </linearGradient>
+
+                  {/* Gradient for Triangle Area */}
+                  <linearGradient id="triangle-fill-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.12" />
+                    <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.05" />
+                  </linearGradient>
+                </defs>
+
+                {/* Grid Canvas */}
+                <rect width="100%" height="100%" fill="url(#tactical-grid-pattern)" rx="8" />
+
+                {/* Ground Baseline Axis across full canvas */}
+                <line
+                  x1="30"
+                  y1={svgGeometry.originY}
+                  x2={svgGeometry.svgWidth - 30}
+                  y2={svgGeometry.originY}
+                  stroke="#334155"
+                  strokeWidth="1.5"
+                  strokeDasharray="3 3"
+                />
+
+                {/* Triangle Area Fill */}
+                {(groundDistance > 0 || altitudeDiff > 0) && (
+                  <polygon
+                    points={`${svgGeometry.originX},${svgGeometry.originY} ${svgGeometry.cornerX},${svgGeometry.cornerY} ${svgGeometry.targetX},${svgGeometry.targetY}`}
+                    fill="url(#triangle-fill-grad)"
+                  />
+                )}
+
+                {/* Right Angle Indicator */}
+                {groundDistance > 0 && altitudeDiff > 0 && (
+                  <path
+                    d={`M ${svgGeometry.cornerX - 14} ${svgGeometry.cornerY} L ${svgGeometry.cornerX - 14} ${svgGeometry.cornerY - 14} L ${svgGeometry.cornerX} ${svgGeometry.cornerY - 14}`}
+                    fill="none"
+                    stroke="#475569"
+                    strokeWidth="1.5"
+                  />
+                )}
+
+                {/* Elevation Pitch Angle Arc at Origin */}
+                {groundDistance > 0 && altitudeDiff > 0 && (
+                  <g>
+                    <path
+                      d={`M ${svgGeometry.originX + 28} ${svgGeometry.originY} A 28 28 0 0 0 ${
+                        svgGeometry.originX + 28 * Math.cos(pitchAngleDegrees * (Math.PI / 180))
+                      } ${svgGeometry.originY - 28 * Math.sin(pitchAngleDegrees * (Math.PI / 180))}`}
+                      fill="none"
+                      stroke="#fbbf24"
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={svgGeometry.originX + 34}
+                      y={svgGeometry.originY - 6}
+                      fill="#fbbf24"
+                      fontSize="10"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {pitchAngleDegrees}°
+                    </text>
+                  </g>
+                )}
+
+                {/* 1. Horizontal Leg (Ground Distance) */}
+                <line
+                  x1={svgGeometry.originX}
+                  y1={svgGeometry.originY}
+                  x2={svgGeometry.cornerX}
+                  y2={svgGeometry.cornerY}
+                  stroke="#f59e0b"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+
+                {/* Horizontal Leg Dynamic Label */}
+                <g transform={`translate(${svgGeometry.midGroundX}, ${svgGeometry.originY + 24})`}>
+                  <rect
+                    x="-75"
+                    y="-13"
+                    width="150"
+                    height="22"
+                    rx="4"
+                    fill="#0f172a"
+                    stroke="#f59e0b"
+                    strokeWidth="1"
+                    strokeOpacity="0.8"
+                  />
+                  <text
+                    x="0"
+                    y="1"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#fbbf24"
+                    fontSize="11"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                  >
+                    Ground: {groundDistance} ft
+                  </text>
+                </g>
+
+                {/* 2. Vertical Leg (Target Altitude Difference) */}
+                <line
+                  x1={svgGeometry.cornerX}
+                  y1={svgGeometry.cornerY}
+                  x2={svgGeometry.targetX}
+                  y2={svgGeometry.targetY}
+                  stroke="#38bdf8"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+
+                {/* Vertical Leg Dynamic Label */}
+                <g transform={`translate(${svgGeometry.targetX + 16}, ${svgGeometry.midAltitudeY})`}>
+                  <rect
+                    x="0"
+                    y="-12"
+                    width="135"
+                    height="24"
+                    rx="4"
+                    fill="#0f172a"
+                    stroke="#38bdf8"
+                    strokeWidth="1"
+                    strokeOpacity="0.8"
+                  />
+                  <text
+                    x="67.5"
+                    y="1"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#38bdf8"
+                    fontSize="11"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                  >
+                    Altitude: {altitudeDiff} ft
+                  </text>
+                </g>
+
+                {/* 3. Hypotenuse (Tactical 3D Distance Line) */}
+                <line
+                  x1={svgGeometry.originX}
+                  y1={svgGeometry.originY}
+                  x2={svgGeometry.targetX}
+                  y2={svgGeometry.targetY}
+                  stroke="url(#hypotenuse-glow)"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                />
+
+                {/* Hypotenuse Dynamic Label (Tactical 5e Range) */}
+                <g transform={`translate(${svgGeometry.midHypotenuseX}, ${svgGeometry.midHypotenuseY - 18})`}>
+                  <rect
+                    x="-106"
+                    y="-14"
+                    width="212"
+                    height="26"
+                    rx="6"
+                    fill="#022c22"
+                    stroke="#10b981"
+                    strokeWidth="1.5"
+                    className="shadow-lg"
+                  />
+                  <text
+                    x="0"
+                    y="0"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#34d399"
+                    fontSize="11"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                  >
+                    Tactical 5e Range: {tactical5eRange} ft
+                  </text>
+                </g>
+
+                {/* Origin Point Marker (Attacker / Shooter) */}
+                <circle
+                  cx={svgGeometry.originX}
+                  cy={svgGeometry.originY}
+                  r="6"
+                  fill="#10b981"
+                  stroke="#022c22"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx={svgGeometry.originX}
+                  cy={svgGeometry.originY}
+                  r="10"
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth="1"
+                  strokeOpacity="0.5"
+                />
+                <text
+                  x={svgGeometry.originX - 10}
+                  y={svgGeometry.originY + 22}
+                  textAnchor="end"
+                  fill="#94a3b8"
+                  fontSize="10"
+                  fontWeight="bold"
+                  fontFamily="sans-serif"
+                >
+                  Origin (0 ft)
+                </text>
+
+                {/* Target Point Marker (Flying Target / High Ground) */}
+                <circle
+                  cx={svgGeometry.targetX}
+                  cy={svgGeometry.targetY}
+                  r="6"
+                  fill="#38bdf8"
+                  stroke="#082f49"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx={svgGeometry.targetX}
+                  cy={svgGeometry.targetY}
+                  r="11"
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="1"
+                  strokeOpacity="0.5"
+                />
+                <text
+                  x={svgGeometry.targetX + 12}
+                  y={svgGeometry.targetY - 8}
+                  textAnchor="start"
+                  fill="#cbd5e1"
+                  fontSize="10"
+                  fontWeight="bold"
+                  fontFamily="sans-serif"
+                >
+                  Target (+{altitudeDiff} ft)
+                </text>
+              </svg>
             </div>
 
+            {/* Diagram Legend & Guide */}
             <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-1">
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> Origin
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> Origin (Attacker)
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className={`w-2.5 h-2.5 rounded-full inline-block ${isInRange ? 'bg-emerald-500' : 'bg-red-500'}`} /> Target
+                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block" /> Elevated Target
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="w-4 h-0.5 bg-sky-400 inline-block" /> Height (ΔZ)
+                  <span className="w-4 h-0.5 bg-amber-400 inline-block" /> Ground
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-4 h-0.5 bg-cyan-400 inline-block" /> Altitude
                 </span>
               </div>
-              <span className="italic">Updates live with sliders</span>
-            </div>
-          </div>
-
-          {/* Quick Pythagorean Altitude Reference Table (Expanded 500ft x 500ft Matrix) */}
-          <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3 shadow-sm flex flex-col flex-1">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
-              <div className="flex items-center gap-2">
-                <Compass className="w-4 h-4 text-amber-400" />
-                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display">
-                  3D Elevation &amp; Flying Distance Cheat Matrix (500ft × 500ft)
-                </h3>
-              </div>
-              <span className="text-[10px] text-slate-400 font-mono">
-                Click any cell to target • Active 3D: <strong className="text-amber-300">{distanceResults.euclideanDistance}ft</strong>
+              <span className="font-mono text-emerald-400">
+                True Hypotenuse: {formattedTrueDistance} ft
               </span>
-            </div>
-
-            <div className="overflow-auto max-h-[380px] rounded-lg border border-slate-800/80 bg-slate-950">
-              <table className="w-full text-xs text-center border-collapse font-mono">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 bg-slate-900/95 sticky top-0 z-20 shadow-sm">
-                    <th className="py-2 px-3 text-left font-bold text-slate-300 sticky left-0 bg-slate-900/95 z-30 border-r border-slate-800 whitespace-nowrap">
-                      Height \ Ground
-                    </th>
-                    {CHEAT_TABLE_GROUND.map((g) => (
-                      <th
-                        key={g}
-                        className={`py-2 px-2.5 font-bold whitespace-nowrap ${
-                          g === closestGround ? 'text-amber-300 bg-amber-950/40' : 'text-slate-300'
-                        }`}
-                      >
-                        {g} ft
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 text-slate-300">
-                  {CHEAT_TABLE_HEIGHT.map((h) => {
-                    const isRowClosest = h === closestHeight;
-                    return (
-                      <tr key={h} className={isRowClosest ? 'bg-slate-900/40' : 'hover:bg-slate-900/20'}>
-                        <td
-                          className={`py-1.5 px-3 text-left font-bold sticky left-0 z-10 border-r border-slate-800 whitespace-nowrap ${
-                            isRowClosest ? 'text-cyan-300 bg-slate-900' : 'text-cyan-400/90 bg-slate-950'
-                          }`}
-                        >
-                          {h} ft high
-                        </td>
-                        {CHEAT_TABLE_GROUND.map((g) => {
-                          const dist = Math.round(Math.sqrt(g * g + h * h));
-                          const isClosest = g === closestGround && h === closestHeight;
-                          const isCellInRange = dist <= rangeLimit;
-
-                          return (
-                            <td
-                              key={g}
-                              onClick={() => {
-                                setHorizontalDist(g);
-                                setTargetElev(sourceElev + h);
-                              }}
-                              title={`Ground: ${g}ft, Height: ${h}ft -> 3D: ${dist}ft (${isCellInRange ? 'In Range' : 'Out of Range'})\nClick to set position`}
-                              className={`py-1.5 px-2 transition-all cursor-pointer select-none text-[11px] tabular-nums ${
-                                isClosest
-                                  ? 'bg-amber-400 text-slate-950 font-bold ring-2 ring-amber-300 shadow-sm'
-                                  : isCellInRange
-                                  ? 'text-emerald-300/90 hover:bg-emerald-950/50 hover:text-emerald-200'
-                                  : 'text-rose-300/80 hover:bg-rose-950/50 hover:text-rose-200'
-                              }`}
-                            >
-                              {dist}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-800/60 font-mono">
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded bg-emerald-500/20 border border-emerald-500/40 inline-block" /> In Range (≤{rangeLimit}ft)
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded bg-rose-500/20 border border-rose-500/40 inline-block" /> Out of Range
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded bg-amber-400 inline-block" /> Active Position
-                </span>
-              </div>
-              <span>Pythagorean Formula: d = √(g² + h²)</span>
             </div>
           </div>
         </div>
+
       </div>
 
       {/* BOTTOM ROW: MOVED HOMEBREW FALL DAMAGE & JUMP DISTANCE CALCULATORS */}

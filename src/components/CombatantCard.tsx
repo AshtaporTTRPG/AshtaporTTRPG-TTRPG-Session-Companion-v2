@@ -28,6 +28,7 @@ interface CombatantCardProps {
   onDelete: () => void;
   onAddLog?: (dmMessage: string, playerMessage?: string) => void;
   onRollInitiative?: () => void;
+  onToggleVisibility?: () => void;
 }
 
 const CONDITIONS_LIST: { name: Condition; color: string }[] = [
@@ -65,6 +66,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
   onDelete,
   onAddLog,
   onRollInitiative,
+  onToggleVisibility,
 }) => {
   // FOG OF WAR & ROLE-BASED ACCESS CONTROL (RBAC):
   // 1. Fog of War: If marked with FoW (or monster/boss/custom default), conceal conditions, status badges, stats, and numerical damage from players.
@@ -361,9 +363,9 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                 </span>
               )}
 
-              {combatant.hidden && isDm && (
-                <span className="text-[10px] text-purple-400 bg-purple-950/80 border border-purple-800 px-1.5 py-0.5 rounded flex items-center gap-1">
-                  <EyeOff className="w-3 h-3" /> Hidden from Players
+              {(combatant.hidden || combatant.isSecret) && isDm && (
+                <span className="text-[10px] text-purple-300 bg-purple-950/90 border border-purple-600/80 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold shadow-sm">
+                  <EyeOff className="w-3 h-3 text-purple-400" /> Hidden / Secret
                 </span>
               )}
             </div>
@@ -407,15 +409,15 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
           {isDm && (
             <button
               type="button"
-              onClick={() => onUpdate({ hidden: !combatant.hidden })}
-              title={combatant.hidden ? 'Reveal to Players' : 'Hide from Players'}
+              onClick={onToggleVisibility ? onToggleVisibility : () => onUpdate({ hidden: !(combatant.hidden || combatant.isSecret), isSecret: false })}
+              title={combatant.hidden || combatant.isSecret ? 'Reveal to Players' : 'Hide from Players'}
               className={`p-1.5 rounded-lg border transition cursor-pointer ${
-                combatant.hidden
-                  ? 'bg-purple-950 border-purple-600 text-purple-300'
+                combatant.hidden || combatant.isSecret
+                  ? 'bg-purple-950 border-purple-600 text-purple-300 ring-1 ring-purple-500/50'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              {combatant.hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {combatant.hidden || combatant.isSecret ? <EyeOff className="w-4 h-4 text-purple-300" /> : <Eye className="w-4 h-4" />}
             </button>
           )}
 

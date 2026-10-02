@@ -88,6 +88,7 @@ export function executeDiceRoll({
   const allResolvedRolls: number[] = [];
   const allRawRolls: number[] = [];
   const allPairedRolls: PairedD20Roll[] = [];
+  const allIndividualLineItems: string[] = [];
   let sumTotal = 0;
   let hasCrit = false;
   let hasFumble = false;
@@ -103,16 +104,21 @@ export function executeDiceRoll({
     totalDiceCount += entry.count;
 
     if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
-      // D&D 5e ADVANTAGE / DISADVANTAGE RESOLUTION:
-      // Advantage: Roll 2d20, keep the highest roll: Math.max(die1, die2) + modifier
-      // Disadvantage: Roll 2d20, keep the lowest roll: Math.min(die1, die2) + modifier
-      // Supports N pairs if multi-dice pool specified, but 1 or 2 d20s evaluates as exactly 1 pair (2 dice rolled)
-      const numPairs = entry.count > 2 ? Math.floor(entry.count / 2) : 1;
+      // MULTI-PAIR GENERATION (Advantage / Disadvantage):
+      // When rolling N d20s with Advantage/Disadvantage:
+      // - Advantage: Roll N independent pairs of 2d20, keep Math.max(die1, die2), and discard the other.
+      // - Disadvantage: Roll N independent pairs of 2d20, keep Math.min(die1, die2), and discard the other.
+      // - Modifier Application: (selectedDie + modifier) added to each evaluated roll.
+      const numPairs = entry.count;
       for (let k = 0; k < numPairs; k++) {
         const valA = rollSingleDie(20);
         const valB = rollSingleDie(20);
         const selected = advantageMode === 'advantage' ? Math.max(valA, valB) : Math.min(valA, valB);
         const discarded = advantageMode === 'advantage' ? Math.min(valA, valB) : Math.max(valA, valB);
+        const evaluatedTotal = selected + modifier;
+
+        const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+        const lineItem = `Roll ${k + 1}: [${selected}, ~~${discarded}~~]${modStr} = ${evaluatedTotal}`;
 
         const pair: PairedD20Roll = {
           pairIndex: k + 1,
@@ -120,12 +126,16 @@ export function executeDiceRoll({
           die2: valB,
           selected,
           discarded,
+          modifier,
+          totalWithModifier: evaluatedTotal,
+          lineItem,
         };
 
         groupPairedRolls.push(pair);
         allPairedRolls.push(pair);
         groupRolls.push(selected);
         groupRawRolls.push(valA, valB);
+        allIndividualLineItems.push(lineItem);
 
         // Crits and Fumbles evaluated strictly on the resolved winning dice
         if (selected === 20) hasCrit = true;
@@ -136,13 +146,17 @@ export function executeDiceRoll({
       const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
       sumTotal += groupSum;
     } else {
-      // Default Multi-d20 or polyhedral roll:
-      // Display ALL rolled values clearly in the order they were rolled (e.g. [Roll 1: 18] [Roll 2: 7]).
-      // DO NOT drop, discard, or auto-pick lowest/highest!
+      // Straight roll (d20 or polyhedral): Roll N independent dice
       for (let i = 0; i < entry.count; i++) {
         const val = rollSingleDie(sides);
+        const evaluatedTotal = val + modifier;
+        const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+        const lineItem = `Roll ${i + 1}: [${val}]${modStr} = ${evaluatedTotal}`;
+
         groupRolls.push(val);
         groupRawRolls.push(val);
+        allIndividualLineItems.push(lineItem);
+
         if (entry.diceType === 'd20') {
           if (val === 20) hasCrit = true;
           if (val === 1 && !hasCrit) hasFumble = true;
@@ -164,10 +178,10 @@ export function executeDiceRoll({
 
   const total = sumTotal + modifier;
 
-  // Build formula string, e.g. "2d20 + 4 (advantage)"
+  // Build formula string, e.g. "5d20 (advantage) + 4"
   const formulaParts = poolEntries.map((e) => {
     if (e.diceType === 'd20' && advantageMode !== 'normal') {
-      return '2d20';
+      return `${e.count}d20 (${advantageMode})`;
     }
     return `${e.count}${e.diceType}`;
   });
@@ -175,25 +189,9 @@ export function executeDiceRoll({
   if (modifier !== 0) {
     formula += modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`;
   }
-  if (advantageMode !== 'normal') {
-    formula += ` (${advantageMode})`;
-  }
 
   // Build individual summary string with paired breakdown when Advantage/Disadvantage is active
-  const individualParts = poolBreakdown.map((b) => {
-    if (b.pairedRolls && b.pairedRolls.length > 0) {
-      const pairStrs = b.pairedRolls.map(
-        (p) => `[${p.selected}, ~~${p.discarded}~~]`
-      );
-      return `${b.dieType} (${advantageMode}): ${pairStrs.join(', ')}`;
-    }
-    const formattedDice = b.rolls.map((r) => `[${r}]`).join(', ');
-    return `${b.dieType}: ${formattedDice}`;
-  });
-  let individualSummary = individualParts.join(' | ');
-  if (modifier !== 0) {
-    individualSummary += ` (Mod: ${modifier > 0 ? `+${modifier}` : modifier})`;
-  }
+  const individualSummary = allIndividualLineItems.join(' | ');
 
   // Audio feedback
   if (hasCrit) {
@@ -229,6 +227,7 @@ export function executeDiceRoll({
     poolBreakdown,
     formula,
     individualSummary,
+    individualLineItems: allIndividualLineItems,
   };
 }
 

@@ -40,6 +40,7 @@ export interface UnifiedFeedItem {
     displayMode?: RollDisplayMode;
     poolBreakdown?: DieGroupRoll[];
     individualSummary?: string;
+    individualLineItems?: string[];
   };
 }
 
@@ -240,6 +241,7 @@ class LiveFeedSyncManager {
             displayMode: roll.displayMode || 'sum',
             poolBreakdown: roll.poolBreakdown,
             individualSummary: roll.individualSummary,
+            individualLineItems: roll.individualLineItems,
           },
         };
 
@@ -343,6 +345,7 @@ class LiveFeedSyncManager {
           poolBreakdown: item.rollDetails.poolBreakdown,
           formula: item.rollDetails.formula,
           individualSummary: item.rollDetails.individualSummary,
+          individualLineItems: item.rollDetails.individualLineItems,
         };
         roomSync.broadcast('DICE_ROLL', { roll: rollObj });
       } else if (item.type === 'turn') {
@@ -425,6 +428,7 @@ class LiveFeedSyncManager {
         displayMode: roll.displayMode || 'sum',
         poolBreakdown: roll.poolBreakdown,
         individualSummary: roll.individualSummary,
+        individualLineItems: roll.individualLineItems,
       },
     };
 

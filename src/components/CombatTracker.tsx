@@ -96,6 +96,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
   const [newAc, setNewAc] = useState(14);
   const [newHp, setNewHp] = useState(25);
   const [newHidden, setNewHidden] = useState(false);
+  const [newIsSecret, setNewIsSecret] = useState(false);
+  const [newFogOfWar, setNewFogOfWar] = useState(false);
 
   // Clear Combat ("Blank Slate") Confirmation Modal State
   const [isClearCombatModalOpen, setIsClearCombatModalOpen] = useState(false);
@@ -243,14 +245,25 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       playTurnSound();
 
       if (activeCombatant) {
-        const announcement = `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
-        liveFeedSync.recordTurnAnnouncement(announcement, true);
+        const isHiddenCombatant = activeCombatant.hidden || activeCombatant.isSecret;
+        if (!isHiddenCombatant) {
+          const announcement = `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
+          liveFeedSync.recordTurnAnnouncement(announcement, true);
 
-        // If active combatant is a Player (PC), trigger prominent floating visual feedback
-        if (activeCombatant.type === 'player') {
-          setPlayerTurnAlert(`⚔️ IT IS ${activeCombatant.name.toUpperCase()}'S TURN!`);
-          setTimeout(() => setPlayerTurnAlert(null), 5000);
+          // If active combatant is a Player (PC), trigger prominent floating visual feedback
+          if (activeCombatant.type === 'player') {
+            setPlayerTurnAlert(`⚔️ IT IS ${activeCombatant.name.toUpperCase()}'S TURN!`);
+            setTimeout(() => setPlayerTurnAlert(null), 5000);
+          } else {
+            setPlayerTurnAlert(null);
+          }
         } else {
+          // Concealed combatant: DM sees turn heralded, players see generic notice without revealing identity
+          liveFeedSync.recordCombatLog(
+            `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
+            true,
+            `⚔️ Turn ${nextIndex + 1}/${combatants.length}: An unseen entity takes their turn... (Round ${nextRound})`
+          );
           setPlayerTurnAlert(null);
         }
       }
@@ -532,19 +545,32 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     });
   };
 
-  // TOGGLE VISIBILITY (DM Fog of War)
+  // TOGGLE VISIBILITY (DM Reveal / Hide)
   const handleToggleVisibility = (combatantId: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isCurrentlyHidden = !!(target.hidden || target.isSecret);
+    const willBeHidden = !isCurrentlyHidden;
+
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, hidden: !c.hidden } : c
+      c.id === combatantId
+        ? {
+            ...c,
+            hidden: willBeHidden,
+            isSecret: willBeHidden ? c.isSecret : false,
+          }
+        : c
     );
     setCombatants(updated);
-    const target = combatants.find((c) => c.id === combatantId);
-    if (target) {
+
+    // Only broadcast a feed message when the GM clicks "Reveal" (revealed to players)
+    if (isCurrentlyHidden && !willBeHidden) {
       liveFeedSync.recordCombatLog(
-        `👁️ ${target.name} is now ${target.hidden ? 'revealed to players' : 'hidden from players'}.`,
+        `👁️ ${target.name} has been revealed to players!`,
         true
       );
     }
+
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
@@ -614,8 +640,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     const allowedType: CombatantType =
       !isDm && newType !== 'player' && newType !== 'ally' ? 'player' : newType;
 
+    const isMarkedSecretOrHidden = isDm && (newHidden || newIsSecret || allowedType === 'boss');
     const isFoWCombatant =
-      isDm && (newHidden || allowedType === 'monster' || allowedType === 'boss' || allowedType === 'custom');
+      isDm && (newFogOfWar || isMarkedSecretOrHidden || allowedType === 'monster' || allowedType === 'boss' || allowedType === 'custom');
+    const isHiddenFromPlayers =
+      isDm && (newHidden || newIsSecret || newFogOfWar || allowedType === 'boss');
 
     const newCombatant: Combatant = {
       id: `combatant-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -628,8 +657,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       hpMax: newHp,
       hpTemp: 0,
       conditions: [],
-      hidden: isDm ? newHidden : false,
+      hidden: isHiddenFromPlayers,
       fogOfWar: isFoWCombatant,
+      isSecret: isDm && (newIsSecret || isHiddenFromPlayers),
     };
 
     // Strictly sort descending by initiative
@@ -650,10 +680,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       setActiveTurnIndex(targetActiveIndex);
     }
 
-    liveFeedSync.recordCombatLog(
-      `➕ Added ${newCombatant.name} (${newCombatant.type === 'player' ? 'Player (PC)' : newCombatant.type === 'ally' ? 'NPC / Ally' : newCombatant.type.toUpperCase()}) with Initiative ${newCombatant.initiative}.`,
-      true
-    );
+    // Suppress all live feed announcements and toast notifications completely when marked Secret, Hidden, or FoW
+    const suppressFeedAndToast = newCombatant.hidden || newCombatant.isSecret || newCombatant.fogOfWar;
+
+    if (!suppressFeedAndToast) {
+      liveFeedSync.recordCombatLog(
+        `➕ Added ${newCombatant.name} (${newCombatant.type === 'player' ? 'Player (PC)' : newCombatant.type === 'ally' ? 'NPC / Ally' : newCombatant.type.toUpperCase()}) with Initiative ${newCombatant.initiative}.`,
+        true
+      );
+    }
+
     broadcastCombat(updated, targetActiveIndex, round, targetActiveId, combatStatus);
 
     // Reset Form
@@ -665,10 +701,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     setNewAc(14);
     setNewHp(25);
     setNewHidden(false);
+    setNewIsSecret(false);
+    setNewFogOfWar(false);
   };
 
-  // Filter center cards based on DM vs Player Fog of War
-  const visibleCombatants = combatants.filter((c) => isDm || !c.hidden);
+  // Filter center cards based on DM vs Player: completely hide any combatant marked hidden or secret from player view
+  const visibleCombatants = combatants.filter((c) => isDm || (!c.hidden && !c.isSecret));
 
   // LAYOUT UX: ACTIVE TURN PRIORITIZATION IN MAIN CENTER DISPLAY
   // Dynamically reorder center combatant cards so the active combatant (current turn) is anchored at the top.
@@ -947,6 +985,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                   onDelete={() => handleDeleteCombatant(combatant.id)}
                   onAddLog={addFeedLog}
                   onRollInitiative={() => handleRollInitiative(combatant.id)}
+                  onToggleVisibility={() => preserveScroll(() => handleToggleVisibility(combatant.id))}
                 />
               );
             })
@@ -1081,24 +1120,50 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
                 </div>
               </div>
 
-              {/* Fog of War Toggle: Hidden from Players initially (DM Only) */}
+              {/* Privacy & Stealth Settings: Hidden / Secret & Fog of War (DM Only) */}
               {isDm && (
-                <label className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newHidden}
-                    onChange={(e) => setNewHidden(e.target.checked)}
-                    className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-0"
-                  />
-                  <div className="text-xs">
-                    <span className="font-semibold text-slate-200 block">
-                      Conceal from Player View (Stealth / Unrevealed)
-                    </span>
-                    <span className="text-[10px] text-slate-500">
-                      Will remain completely hidden until revealed with the eye toggle.
-                    </span>
-                  </div>
-                </label>
+                <div className="space-y-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Privacy &amp; Stealth Settings (GM Only)
+                  </span>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newHidden || newIsSecret}
+                      onChange={(e) => {
+                        setNewHidden(e.target.checked);
+                        setNewIsSecret(e.target.checked);
+                      }}
+                      className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-0 mt-0.5"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-slate-200 block">
+                        Mark as Secret / Hidden (Secret Boss &amp; Stealth FoW)
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        Suppresses all feed announcements &amp; toasts completely. Kept completely invisible from player initiative until revealed.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer pt-1 border-t border-slate-800/60">
+                    <input
+                      type="checkbox"
+                      checked={newFogOfWar}
+                      onChange={(e) => setNewFogOfWar(e.target.checked)}
+                      className="rounded bg-slate-900 border-slate-700 text-purple-400 focus:ring-0 mt-0.5"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-purple-300 block">
+                        Fog of War (Conceal Stats &amp; Active Conditions)
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        Hides numerical HP, AC, damage details, and health status badges from players.
+                      </span>
+                    </div>
+                  </label>
+                </div>
               )}
 
               {/* Modal Buttons */}

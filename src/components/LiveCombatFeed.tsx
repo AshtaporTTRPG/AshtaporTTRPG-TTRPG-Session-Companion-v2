@@ -236,84 +236,117 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
                   )}
 
                   {isIndividual ? (
-                    <div className="space-y-1.5 pt-0.5 border-t border-slate-800/60">
-                      {pairedRolls && pairedRolls.length > 0 && (
-                        <div className="space-y-1">
-                          <div className="text-[10px] font-semibold text-amber-300 font-mono">
-                            d20 ({advantageModeVal || 'contested'}):
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {pairedRolls.map((pair) => (
-                              <div
-                                key={pair.pairIndex}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono"
-                              >
-                                <span className="text-[9px] text-slate-400 font-bold">P{pair.pairIndex}:</span>
-                                <span
-                                  className={`px-1 py-0.2 rounded font-bold ${
-                                    pair.selected === 20
-                                      ? 'bg-amber-400 text-slate-950'
-                                      : pair.selected === 1
-                                      ? 'bg-rose-600 text-white'
-                                      : 'bg-amber-950/80 text-amber-200 border border-amber-600/60'
-                                  }`}
-                                >
-                                  [{pair.selected}]
-                                </span>
-                                <span className="text-[10px] text-slate-500 flex items-center opacity-80">
-                                  (drop{' '}
-                                  <span className="line-through decoration-rose-500 text-slate-400 font-semibold">
-                                    {pair.discarded}
-                                  </span>
-                                  )
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {(poolBreakdown && poolBreakdown.length > 0
-                          ? pairedRolls && pairedRolls.length > 0
-                            ? poolBreakdown.filter((g) => g.dieType !== 'd20')
-                            : poolBreakdown
-                          : pairedRolls && pairedRolls.length > 0
-                          ? []
-                          : [{ dieType: evt.rollDetails?.diceType || 'd20', rolls: rolls || [] }]
-                        ).map((group, gIdx) => (
-                          <div
-                            key={gIdx}
-                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono"
-                          >
-                            <span className="font-bold text-amber-300">{group.dieType}:</span>
-                            <div className="flex items-center gap-0.5">
-                              {group.rolls.map((r, rIdx) => {
-                                const rNat20 = group.dieType === 'd20' && r === 20;
-                                const rNat1 = group.dieType === 'd20' && r === 1;
-                                return (
-                                  <span
-                                    key={rIdx}
-                                    className={`px-1 py-0.2 rounded font-bold ${
-                                      rNat20
-                                        ? 'bg-amber-400 text-slate-950'
-                                        : rNat1
-                                        ? 'bg-rose-600 text-white'
-                                        : 'bg-slate-800 text-slate-200'
-                                    }`}
-                                  >
-                                    [{r}]
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-
+                    <div className="space-y-1.5 pt-1 border-t border-slate-800/60">
+                      <div className="flex items-center justify-between text-[10px] font-mono">
+                        <span className="font-bold text-amber-300">
+                          Individual Rolls ({formula || `${rolls?.length || 1}d20`}):
+                        </span>
                         {modifier !== undefined && modifier !== 0 && (
-                          <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800">
+                          <span className="text-slate-400">
                             Mod: {modifier > 0 ? `+${modifier}` : modifier}
                           </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-1 font-mono text-xs">
+                        {pairedRolls && pairedRolls.length > 0 ? (
+                          pairedRolls.map((pair) => {
+                            const pairNat20 = pair.selected === 20;
+                            const pairNat1 = pair.selected === 1;
+                            const modVal = pair.modifier ?? modifier ?? 0;
+                            const modStr = modVal > 0 ? ` + ${modVal}` : modVal < 0 ? ` - ${Math.abs(modVal)}` : '';
+                            const totalVal = pair.totalWithModifier ?? (pair.selected + modVal);
+                            return (
+                              <div
+                                key={pair.pairIndex}
+                                className="flex items-center justify-between px-2 py-1 rounded bg-slate-900 border border-slate-800 text-[11px]"
+                              >
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-slate-400 font-bold">Roll {pair.pairIndex}:</span>
+                                  <span className="inline-flex items-center">
+                                    <span>[</span>
+                                    <span
+                                      className={`font-bold px-0.5 rounded ${
+                                        pairNat20
+                                          ? 'bg-amber-400 text-slate-950'
+                                          : pairNat1
+                                          ? 'bg-rose-600 text-white'
+                                          : 'text-amber-300'
+                                      }`}
+                                    >
+                                      {pair.selected}
+                                    </span>
+                                    <span>, </span>
+                                    <span className="line-through decoration-rose-500 text-slate-500 font-semibold px-0.5">
+                                      {pair.discarded}
+                                    </span>
+                                    <span>]</span>
+                                  </span>
+                                  {modStr && <span className="text-slate-300">{modStr}</span>}
+                                  <span className="text-slate-400">=</span>
+                                  <span
+                                    className={`font-bold ${
+                                      pairNat20 ? 'text-amber-300' : pairNat1 ? 'text-rose-400' : 'text-slate-100'
+                                    }`}
+                                  >
+                                    {totalVal}
+                                  </span>
+                                </div>
+                                {(pairNat20 || pairNat1) && (
+                                  <span className={`text-[9px] font-bold uppercase font-sans ${pairNat20 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                    {pairNat20 ? 'NAT 20' : 'NAT 1'}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          (rolls || []).map((r, rIdx) => {
+                            const rNat20 = (evt.rollDetails?.diceType === 'd20' || !evt.rollDetails?.diceType) && r === 20;
+                            const rNat1 = (evt.rollDetails?.diceType === 'd20' || !evt.rollDetails?.diceType) && r === 1;
+                            const modVal = modifier ?? 0;
+                            const modStr = modVal > 0 ? ` + ${modVal}` : modVal < 0 ? ` - ${Math.abs(modVal)}` : '';
+                            const totalVal = r + modVal;
+                            return (
+                              <div
+                                key={rIdx}
+                                className="flex items-center justify-between px-2 py-1 rounded bg-slate-900 border border-slate-800 text-[11px]"
+                              >
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-slate-400 font-bold">Roll {rIdx + 1}:</span>
+                                  <span className="inline-flex items-center">
+                                    <span>[</span>
+                                    <span
+                                      className={`font-bold px-0.5 rounded ${
+                                        rNat20
+                                          ? 'bg-amber-400 text-slate-950'
+                                          : rNat1
+                                          ? 'bg-rose-600 text-white'
+                                          : 'text-amber-300'
+                                      }`}
+                                    >
+                                      {r}
+                                    </span>
+                                    <span>]</span>
+                                  </span>
+                                  {modStr && <span className="text-slate-300">{modStr}</span>}
+                                  <span className="text-slate-400">=</span>
+                                  <span
+                                    className={`font-bold ${
+                                      rNat20 ? 'text-amber-300' : rNat1 ? 'text-rose-400' : 'text-slate-100'
+                                    }`}
+                                  >
+                                    {totalVal}
+                                  </span>
+                                </div>
+                                {(rNat20 || rNat1) && (
+                                  <span className={`text-[9px] font-bold uppercase font-sans ${rNat20 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                    {rNat20 ? 'NAT 20' : 'NAT 1'}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })
                         )}
                       </div>
                     </div>

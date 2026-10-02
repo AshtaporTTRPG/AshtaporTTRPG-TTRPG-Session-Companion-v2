@@ -38,17 +38,18 @@ export interface Combatant {
   notes?: string;
   hidden?: boolean; // Per-combatant DM visibility toggle (completely hidden from initiative)
   fogOfWar?: boolean; // Fog of War toggle (conceals active conditions, status badges, exact HP, and damage numbers)
+  isSecret?: boolean; // Secret Boss / NPC marker (completely hidden from player initiative until revealed)
 }
 
 /**
  * Returns true if a combatant is considered under Fog of War.
  * - If fogOfWar is explicitly set, it respects that boolean.
- * - If hidden is true, it is under Fog of War.
+ * - If hidden or isSecret is true, it is under Fog of War.
  * - Otherwise, monsters, bosses, and custom environmental entities default to Fog of War.
  */
 export function isCombatantFoW(combatant: Combatant): boolean {
   if (combatant.fogOfWar !== undefined) return combatant.fogOfWar;
-  if (combatant.hidden) return true;
+  if (combatant.hidden || combatant.isSecret) return true;
   return combatant.type === 'monster' || combatant.type === 'boss' || combatant.type === 'custom';
 }
 
@@ -93,6 +94,9 @@ export interface PairedD20Roll {
   die2: number;
   selected: number;
   discarded: number;
+  modifier?: number;
+  totalWithModifier?: number;
+  lineItem?: string; // e.g. "Roll 1: [18, ~~6~~] + 4 = 22"
 }
 
 export interface DieGroupRoll {
@@ -125,6 +129,7 @@ export interface DiceRollResult {
   poolBreakdown?: DieGroupRoll[];
   formula?: string;
   individualSummary?: string;
+  individualLineItems?: string[];
 }
 
 export type PinCategory = 'general' | 'npc' | 'quest' | 'loot' | 'secret' | 'landmark' | 'tavern' | 'settlement';

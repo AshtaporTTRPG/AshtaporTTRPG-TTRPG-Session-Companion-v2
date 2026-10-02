@@ -158,6 +158,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
           poolBreakdown: item.rollDetails.poolBreakdown,
           formula: item.rollDetails.formula,
           individualSummary: item.rollDetails.individualSummary,
+          individualLineItems: item.rollDetails.individualLineItems,
           pairedRolls: item.rollDetails.pairedRolls,
           rawRolls: item.rollDetails.rawRolls,
         });
@@ -235,6 +236,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
           poolBreakdown: newItem.rollDetails.poolBreakdown,
           formula: newItem.rollDetails.formula,
           individualSummary: newItem.rollDetails.individualSummary,
+          individualLineItems: newItem.rollDetails.individualLineItems,
           pairedRolls: newItem.rollDetails.pairedRolls,
           rawRolls: newItem.rollDetails.rawRolls,
         };
@@ -1140,114 +1142,144 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                   {roll.displayMode === 'individual' ? (
                     <div className="space-y-2 pt-1 border-t border-slate-800/60 mt-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider font-mono px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/60">
+                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider font-mono px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800/60">
                           Individual Mode ({roll.formula || `${roll.count}${roll.diceType}`})
                         </span>
                         {roll.modifier !== 0 && (
                           <span className="text-[11px] font-mono font-semibold text-slate-300">
-                            Mod: {roll.modifier > 0 ? `+${roll.modifier}` : roll.modifier}
+                            Selected Modifier: {roll.modifier > 0 ? `+${roll.modifier}` : roll.modifier}
                           </span>
                         )}
                       </div>
 
-                      {/* If d20 roll with Advantage or Disadvantage: render paired breakdown with strikethrough for discarded dice */}
-                      {roll.pairedRolls && roll.pairedRolls.length > 0 && (
-                        <div className="space-y-1.5">
-                          <div className="text-[10px] font-semibold text-amber-300 font-mono flex items-center gap-1.5">
-                            <span>d20 ({roll.advantageMode}):</span>
-                            <span className="text-[10px] text-slate-400 font-normal">
-                              {roll.pairedRolls.length} independent {roll.pairedRolls.length === 1 ? 'pair' : 'pairs'} evaluated
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {roll.pairedRolls.map((pair) => {
-                              const isNat20 = pair.selected === 20;
-                              const isNat1 = pair.selected === 1;
-                              return (
-                                <div
-                                  key={pair.pairIndex}
-                                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-mono"
-                                >
-                                  <span className="text-[10px] text-slate-400 font-bold">Pair {pair.pairIndex}:</span>
-                                  <span
-                                    className={`px-1.5 py-0.5 rounded font-bold ${
-                                      isNat20
-                                        ? 'bg-amber-400 text-slate-950 shadow-sm'
-                                        : isNat1
-                                        ? 'bg-rose-600 text-white'
-                                        : 'bg-amber-950/70 text-amber-300 border border-amber-600/60'
-                                    }`}
-                                    title={`Winning die: ${pair.selected}`}
-                                  >
-                                    [{pair.selected}]
-                                  </span>
-                                  <span
-                                    className="text-[11px] text-slate-400 font-mono flex items-center gap-0.5 opacity-80"
-                                    title={`Discarded die: ${pair.discarded}`}
-                                  >
-                                    <span className="text-[10px] text-slate-500">(discarded</span>
-                                    <span className="line-through decoration-rose-500 text-slate-400 font-bold px-1 bg-slate-950 rounded border border-slate-800 text-[10px]">
+                      {/* List each check/attack separately as its own line item without adding them together */}
+                      <div className="space-y-1.5 font-mono text-xs">
+                        {roll.pairedRolls && roll.pairedRolls.length > 0 ? (
+                          roll.pairedRolls.map((pair) => {
+                            const isNat20 = pair.selected === 20;
+                            const isNat1 = pair.selected === 1;
+                            const modVal = pair.modifier ?? roll.modifier ?? 0;
+                            const modStr = modVal > 0 ? ` + ${modVal}` : modVal < 0 ? ` - ${Math.abs(modVal)}` : '';
+                            const totalVal = pair.totalWithModifier ?? (pair.selected + modVal);
+                            return (
+                              <div
+                                key={pair.pairIndex}
+                                className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-xs hover:border-slate-700"
+                              >
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-slate-400 font-bold">Roll {pair.pairIndex}:</span>
+                                  <span className="inline-flex items-center">
+                                    <span>[</span>
+                                    <span
+                                      className={`font-bold px-1 rounded ${
+                                        isNat20
+                                          ? 'bg-amber-400 text-slate-950'
+                                          : isNat1
+                                          ? 'bg-rose-600 text-white'
+                                          : 'text-amber-300'
+                                      }`}
+                                    >
+                                      {pair.selected}
+                                    </span>
+                                    <span>, </span>
+                                    <span className="line-through decoration-rose-500 text-slate-500 font-semibold px-0.5">
                                       {pair.discarded}
                                     </span>
-                                    <span className="text-[10px] text-slate-500">)</span>
+                                    <span>]</span>
+                                  </span>
+                                  {modStr && <span className="text-slate-300">{modStr}</span>}
+                                  <span className="text-slate-400">=</span>
+                                  <span
+                                    className={`font-bold text-sm ${
+                                      isNat20 ? 'text-amber-300' : isNat1 ? 'text-rose-400' : 'text-slate-100'
+                                    }`}
+                                  >
+                                    {totalVal}
                                   </span>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Display other non-d20 die groups in pool if present, or all groups if normal roll */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        {(roll.poolBreakdown && roll.poolBreakdown.length > 0
-                          ? roll.pairedRolls && roll.pairedRolls.length > 0
-                            ? roll.poolBreakdown.filter((g) => g.dieType !== 'd20')
-                            : roll.poolBreakdown
-                          : roll.pairedRolls && roll.pairedRolls.length > 0
-                          ? []
-                          : [{ dieType: roll.diceType, rolls: roll.rolls }]
-                        ).map((group, gIdx) => (
-                          <div
-                            key={gIdx}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-xs"
-                          >
-                            <span className="font-mono font-bold text-amber-300">{group.dieType}:</span>
-                            <div className="flex items-center gap-1 font-mono">
-                              {group.rolls.map((r, rIdx) => {
-                                const isNat20 = group.dieType === 'd20' && r === 20;
-                                const isNat1 = group.dieType === 'd20' && r === 1;
-                                return (
-                                  <span
-                                    key={rIdx}
-                                    className={`px-1.5 py-0.5 rounded font-bold ${
-                                      isNat20
-                                        ? 'bg-amber-400 text-slate-950 shadow-sm'
-                                        : isNat1
-                                        ? 'bg-rose-600 text-white'
-                                        : 'bg-slate-800 text-slate-100 border border-slate-700'
-                                    }`}
-                                    title={`Roll ${rIdx + 1}: ${r}`}
-                                  >
-                                    [{r}]
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {isNat20 && (
+                                    <span className="text-[10px] font-bold text-amber-400 font-sans uppercase px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-700/60">
+                                      NAT 20
+                                    </span>
+                                  )}
+                                  {isNat1 && (
+                                    <span className="text-[10px] font-bold text-rose-400 font-sans uppercase px-1.5 py-0.5 rounded bg-rose-950/80 border border-rose-700/60">
+                                      NAT 1
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          roll.rolls.map((r, rIdx) => {
+                            const isNat20 = roll.diceType === 'd20' && r === 20;
+                            const isNat1 = roll.diceType === 'd20' && r === 1;
+                            const modVal = roll.modifier ?? 0;
+                            const modStr = modVal > 0 ? ` + ${modVal}` : modVal < 0 ? ` - ${Math.abs(modVal)}` : '';
+                            const totalVal = r + modVal;
+                            return (
+                              <div
+                                key={rIdx}
+                                className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-xs hover:border-slate-700"
+                              >
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-slate-400 font-bold">Roll {rIdx + 1}:</span>
+                                  <span className="inline-flex items-center">
+                                    <span>[</span>
+                                    <span
+                                      className={`font-bold px-1 rounded ${
+                                        isNat20
+                                          ? 'bg-amber-400 text-slate-950'
+                                          : isNat1
+                                          ? 'bg-rose-600 text-white'
+                                          : 'text-amber-300'
+                                      }`}
+                                    >
+                                      {r}
+                                    </span>
+                                    <span>]</span>
                                   </span>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
+                                  {modStr && <span className="text-slate-300">{modStr}</span>}
+                                  <span className="text-slate-400">=</span>
+                                  <span
+                                    className={`font-bold text-sm ${
+                                      isNat20 ? 'text-amber-300' : isNat1 ? 'text-rose-400' : 'text-slate-100'
+                                    }`}
+                                  >
+                                    {totalVal}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {isNat20 && (
+                                    <span className="text-[10px] font-bold text-amber-400 font-sans uppercase px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-700/60">
+                                      NAT 20
+                                    </span>
+                                  )}
+                                  {isNat1 && (
+                                    <span className="text-[10px] font-bold text-rose-400 font-sans uppercase px-1.5 py-0.5 rounded bg-rose-950/80 border border-rose-700/60">
+                                      NAT 1
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   ) : (
                     /* Sum Mode (Default) */
                     <div className="space-y-1.5 pt-0.5">
-                      <div className="flex items-baseline justify-between">
-                        {/* Breakdown */}
-                        <div className="text-xs text-slate-400 font-mono">
+                      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                        {/* Breakdown: All rolled pairs with discarded dice struck through, plus the modifier */}
+                        <div className="text-xs text-slate-300 font-mono flex items-center gap-1.5 flex-wrap">
                           {roll.pairedRolls && roll.pairedRolls.length > 0 ? (
-                            <span className="inline-flex items-center gap-1 flex-wrap">
-                              {roll.pairedRolls.map((pair) => (
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              {roll.pairedRolls.map((pair, pIdx) => (
                                 <span key={pair.pairIndex} className="inline-flex items-center gap-0.5">
+                                  {pIdx > 0 && <span className="text-slate-500 mr-1">+</span>}
                                   <span>[</span>
                                   <span
                                     className={
@@ -1255,7 +1287,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                                         ? 'font-bold text-amber-400'
                                         : pair.selected === 1
                                         ? 'font-bold text-rose-400'
-                                        : 'font-bold text-slate-200'
+                                        : 'font-bold text-slate-100'
                                     }
                                   >
                                     {pair.selected}
@@ -1278,16 +1310,18 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                               {roll.advantageMode !== 'normal' && (
                                 <span className="ml-1 text-[11px] text-amber-300">({roll.advantageMode})</span>
                               )}
-                              <span>: [ {(roll.rolls || [roll.total]).join(', ')} ]</span>
+                              <span>: [ {(roll.rolls || [roll.total]).join(' + ')} ]</span>
                               {roll.modifier !== 0 && (
                                 <span> {roll.modifier > 0 ? `+ ${roll.modifier}` : `- ${Math.abs(roll.modifier)}`}</span>
                               )}
+                              <span> = </span>
                             </>
                           )}
                         </div>
 
-                        {/* Total Number & Crit Flags */}
+                        {/* Grand Total output at the end */}
                         <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold font-mono">Grand Total:</span>
                           {roll.isCrit && (
                             <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider animate-bounce">
                               NAT 20 CRIT!
@@ -1299,7 +1333,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                             </span>
                           )}
                           <span
-                            className={`text-xl font-bold font-mono tabular-nums ${
+                            className={`text-2xl font-bold font-mono tabular-nums ${
                               roll.isCrit
                                 ? 'text-amber-300'
                                 : roll.isFumble
