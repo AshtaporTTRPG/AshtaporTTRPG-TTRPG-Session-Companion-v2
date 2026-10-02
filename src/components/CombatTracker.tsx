@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Combatant, CombatantType, isCombatantFoW, sortInitiativeStrictDescending } from '../types/ttrpg';
-import { QuickGlanceInitiative } from './QuickGlanceInitiative';
-import { CombatantCard } from './CombatantCard';
-import { LiveCombatFeed } from './LiveCombatFeed';
+import {
+  Combatant,
+  CombatantType,
+  Condition,
+  isCombatantFoW,
+  sortInitiativeStrictDescending,
+} from '../types/ttrpg';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import OBR from '@owlbear-rodeo/sdk';
 import { COMBAT_STATE_KEY, CombatState } from '../utils/obrCombatSync';
 import { playTurnSound } from '../utils/audio';
 import { executeDiceRoll } from '../utils/dice';
+import { getHealthThreshold } from '../utils/combatHealth';
+import { isConcentrating, calculateConcentrationDC } from '../utils/concentration';
 import {
   Swords,
   Plus,
@@ -17,9 +22,15 @@ import {
   ArrowUpDown,
   X,
   Sparkles,
-  AlertTriangle,
   Trash2,
   Dices,
+  Eye,
+  EyeOff,
+  MoreVertical,
+  Shield,
+  Edit2,
+  Check,
+  Zap,
   Play,
 } from 'lucide-react';
 
@@ -28,22 +39,40 @@ interface CombatTrackerProps {
   playerName?: string;
 }
 
+const CONDITIONS_LIST: Condition[] = [
+  'Concentration',
+  'Blinded',
+  'Charmed',
+  'Deafened',
+  'Exhaustion',
+  'Frightened',
+  'Grappled',
+  'Incapacitated',
+  'Invisible',
+  'Paralyzed',
+  'Petrified',
+  'Poisoned',
+  'Prone',
+  'Restrained',
+  'Stunned',
+  'Unconscious',
+];
+
 export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }) => {
   const rollerIdentity = playerName || liveFeedSync.getPlayerName();
 
-  // Combat State - initialized to an empty array [] if no active session data exists
+  // Combat State - initialized from local storage
   const [combatants, setCombatants] = useState<Combatant[]>(() => {
     try {
       const saved = localStorage.getItem('ttrpg_combatants');
       if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return sortInitiativeStrictDescending(parsed);
       }
     } catch {}
     return [];
   });
 
-  // Track active turn primarily by unique combatant ID to preserve turn through sorts and edits
   const [activeCombatantId, setActiveCombatantId] = useState<string | null>(() => {
     try {
       return localStorage.getItem('ttrpg_active_combatant_id') || null;
@@ -52,7 +81,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   });
 
-  // Secondary index pointer for numeric display / turn order math
   const [activeTurnIndex, setActiveTurnIndex] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('ttrpg_active_turn_index');
@@ -71,7 +99,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   });
 
-  // Combat Status: 'setup' | 'active'
   const [combatStatus, setCombatStatus] = useState<'setup' | 'active'>(() => {
     try {
       const saved = localStorage.getItem('ttrpg_combat_status');
@@ -81,18 +108,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   });
 
-  // Turn Announcement Alert Banner (Floating, non-layout-shifting)
-  const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
-
-  // Floating Damage Alert Toast: Obfuscated for FoW combatants on player view
-  const [damageToastAlert, setDamageToastAlert] = useState<string | null>(null);
-  const damageToastTimerRef = useRef<any>(null);
-
-  // Add Combatant Modal State
+  // Modal / Flyout states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [actionMenuCombatantId, setActionMenuCombatantId] = useState<string | null>(null);
+  const [editingCombatantId, setEditingCombatantId] = useState<string | null>(null);
+
+  // Form states for Add Combatant
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<CombatantType>('player');
-  const [newCustomLabel, setNewCustomLabel] = useState('');
   const [newInitiative, setNewInitiative] = useState(10);
   const [newAc, setNewAc] = useState(14);
   const [newHp, setNewHp] = useState(25);
@@ -100,10 +124,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [newIsSecret, setNewIsSecret] = useState(false);
   const [newFogOfWar, setNewFogOfWar] = useState(false);
 
-  // Clear Combat ("Blank Slate") Confirmation Modal State
-  const [isClearCombatModalOpen, setIsClearCombatModalOpen] = useState(false);
+  // Edit draft states
+  const [editName, setEditName] = useState('');
+  const [editInit, setEditInit] = useState(10);
+  const [editAc, setEditAc] = useState(14);
+  const [editHpMax, setEditHpMax] = useState(25);
+  const [editHpCurr, setEditHpCurr] = useState(25);
 
-  // Keep activeCombatantId and activeTurnIndex synchronized with combatants array
+  // Turn alert toast
+  const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
+
+  // Synchronize active pointer with combatants list
   useEffect(() => {
     if (combatants.length === 0) {
       if (activeCombatantId !== null) setActiveCombatantId(null);
@@ -111,7 +142,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       return;
     }
 
-    // Check if activeCombatantId exists in current combatants list
     if (activeCombatantId) {
       const foundIdx = combatants.findIndex((c) => c.id === activeCombatantId);
       if (foundIdx !== -1) {
@@ -122,16 +152,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
     }
 
-    // If activeCombatantId is missing or invalid, resolve to activeTurnIndex or first combatant
     const safeIdx = Math.min(Math.max(0, activeTurnIndex), combatants.length - 1);
-    const resolvedCombatant = combatants[safeIdx];
-    if (resolvedCombatant) {
-      setActiveCombatantId(resolvedCombatant.id);
+    const resolved = combatants[safeIdx];
+    if (resolved) {
+      setActiveCombatantId(resolved.id);
       setActiveTurnIndex(safeIdx);
     }
   }, [combatants, activeCombatantId, activeTurnIndex]);
 
-  // Persist locally across component remounts, route changes, and tab switches
+  // Local storage persistence
   useEffect(() => {
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(combatants));
@@ -146,7 +175,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     } catch {}
   }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus]);
 
-  // Fetch initial state from OBR metadata if present
+  // Initial OBR room metadata
   useEffect(() => {
     if (!OBR.isReady) return;
     OBR.room
@@ -154,7 +183,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       .then((metadata) => {
         const state = metadata[COMBAT_STATE_KEY] as CombatState | undefined;
         if (state) {
-          if (Array.isArray(state.combatants)) setCombatants(state.combatants);
+          if (Array.isArray(state.combatants)) {
+            setCombatants(sortInitiativeStrictDescending(state.combatants));
+          }
           if (state.activeCombatantId !== undefined) {
             setActiveCombatantId(state.activeCombatantId);
           }
@@ -168,13 +199,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       .catch(() => {});
   }, []);
 
-  // Listen for native OBR table metadata changes on all clients
+  // Listen for OBR metadata changes
   useEffect(() => {
     if (!OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((metadata) => {
       const state = metadata[COMBAT_STATE_KEY] as CombatState | undefined;
       if (state) {
-        if (Array.isArray(state.combatants)) setCombatants(state.combatants);
+        if (Array.isArray(state.combatants)) {
+          setCombatants(sortInitiativeStrictDescending(state.combatants));
+        }
         if (state.activeCombatantId !== undefined) {
           setActiveCombatantId(state.activeCombatantId);
         }
@@ -188,7 +221,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return () => unsub();
   }, []);
 
-  // Broadcast combat updates when state is modified by writing to OBR room metadata
+  // Broadcast helper
   const broadcastCombat = async (
     updatedCombatants: Combatant[],
     updatedTurn: number,
@@ -218,358 +251,286 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // Scroll position preservation helper to eliminate layout jump and unwanted auto-scroll
-  const preserveScroll = (action: () => void) => {
-    const currentScrollY = window.scrollY;
-    action();
-    requestAnimationFrame(() => {
-      if (Math.abs(window.scrollY - currentScrollY) > 0) {
-        window.scrollTo({ top: currentScrollY, behavior: 'instant' as ScrollBehavior });
-      }
-    });
-  };
-
-  // Helper to log into unified live feed and trigger damage toast alert
-  const addFeedLog = (dmMessage: string, playerMessage?: string) => {
-    liveFeedSync.recordCombatLog(dmMessage, true, playerMessage);
-    const alertMsg = !isDm && playerMessage ? playerMessage : dmMessage;
-    if (alertMsg.includes('took') || alertMsg.includes('damage')) {
-      setDamageToastAlert(alertMsg.replace(/^[⚔️💚⚡⚙️✨💀➕]\s*/u, ''));
-      if (damageToastTimerRef.current) clearTimeout(damageToastTimerRef.current);
-      damageToastTimerRef.current = setTimeout(() => setDamageToastAlert(null), 4000);
-    }
-  };
-
-  // ADVANCE TURN LOGIC & PLAYER TURN NOTIFICATION (Zero layout shift & scroll jump)
+  // Turn management: NEXT TURN
   const handleNextTurn = () => {
-    preserveScroll(() => {
-      if (combatants.length === 0) return;
+    if (combatants.length === 0) return;
+    const currentIdx = activeCombatantId
+      ? combatants.findIndex((c) => c.id === activeCombatantId)
+      : activeTurnIndex;
+    const validCurrentIdx = currentIdx >= 0 ? currentIdx : activeTurnIndex;
 
-      const currentIdx = activeCombatantId
-        ? combatants.findIndex((c) => c.id === activeCombatantId)
-        : activeTurnIndex;
-      const validCurrentIdx = currentIdx >= 0 ? currentIdx : activeTurnIndex;
+    let nextIndex = validCurrentIdx + 1;
+    let nextRound = round;
 
-      let nextIndex = validCurrentIdx + 1;
-      let nextRound = round;
+    if (nextIndex >= combatants.length) {
+      nextIndex = 0;
+      nextRound = round + 1;
+      liveFeedSync.recordCombatLog(`🔔 --- Round ${nextRound} Began ---`, true);
+    }
 
-      if (nextIndex >= combatants.length) {
-        nextIndex = 0;
-        nextRound = round + 1;
-        liveFeedSync.recordCombatLog(`🔔 --- Round ${nextRound} Began ---`, true);
-      }
+    const activeCombatant = combatants[nextIndex];
+    const nextId = activeCombatant ? activeCombatant.id : null;
 
-      const activeCombatant = combatants[nextIndex];
-      const nextId = activeCombatant ? activeCombatant.id : null;
+    setActiveCombatantId(nextId);
+    setActiveTurnIndex(nextIndex);
+    setRound(nextRound);
+    playTurnSound();
 
-      setActiveCombatantId(nextId);
-      setActiveTurnIndex(nextIndex);
-      setRound(nextRound);
-      playTurnSound();
-
-      if (activeCombatant) {
-        const isHiddenCombatant = activeCombatant.hidden || activeCombatant.isSecret;
-        if (!isHiddenCombatant) {
-          const announcement = `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
-          liveFeedSync.recordTurnAnnouncement(announcement, true);
-
-          // If active combatant is a Player (PC), trigger prominent floating visual feedback
-          if (activeCombatant.type === 'player') {
-            setPlayerTurnAlert(`⚔️ IT IS ${activeCombatant.name.toUpperCase()}'S TURN!`);
-            setTimeout(() => setPlayerTurnAlert(null), 5000);
-          } else {
-            setPlayerTurnAlert(null);
-          }
-        } else {
-          // Concealed combatant: DM sees turn heralded, players see generic notice without revealing identity
-          liveFeedSync.recordCombatLog(
-            `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
-            true,
-            `⚔️ Turn ${nextIndex + 1}/${combatants.length}: An unseen entity takes their turn... (Round ${nextRound})`
-          );
-          setPlayerTurnAlert(null);
-        }
-      }
-
-      broadcastCombat(combatants, nextIndex, nextRound, nextId, combatStatus);
-    });
-  };
-
-  // PREVIOUS TURN LOGIC
-  const handlePrevTurn = () => {
-    preserveScroll(() => {
-      if (combatants.length === 0) return;
-
-      const currentIdx = activeCombatantId
-        ? combatants.findIndex((c) => c.id === activeCombatantId)
-        : activeTurnIndex;
-      const validCurrentIdx = currentIdx >= 0 ? currentIdx : activeTurnIndex;
-
-      let prevIndex = validCurrentIdx - 1;
-      let prevRound = round;
-
-      if (prevIndex < 0) {
-        prevIndex = Math.max(0, combatants.length - 1);
-        prevRound = Math.max(1, round - 1);
-      }
-
-      const activeCombatant = combatants[prevIndex];
-      const prevId = activeCombatant ? activeCombatant.id : null;
-
-      setActiveCombatantId(prevId);
-      setActiveTurnIndex(prevIndex);
-      setRound(prevRound);
-      broadcastCombat(combatants, prevIndex, prevRound, prevId, combatStatus);
-    });
-  };
-
-  // BUG FIX: RESET ROUND COUNTER (Direct, zero window.confirm blocker, synchronizes room & live feed)
-  const handleResetRound = () => {
-    preserveScroll(() => {
-      setRound(1);
-      liveFeedSync.recordCombatLog('🔄 Round counter has been reset to Round 1 by the DM.', true);
-      broadcastCombat(combatants, activeTurnIndex, 1, activeCombatantId, combatStatus);
-    });
-  };
-
-  // ENCOUNTER RESET ("BLANK SLATE") WITH SAFETY CONFIRMATION FLOW
-  const handleConfirmClearCombat = () => {
-    preserveScroll(() => {
-      setCombatants([]);
-      setActiveCombatantId(null);
-      setActiveTurnIndex(0);
-      setRound(1);
-      setCombatStatus('setup');
-      setPlayerTurnAlert(null);
-      setIsClearCombatModalOpen(false);
-
-      // Explicitly persist blank slate so tab switches or page refreshes keep the encounter empty
-      try {
-        localStorage.setItem('ttrpg_combatants', JSON.stringify([]));
-        localStorage.removeItem('ttrpg_active_combatant_id');
-        localStorage.setItem('ttrpg_active_turn_index', '0');
-        localStorage.setItem('ttrpg_combat_round', '1');
-        localStorage.setItem('ttrpg_combat_status', 'setup');
-      } catch {}
-
-      liveFeedSync.recordCombatLog(
-        '⚔️ Encounter cleared by the DM. Blank slate prepared for a new battle.',
-        true
-      );
-      broadcastCombat([], 0, 1, null, 'setup');
-    });
-  };
-
-  // DETERMINISTIC FIRST TURN ON "START COMBAT"
-  // When the DM clicks "Start Combat":
-  // 1. Strictly sort descending (b.initiative - a.initiative)
-  // 2. Explicitly set active combatant index to 0
-  // 3. Reset active turn pointers so combat never starts on previous index, random index, or bottom
-  // 4. Lock round counter to Round 1
-  // 5. Highlight, active turn banner, and turn pointer lock onto combatant with highest initiative
-  // 6. Broadcast across peers with combatStatus = 'active'
-  const handleStartCombat = () => {
-    preserveScroll(() => {
-      if (combatants.length === 0) {
-        setIsAddModalOpen(true);
-        return;
-      }
-
-      // 1. Strict Descending Sort: Highest total initiative score at index 0
-      const sorted = sortInitiativeStrictDescending(combatants);
-      const firstCombatant = sorted[0];
-
-      // 2. Deterministic First Turn: Explicitly set active combatant index to 0, round to 1
-      const targetIndex = 0;
-      const targetId = firstCombatant ? firstCombatant.id : null;
-      const targetRound = 1;
-      const targetStatus: 'active' = 'active';
-
-      setCombatants(sorted);
-      setActiveTurnIndex(targetIndex);
-      setActiveCombatantId(targetId);
-      setRound(targetRound);
-      setCombatStatus(targetStatus);
-
-      playTurnSound();
-
-      // 3. Highlight and active turn banner lock onto combatant with highest initiative
-      if (firstCombatant) {
-        if (firstCombatant.type === 'player') {
-          setPlayerTurnAlert(`⚔️ IT IS ${firstCombatant.name.toUpperCase()}'S TURN!`);
-          setTimeout(() => setPlayerTurnAlert(null), 5000);
+    if (activeCombatant) {
+      const isHidden = activeCombatant.hidden || activeCombatant.isSecret;
+      if (!isHidden) {
+        const announcement = `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
+        liveFeedSync.recordTurnAnnouncement(announcement, true);
+        if (activeCombatant.type === 'player') {
+          setPlayerTurnAlert(`⚔️ ${activeCombatant.name.toUpperCase()}'S TURN!`);
+          setTimeout(() => setPlayerTurnAlert(null), 4000);
         } else {
           setPlayerTurnAlert(null);
-        }
-
-        liveFeedSync.recordCombatLog(
-          `⚔️ Combat Started! Round 1 begins with ${firstCombatant.name} (Initiative ${firstCombatant.initiative}) taking the first turn.`,
-          true
-        );
-        liveFeedSync.recordTurnAnnouncement(
-          `⚔️ Turn 1/${sorted.length}: It is ${firstCombatant.name}'s turn! (Round 1)`,
-          true
-        );
-      }
-
-      // 4. Broadcast cleanly to all connected peers
-      broadcastCombat(sorted, targetIndex, targetRound, targetId, targetStatus);
-    });
-  };
-
-  // STRICT DESCENDING INITIATIVE SORT (b.initiative - a.initiative)
-  // Enforces highest initiative score at index 0 at the top of the tracker
-  const handleSortInitiative = () => {
-    preserveScroll(() => {
-      if (combatants.length === 0) return;
-
-      // Identify currently active combatant ID before sort
-      const currentActiveId =
-        activeCombatantId || combatants[activeTurnIndex]?.id || null;
-
-      // Reorder strictly in descending order of initiative score
-      const sorted = sortInitiativeStrictDescending(combatants);
-
-      // Find new index of the active combatant in the sorted list
-      let newActiveIndex = 0;
-      if (currentActiveId) {
-        const foundIndex = sorted.findIndex((c) => c.id === currentActiveId);
-        if (foundIndex !== -1) {
-          newActiveIndex = foundIndex;
-        }
-      }
-
-      setCombatants(sorted);
-      if (currentActiveId) {
-        setActiveCombatantId(currentActiveId);
-      }
-      setActiveTurnIndex(newActiveIndex);
-
-      const activeName = currentActiveId
-        ? sorted.find((c) => c.id === currentActiveId)?.name
-        : 'Active combatant';
-
-      liveFeedSync.recordCombatLog(
-        `⚡ Initiative sorted in strict descending order. Active turn on ${activeName || 'current combatant'} preserved.`,
-        true
-      );
-      broadcastCombat(sorted, newActiveIndex, round, currentActiveId, combatStatus);
-    });
-  };
-
-  // ROLL INITIATIVE FOR A SINGLE COMBATANT
-  // Rolls 1d20, modifies initiative, strictly sorts descending, and syncs
-  const handleRollInitiative = (combatantId: string) => {
-    preserveScroll(() => {
-      const target = combatants.find((c) => c.id === combatantId);
-      if (!target) return;
-      const isTargetFoW = isCombatantFoW(target);
-      const isTargetPlayerOrAlly = target.type === 'player' || target.type === 'ally';
-      if (!isDm && (!isTargetPlayerOrAlly || isTargetFoW)) return;
-
-      const rollerName = rollerIdentity;
-
-      const rollResult = executeDiceRoll({
-        diceType: 'd20',
-        count: 1,
-        advantageMode: 'normal',
-        sender: rollerName,
-        isDm,
-        visibility: 'public',
-        rollType: 'Straight roll',
-        label: `Initiative (${target.name})`,
-      });
-
-      const roll = rollResult.total;
-      const updated = combatants.map((c) =>
-        c.id === combatantId ? { ...c, initiative: roll } : c
-      );
-
-      // Strict descending sort on roll
-      const sorted = sortInitiativeStrictDescending(updated);
-
-      let targetIndex = activeTurnIndex;
-      if (activeCombatantId) {
-        const found = sorted.findIndex((c) => c.id === activeCombatantId);
-        if (found !== -1) targetIndex = found;
-      }
-
-      setCombatants(sorted);
-      setActiveTurnIndex(targetIndex);
-
-      liveFeedSync.recordDiceRoll(rollResult, true);
-      broadcastCombat(sorted, targetIndex, round, activeCombatantId, combatStatus);
-    });
-  };
-
-  // ROLL ALL INITIATIVES (DM Action)
-  // Rolls 1d20 for all combatants and enforces strict descending sort
-  const handleRollAllInitiatives = () => {
-    preserveScroll(() => {
-      if (!isDm || combatants.length === 0) return;
-
-      const dmRoller = rollerIdentity;
-
-      const updated = combatants.map((c) => {
-        const roll = Math.floor(Math.random() * 20) + 1;
-        return { ...c, initiative: roll };
-      });
-
-      // Strict descending sort
-      const sorted = sortInitiativeStrictDescending(updated);
-      let targetIndex = 0;
-      let targetId = sorted[0]?.id || null;
-
-      if (combatStatus === 'active' && activeCombatantId) {
-        const found = sorted.findIndex((c) => c.id === activeCombatantId);
-        if (found !== -1) {
-          targetIndex = found;
-          targetId = activeCombatantId;
         }
       } else {
-        targetId = sorted[0]?.id || null;
-        targetIndex = 0;
+        liveFeedSync.recordCombatLog(
+          `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
+          true,
+          `⚔️ Turn ${nextIndex + 1}/${combatants.length}: An unseen entity takes their turn... (Round ${nextRound})`
+        );
+        setPlayerTurnAlert(null);
       }
+    }
 
-      setCombatants(sorted);
-      setActiveTurnIndex(targetIndex);
-      if (targetId) setActiveCombatantId(targetId);
+    broadcastCombat(combatants, nextIndex, nextRound, nextId, combatStatus);
+  };
 
+  // PREV TURN
+  const handlePrevTurn = () => {
+    if (combatants.length === 0) return;
+    const currentIdx = activeCombatantId
+      ? combatants.findIndex((c) => c.id === activeCombatantId)
+      : activeTurnIndex;
+    const validCurrentIdx = currentIdx >= 0 ? currentIdx : activeTurnIndex;
+
+    let prevIndex = validCurrentIdx - 1;
+    let prevRound = round;
+
+    if (prevIndex < 0) {
+      prevIndex = Math.max(0, combatants.length - 1);
+      prevRound = Math.max(1, round - 1);
+    }
+
+    const activeCombatant = combatants[prevIndex];
+    const prevId = activeCombatant ? activeCombatant.id : null;
+
+    setActiveCombatantId(prevId);
+    setActiveTurnIndex(prevIndex);
+    setRound(prevRound);
+    broadcastCombat(combatants, prevIndex, prevRound, prevId, combatStatus);
+  };
+
+  // START COMBAT (Strict sort descending, turn 1 on highest initiative)
+  const handleStartCombat = () => {
+    if (combatants.length === 0) {
+      setIsAddModalOpen(true);
+      return;
+    }
+    const sorted = sortInitiativeStrictDescending(combatants);
+    const first = sorted[0];
+    const firstId = first ? first.id : null;
+
+    setCombatants(sorted);
+    setActiveTurnIndex(0);
+    setActiveCombatantId(firstId);
+    setRound(1);
+    setCombatStatus('active');
+    playTurnSound();
+
+    if (first) {
       liveFeedSync.recordCombatLog(
-        `🎲 All initiatives rolled by ${dmRoller} and sorted in strict descending order.`,
+        `⚔️ Combat Started! Round 1 begins with ${first.name} (Initiative ${first.initiative}).`,
         true
       );
-      broadcastCombat(sorted, targetIndex, round, targetId, combatStatus);
-    });
+    }
+
+    broadcastCombat(sorted, 0, 1, firstId, 'active');
   };
 
-  // MANUAL TIE-BREAKING / REORDERING
-  const handleMoveCombatant = (fromIndex: number, toIndex: number) => {
-    preserveScroll(() => {
-      if (toIndex < 0 || toIndex >= combatants.length) return;
-      const currentActiveId =
-        activeCombatantId || combatants[activeTurnIndex]?.id || null;
+  // SORT INITIATIVE (Strict descending)
+  const handleSortInitiative = () => {
+    if (combatants.length === 0) return;
+    const currentActiveId = activeCombatantId || combatants[activeTurnIndex]?.id || null;
+    const sorted = sortInitiativeStrictDescending(combatants);
 
-      const copy = [...combatants];
-      const [moved] = copy.splice(fromIndex, 1);
-      copy.splice(toIndex, 0, moved);
+    let newIndex = 0;
+    if (currentActiveId) {
+      const idx = sorted.findIndex((c) => c.id === currentActiveId);
+      if (idx !== -1) newIndex = idx;
+    }
 
-      // Recalculate index of active combatant
-      let newActiveIdx = 0;
-      if (currentActiveId) {
-        const found = copy.findIndex((c) => c.id === currentActiveId);
-        if (found !== -1) newActiveIdx = found;
+    setCombatants(sorted);
+    setActiveTurnIndex(newIndex);
+    broadcastCombat(sorted, newIndex, round, currentActiveId, combatStatus);
+  };
+
+  // ROLL INITIATIVE FOR ONE COMBATANT
+  const handleRollInitiative = (combatantId: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    if (!isDm && target.type !== 'player' && target.type !== 'ally') return;
+
+    const rollResult = executeDiceRoll({
+      diceType: 'd20',
+      count: 1,
+      sender: rollerIdentity,
+      isDm,
+      rollType: 'Straight roll',
+      label: `Initiative (${target.name})`,
+    });
+
+    const newInit = rollResult.total;
+    const updated = combatants.map((c) =>
+      c.id === combatantId ? { ...c, initiative: newInit } : c
+    );
+    const sorted = sortInitiativeStrictDescending(updated);
+
+    let targetIdx = activeTurnIndex;
+    if (activeCombatantId) {
+      const found = sorted.findIndex((c) => c.id === activeCombatantId);
+      if (found !== -1) targetIdx = found;
+    }
+
+    setCombatants(sorted);
+    setActiveTurnIndex(targetIdx);
+    liveFeedSync.recordDiceRoll(rollResult, true);
+    broadcastCombat(sorted, targetIdx, round, activeCombatantId, combatStatus);
+  };
+
+  // ROLL ALL INITIATIVES
+  const handleRollAllInitiatives = () => {
+    if (!isDm || combatants.length === 0) return;
+    const updated = combatants.map((c) => ({
+      ...c,
+      initiative: Math.floor(Math.random() * 20) + 1,
+    }));
+    const sorted = sortInitiativeStrictDescending(updated);
+
+    let targetId = activeCombatantId;
+    let targetIdx = 0;
+    if (combatStatus === 'active' && activeCombatantId) {
+      const found = sorted.findIndex((c) => c.id === activeCombatantId);
+      if (found !== -1) targetIdx = found;
+    } else {
+      targetId = sorted[0]?.id || null;
+      targetIdx = 0;
+    }
+
+    setCombatants(sorted);
+    setActiveTurnIndex(targetIdx);
+    if (targetId) setActiveCombatantId(targetId);
+
+    liveFeedSync.recordCombatLog(`🎲 All initiatives rolled and sorted descending.`, true);
+    broadcastCombat(sorted, targetIdx, round, targetId, combatStatus);
+  };
+
+  // RESET ENCOUNTER / CLEAR ALL
+  const handleClearCombat = () => {
+    setCombatants([]);
+    setActiveCombatantId(null);
+    setActiveTurnIndex(0);
+    setRound(1);
+    setCombatStatus('setup');
+    setIsClearModalOpen(false);
+
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify([]));
+      localStorage.removeItem('ttrpg_active_combatant_id');
+      localStorage.setItem('ttrpg_active_turn_index', '0');
+      localStorage.setItem('ttrpg_combat_round', '1');
+      localStorage.setItem('ttrpg_combat_status', 'setup');
+    } catch {}
+
+    liveFeedSync.recordCombatLog('⚔️ Encounter reset to a blank slate.', true);
+    broadcastCombat([], 0, 1, null, 'setup');
+  };
+
+  // HP DELTA MICRO-BUTTONS (-1, -5, +5, +1)
+  const handleHpDelta = (combatantId: string, delta: number) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isFoW = isCombatantFoW(target);
+    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    if (!isDm && (!isPlayerOrAlly || isFoW)) return;
+
+    let newCurrent = target.hpCurrent;
+    let newTemp = target.hpTemp || 0;
+
+    if (delta < 0) {
+      // Damage: subtract from temp HP first
+      const damage = Math.abs(delta);
+      let rem = damage;
+      if (newTemp > 0) {
+        if (rem <= newTemp) {
+          newTemp -= rem;
+          rem = 0;
+        } else {
+          rem -= newTemp;
+          newTemp = 0;
+        }
+      }
+      newCurrent = Math.max(0, newCurrent - rem);
+
+      // Concentration check
+      if (isConcentrating(target)) {
+        const dc = calculateConcentrationDC(damage);
+        const dmMsg = `⚡ ${target.name} took ${damage} dmg while concentrating! DC ${dc} CON save required.`;
+        const pMsg = isFoW ? `⚔️ ${target.name} took damage.` : dmMsg;
+        liveFeedSync.recordCombatLog(dmMsg, true, pMsg);
       }
 
-      setCombatants(copy);
-      setActiveTurnIndex(newActiveIdx);
-      if (currentActiveId) setActiveCombatantId(currentActiveId);
-      broadcastCombat(copy, newActiveIdx, round, currentActiveId, combatStatus);
-    });
+      const logDm = `⚔️ ${target.name} took ${damage} damage (${newCurrent}/${target.hpMax} HP)`;
+      const logP = isFoW ? `⚔️ ${target.name} took damage.` : logDm;
+      liveFeedSync.recordCombatLog(logDm, true, logP);
+    } else {
+      // Heal
+      newCurrent = Math.min(target.hpMax, newCurrent + delta);
+      const logDm = `💚 ${target.name} healed +${delta} HP (${newCurrent}/${target.hpMax} HP)`;
+      const logP = isFoW ? `💚 ${target.name} healed.` : logDm;
+      liveFeedSync.recordCombatLog(logDm, true, logP);
+    }
+
+    const updated = combatants.map((c) =>
+      c.id === combatantId ? { ...c, hpCurrent: newCurrent, hpTemp: newTemp } : c
+    );
+    setCombatants(updated);
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
-  // TOGGLE VISIBILITY (DM Reveal / Hide)
+  // TOGGLE CONDITION
+  const handleToggleCondition = (combatantId: string, conditionName: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isFoW = isCombatantFoW(target);
+    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    if (!isDm && (!isPlayerOrAlly || isFoW)) return;
+
+    const exists = target.conditions.some((c) => c.name === conditionName);
+    const newConditions = exists
+      ? target.conditions.filter((c) => c.name !== conditionName)
+      : [...target.conditions, { name: conditionName }];
+
+    const updated = combatants.map((c) =>
+      c.id === combatantId ? { ...c, conditions: newConditions } : c
+    );
+    setCombatants(updated);
+
+    const action = exists ? 'removed from' : 'applied to';
+    const logDm = `✨ Condition [${conditionName}] ${action} ${target.name}.`;
+    const logP = isFoW ? undefined : logDm;
+    liveFeedSync.recordCombatLog(logDm, true, logP);
+
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // TOGGLE VISIBILITY (DM Only)
   const handleToggleVisibility = (combatantId: string) => {
+    if (!isDm) return;
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
     const isCurrentlyHidden = !!(target.hidden || target.isSecret);
@@ -586,61 +547,28 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     );
     setCombatants(updated);
 
-    // Only broadcast a feed message when the GM clicks "Reveal" (revealed to players)
     if (isCurrentlyHidden && !willBeHidden) {
-      liveFeedSync.recordCombatLog(
-        `👁️ ${target.name} has been revealed to players!`,
-        true
-      );
+      liveFeedSync.recordCombatLog(`👁️ ${target.name} has been revealed to players!`, true);
     }
 
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
-  // UPDATE COMBATANT (Permission Enforced: Players can ONLY edit non-FoW Player and Ally combatants)
-  // When initiative is modified, enforce strict descending order
-  const handleUpdateCombatant = (id: string, updates: Partial<Combatant>) => {
-    const target = combatants.find((c) => c.id === id);
-    if (!target) return;
-    const isTargetFoW = isCombatantFoW(target);
-    const isTargetPlayerOrAlly = target.type === 'player' || target.type === 'ally';
-    if (!isDm && (!isTargetPlayerOrAlly || isTargetFoW)) {
-      return;
-    }
-
-    let updated = combatants.map((c) => (c.id === id ? { ...c, ...updates } : c));
-
-    let targetIndex = activeTurnIndex;
-    let targetId = activeCombatantId;
-
-    // Strict descending sort when initiative is modified
-    if (updates.initiative !== undefined) {
-      updated = sortInitiativeStrictDescending(updated);
-      if (activeCombatantId) {
-        const found = updated.findIndex((c) => c.id === activeCombatantId);
-        if (found !== -1) targetIndex = found;
-      }
-    }
-
-    setCombatants(updated);
-    setActiveTurnIndex(targetIndex);
-    broadcastCombat(updated, targetIndex, round, targetId, combatStatus);
-  };
-
-  // DELETE COMBATANT (DM only)
-  const handleDeleteCombatant = (id: string) => {
+  // DELETE COMBATANT (DM Only)
+  const handleDeleteCombatant = (combatantId: string) => {
     if (!isDm) return;
-    const target = combatants.find((c) => c.id === id);
-    const updated = combatants.filter((c) => c.id !== id);
+    const target = combatants.find((c) => c.id === combatantId);
+    const updated = combatants.filter((c) => c.id !== combatantId);
     setCombatants(updated);
+    setActionMenuCombatantId(null);
+
     if (target) liveFeedSync.recordCombatLog(`💀 ${target.name} was removed from combat.`, true);
 
     let nextActiveId = activeCombatantId;
     let nextActiveIdx = 0;
 
-    if (activeCombatantId === id) {
-      // If the deleted combatant was active, advance to next or first available
-      const wasIndex = combatants.findIndex((c) => c.id === id);
+    if (activeCombatantId === combatantId) {
+      const wasIndex = combatants.findIndex((c) => c.id === combatantId);
       const nextCandidate = updated[wasIndex] || updated[0] || null;
       nextActiveId = nextCandidate ? nextCandidate.id : null;
       nextActiveIdx = nextCandidate ? updated.findIndex((c) => c.id === nextCandidate.id) : 0;
@@ -654,26 +582,67 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, nextActiveIdx, round, nextActiveId, combatStatus);
   };
 
-  // ADD COMBATANT FORM SUBMISSION (Players can add "Player (PC)" and "NPC / Ally")
+  // START EDITING COMBATANT
+  const handleStartEditing = (c: Combatant) => {
+    setEditingCombatantId(c.id);
+    setEditName(c.name);
+    setEditInit(c.initiative);
+    setEditAc(c.armorClass);
+    setEditHpMax(c.hpMax);
+    setEditHpCurr(c.hpCurrent);
+  };
+
+  // SAVE EDITED COMBATANT
+  const handleSaveEdit = (combatantId: string) => {
+    let updated = combatants.map((c) =>
+      c.id === combatantId
+        ? {
+            ...c,
+            name: editName.trim() || c.name,
+            initiative: editInit,
+            armorClass: editAc,
+            hpMax: editHpMax,
+            hpCurrent: Math.min(editHpCurr, editHpMax),
+          }
+        : c
+    );
+    updated = sortInitiativeStrictDescending(updated);
+    setCombatants(updated);
+    setEditingCombatantId(null);
+    setActionMenuCombatantId(null);
+
+    let targetIdx = activeTurnIndex;
+    if (activeCombatantId) {
+      const found = updated.findIndex((c) => c.id === activeCombatantId);
+      if (found !== -1) targetIdx = found;
+    }
+    setActiveTurnIndex(targetIdx);
+    broadcastCombat(updated, targetIdx, round, activeCombatantId, combatStatus);
+  };
+
+  // ADD COMBATANT FORM SUBMISSION
   const handleSaveNewCombatant = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
 
-    // Enforce role permission: players may ONLY add Player (PC) or Ally / NPC
     const allowedType: CombatantType =
       !isDm && newType !== 'player' && newType !== 'ally' ? 'player' : newType;
 
     const isMarkedSecretOrHidden = isDm && (newHidden || newIsSecret || allowedType === 'boss');
     const isFoWCombatant =
-      isDm && (newFogOfWar || isMarkedSecretOrHidden || allowedType === 'monster' || allowedType === 'boss' || allowedType === 'custom');
+      isDm &&
+      (newFogOfWar ||
+        isMarkedSecretOrHidden ||
+        allowedType === 'monster' ||
+        allowedType === 'boss' ||
+        allowedType === 'custom');
     const isHiddenFromPlayers =
       isDm && (newHidden || newIsSecret || newFogOfWar || allowedType === 'boss');
 
     const newCombatant: Combatant = {
-      id: `combatant-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `c-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: newName.trim(),
       type: allowedType,
-      customRoleLabel: isDm && allowedType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined,
       initiative: newInitiative,
       armorClass: newAc,
       hpCurrent: newHp,
@@ -685,13 +654,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       isSecret: isDm && (newIsSecret || isHiddenFromPlayers),
     };
 
-    // Strictly sort descending by initiative
     const updated = sortInitiativeStrictDescending([...combatants, newCombatant]);
     setCombatants(updated);
 
-    // If this was the first combatant added to an empty slate, make it active immediately
     let targetActiveId = activeCombatantId;
     let targetActiveIndex = activeTurnIndex;
+
     if (combatants.length === 0) {
       targetActiveId = newCombatant.id;
       targetActiveIndex = 0;
@@ -703,23 +671,18 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       setActiveTurnIndex(targetActiveIndex);
     }
 
-    // Suppress all live feed announcements and toast notifications completely when marked Secret, Hidden, or FoW
-    const suppressFeedAndToast = newCombatant.hidden || newCombatant.isSecret || newCombatant.fogOfWar;
-
-    if (!suppressFeedAndToast) {
+    if (!newCombatant.hidden && !newCombatant.isSecret) {
       liveFeedSync.recordCombatLog(
-        `➕ Added ${newCombatant.name} (${newCombatant.type === 'player' ? 'Player (PC)' : newCombatant.type === 'ally' ? 'NPC / Ally' : newCombatant.type.toUpperCase()}) with Initiative ${newCombatant.initiative}.`,
+        `➕ Added ${newCombatant.name} with Initiative ${newCombatant.initiative}.`,
         true
       );
     }
 
     broadcastCombat(updated, targetActiveIndex, round, targetActiveId, combatStatus);
 
-    // Reset Form
     setIsAddModalOpen(false);
     setNewName('');
     setNewType('player');
-    setNewCustomLabel('');
     setNewInitiative(10);
     setNewAc(14);
     setNewHp(25);
@@ -728,313 +691,467 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setNewFogOfWar(false);
   };
 
-  // Filter center cards based on DM vs Player: completely hide any combatant marked hidden or secret from player view
+  // Filter visible combatants (players cannot see hidden or secret combatants)
   const visibleCombatants = combatants.filter((c) => isDm || (!c.hidden && !c.isSecret));
 
-  // LAYOUT UX: ACTIVE TURN PRIORITIZATION IN MAIN CENTER DISPLAY
-  // Dynamically reorder center combatant cards so the active combatant (current turn) is anchored at the top.
-  // Remaining combatants follow in immediate turn order (upcoming turns, cycling back to the top of the sequence).
-  const orderedCenterCombatants = (() => {
-    if (visibleCombatants.length === 0) return [];
-    const currentActiveId = activeCombatantId || combatants[activeTurnIndex]?.id;
-    let vActiveIndex = visibleCombatants.findIndex((c) => c.id === currentActiveId);
-    if (vActiveIndex === -1) {
-      vActiveIndex = 0;
-    }
-    return [
-      ...visibleCombatants.slice(vActiveIndex),
-      ...visibleCombatants.slice(0, vActiveIndex),
-    ];
-  })();
+  // Active combatant details
+  const activeCombatant =
+    combatants.find((c) => c.id === activeCombatantId) || combatants[activeTurnIndex];
+  const activeTurnName = activeCombatant ? activeCombatant.name : 'None';
 
   return (
-    <div className="space-y-4 relative">
-      {/* FLOATING TURN ALERT: Isolated from page layout flow (Zero Layout Shift) */}
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none relative">
+      {/* FLOATING TURN ALERT BANNER */}
       {playerTurnAlert && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 pointer-events-none px-6 py-3 rounded-2xl bg-amber-500/90 text-slate-950 font-display font-bold text-sm shadow-2xl backdrop-blur-md flex items-center gap-2.5 animate-fadeIn ring-2 ring-amber-300">
-          <Sparkles className="w-5 h-5 text-slate-950 shrink-0" />
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 pointer-events-none px-3 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs shadow-xl flex items-center gap-1.5 animate-fadeIn">
+          <Sparkles className="w-3.5 h-3.5 shrink-0" />
           <span>{playerTurnAlert}</span>
-          <span className="text-xs font-sans font-semibold opacity-90 hidden sm:inline">
-            — Ready your Action, Bonus Action, and Movement!
+        </div>
+      )}
+
+      {/* 1. HEADER ROW: Round Counter, Active Turn Name, Primary Next Turn Button */}
+      <div className="h-11 px-2.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between shrink-0 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Round Counter */}
+          <span className="px-2 py-0.5 rounded bg-amber-950/90 border border-amber-500/60 text-amber-300 font-mono font-bold text-[11px] shrink-0">
+            Round {round}
           </span>
-        </div>
-      )}
 
-      {/* FLOATING DAMAGE TOAST ALERT: Obfuscated for FoW combatants on Player view */}
-      {damageToastAlert && (
-        <div className="fixed top-28 left-1/2 -translate-x-1/2 z-50 pointer-events-none px-5 py-2.5 rounded-2xl bg-rose-950/95 border border-rose-600/80 text-rose-200 font-sans font-semibold text-xs shadow-2xl backdrop-blur-md flex items-center gap-2 animate-fadeIn ring-1 ring-rose-500/40">
-          <Swords className="w-4 h-4 text-rose-400 shrink-0" />
-          <span>{damageToastAlert}</span>
-        </div>
-      )}
-
-      {/* Top Combat Navigation & Action Controls Bar */}
-      <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-wrap items-center justify-between gap-4 shadow-lg">
-        {/* Title, Round Counter & Turn Indicator */}
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-amber-400/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-            <Swords className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-slate-100 font-display">
-                Combat Tracker
-              </h2>
-              {/* Round Badge */}
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-950 border border-amber-500/60 text-amber-300">
-                Round {round}
-              </span>
-              {combatStatus === 'active' ? (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950 border border-emerald-500/60 text-emerald-300 flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  In Combat
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-800 border border-slate-700 text-slate-400">
-                  Setup
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-400">
-              {combatants.length > 0
-                ? `Active Turn: ${(combatants.find((c) => c.id === activeCombatantId) || combatants[activeTurnIndex])?.name || 'None'} (${((activeCombatantId ? combatants.findIndex((c) => c.id === activeCombatantId) : activeTurnIndex) >= 0 ? (activeCombatantId ? combatants.findIndex((c) => c.id === activeCombatantId) : activeTurnIndex) : 0) + 1}/${combatants.length})`
-                : 'No combatants added yet'}
-            </p>
+          {/* Active Turn Name */}
+          <div className="truncate text-xs font-medium text-slate-300 flex items-center gap-1">
+            <span className="text-slate-500 text-[10px] uppercase font-bold">Turn:</span>
+            <span className="font-semibold text-amber-300 truncate max-w-[130px]" title={activeTurnName}>
+              {activeTurnName}
+            </span>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Start Combat Trigger (DM Only - Locks Turn 1 to highest initiative roller) */}
-          {isDm && (
+        {/* Turn Nav Controls */}
+        <div className="flex items-center gap-1 shrink-0">
+          {isDm && combatStatus === 'setup' && combatants.length > 0 && (
             <button
               type="button"
               onClick={handleStartCombat}
-              disabled={combatants.length === 0}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-slate-950 transition cursor-pointer shadow-md"
-              title="Start combat: sort descending by initiative, lock Turn 1 onto highest score, reset round to 1"
+              className="h-7 px-2 text-[11px] font-bold rounded bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center gap-1 cursor-pointer shadow-sm"
+              title="Start Combat"
             >
-              <Swords className="w-4 h-4 stroke-[2.5]" />
-              <span>Start Combat</span>
+              <Play className="w-3 h-3 fill-current" />
+              <span>Start</span>
             </button>
           )}
 
-          {/* Previous Turn */}
           <button
             type="button"
             onClick={handlePrevTurn}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition cursor-pointer"
-            title="Go to previous combatant turn"
+            disabled={combatants.length === 0}
+            className="h-7 w-7 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition disabled:opacity-40 cursor-pointer"
+            title="Previous Turn"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Prev</span>
           </button>
 
-          {/* Next Turn (Primary Action) */}
           <button
             type="button"
             onClick={handleNextTurn}
-            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shadow-md"
-            title="Advance to next turn"
+            disabled={combatants.length === 0}
+            className="h-7 px-2.5 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 transition shadow cursor-pointer disabled:opacity-40"
+            title="Advance to Next Turn"
           >
             <span>Next Turn</span>
-            <ArrowRight className="w-4 h-4 stroke-[3]" />
+            <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
           </button>
 
-          {/* Sort by Initiative (Strict descending order) */}
           {isDm && (
             <button
               type="button"
               onClick={handleSortInitiative}
-              disabled={combatants.length === 0}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-amber-300 transition cursor-pointer disabled:opacity-40"
-              title="Sort all combatants in strict descending initiative order"
+              className="h-7 w-7 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+              title="Strict Descending Initiative Sort"
             >
               <ArrowUpDown className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sort</span>
             </button>
           )}
+        </div>
+      </div>
 
-          {/* Roll All Initiatives (DM Only) */}
+      {/* 2. COMBATANT LIST CONTAINER: Strictly single source of truth, sorted by initiative descending */}
+      <div className="flex-1 overflow-y-auto px-2 py-1.5 space-y-1">
+        {visibleCombatants.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
+            <Swords className="w-8 h-8 opacity-40 text-amber-400" />
+            <p className="text-xs font-medium text-slate-400">
+              {combatants.length === 0
+                ? 'No combatants in encounter.'
+                : 'No visible combatants for your role.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setNewType('player');
+                setIsAddModalOpen(true);
+              }}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer"
+            >
+              + Add First Combatant
+            </button>
+          </div>
+        ) : (
+          visibleCombatants.map((c) => {
+            const isActive = c.id === (activeCombatantId || combatants[activeTurnIndex]?.id);
+            const isFoW = isCombatantFoW(c);
+            const isPlayerOrAlly = c.type === 'player' || c.type === 'ally';
+            const canEdit = isDm || (isPlayerOrAlly && !isFoW);
+            const isMenuOpen = actionMenuCombatantId === c.id;
+            const isEditing = editingCombatantId === c.id;
+            const health = getHealthThreshold(c.hpCurrent, c.hpMax);
+
+            return (
+              <div
+                key={c.id}
+                className={`h-11 px-2 rounded-lg border transition-all flex items-center justify-between gap-1.5 text-xs select-none ${
+                  isActive
+                    ? 'bg-amber-950/30 border-amber-500/80 shadow-sm border-l-4 border-l-amber-400 ring-1 ring-amber-400/20'
+                    : 'bg-slate-900/80 border-slate-800/90 hover:border-slate-700'
+                }`}
+              >
+                {/* COL 1: Initiative Badge (w-7 h-7 font-bold text-xs rounded bg-neutral-800 text-amber-400) */}
+                <button
+                  type="button"
+                  onClick={() => canEdit && handleRollInitiative(c.id)}
+                  title={canEdit ? 'Click to roll 1d20 Initiative' : `Initiative ${c.initiative}`}
+                  className="w-7 h-7 font-bold text-xs rounded bg-neutral-800 text-amber-400 flex items-center justify-center shrink-0 tabular-nums border border-neutral-700 hover:border-amber-400 transition cursor-pointer shadow-inner"
+                >
+                  {c.initiative}
+                </button>
+
+                {/* COL 2: Name, Active Turn indicator, and "Hidden/Secret" FoW badge */}
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  <span
+                    className={`font-semibold truncate max-w-[110px] ${
+                      isActive ? 'text-amber-300 font-bold' : 'text-slate-200'
+                    }`}
+                    title={c.name}
+                  >
+                    {c.name}
+                  </span>
+
+                  {/* Badges */}
+                  {isDm && (c.hidden || c.isSecret) && (
+                    <span
+                      className="px-1 py-0.2 rounded text-[9px] font-mono bg-rose-950/80 border border-rose-800/80 text-rose-300 shrink-0 flex items-center gap-0.5"
+                      title="Hidden from players"
+                    >
+                      <EyeOff className="w-2.5 h-2.5" />
+                      <span>FoW</span>
+                    </span>
+                  )}
+
+                  {/* Concentration Icon Indicator */}
+                  {isConcentrating(c) && (
+                    <span
+                      className="text-cyan-400 shrink-0 animate-pulse"
+                      title="Concentrating (CON save on damage)"
+                    >
+                      <Zap className="w-3 h-3 fill-current" />
+                    </span>
+                  )}
+
+                  {/* Conditions count pill if > 0 */}
+                  {c.conditions.length > 0 && !isFoW && (
+                    <span className="text-[9px] font-mono text-slate-400 shrink-0">
+                      ({c.conditions.length})
+                    </span>
+                  )}
+                </div>
+
+                {/* COL 3: Inline HP tracker (current/max) with quick micro-buttons (-1, -5, +5, +1) */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {isFoW && !isDm ? (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${health.badgeClass}`}>
+                      {health.status}
+                    </span>
+                  ) : (
+                    <>
+                      {/* Micro damage buttons (-1, -5) */}
+                      <button
+                        type="button"
+                        onClick={() => handleHpDelta(c.id, -1)}
+                        disabled={!canEdit}
+                        className="h-6 w-5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                        title="-1 HP"
+                      >
+                        -1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleHpDelta(c.id, -5)}
+                        disabled={!canEdit}
+                        className="h-6 w-5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                        title="-5 HP"
+                      >
+                        -5
+                      </button>
+
+                      {/* Current / Max HP display */}
+                      <span className="text-[11px] font-mono font-bold text-slate-200 tabular-nums px-0.5 min-w-[44px] text-center">
+                        <span className={c.hpCurrent <= c.hpMax * 0.5 ? 'text-amber-400' : 'text-slate-100'}>
+                          {c.hpCurrent}
+                        </span>
+                        <span className="text-slate-500 font-normal text-[10px]">/{c.hpMax}</span>
+                        {c.hpTemp > 0 && (
+                          <span className="text-cyan-400 text-[9px] font-normal">+{c.hpTemp}</span>
+                        )}
+                      </span>
+
+                      {/* Micro heal buttons (+5, +1) */}
+                      <button
+                        type="button"
+                        onClick={() => handleHpDelta(c.id, 5)}
+                        disabled={!canEdit}
+                        className="h-6 w-5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                        title="+5 HP"
+                      >
+                        +5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleHpDelta(c.id, 1)}
+                        disabled={!canEdit}
+                        className="h-6 w-5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                        title="+1 HP"
+                      >
+                        +1
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* COL 4: Quick dropdown/icon for condition badges and DM delete/edit actions */}
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActionMenuCombatantId(actionMenuCombatantId === c.id ? null : c.id)
+                    }
+                    className={`h-7 w-7 rounded flex items-center justify-center border transition cursor-pointer ${
+                      c.conditions.length > 0
+                        ? 'bg-amber-950/70 border-amber-600/70 text-amber-300'
+                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Conditions & Combatant Options"
+                  >
+                    <MoreVertical className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* FLYOUT MENU FOR ROW */}
+                  {isMenuOpen && (
+                    <div className="absolute right-0 bottom-8 z-50 w-64 bg-slate-900 border border-slate-700 rounded-xl p-3 shadow-2xl space-y-2.5 text-xs animate-fadeIn">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                        <span className="font-bold text-slate-200 truncate">{c.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setActionMenuCombatantId(null)}
+                          className="text-slate-400 hover:text-slate-200 p-0.5"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Quick Conditions Badges Toggle */}
+                      {canEdit && (
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                            Conditions &amp; Status
+                          </span>
+                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto p-0.5">
+                            {CONDITIONS_LIST.map((cond) => {
+                              const isActiveCond = c.conditions.some((item) => item.name === cond);
+                              return (
+                                <button
+                                  key={cond}
+                                  type="button"
+                                  onClick={() => handleToggleCondition(c.id, cond)}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                                    isActiveCond
+                                      ? cond === 'Concentration'
+                                        ? 'bg-cyan-500 text-slate-950 font-bold border-cyan-400'
+                                        : 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                                  }`}
+                                >
+                                  {cond}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Edit Combatant or Stats */}
+                      {isEditing ? (
+                        <div className="space-y-2 pt-1 border-t border-slate-800">
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            placeholder="Combatant Name"
+                            className="w-full px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-slate-100"
+                          />
+                          <div className="grid grid-cols-3 gap-1 text-[11px]">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">Init</span>
+                              <input
+                                type="number"
+                                value={editInit}
+                                onChange={(e) => setEditInit(parseInt(e.target.value, 10) || 0)}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-amber-300"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">AC</span>
+                              <input
+                                type="number"
+                                value={editAc}
+                                onChange={(e) => setEditAc(parseInt(e.target.value, 10) || 10)}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-slate-200"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">Max HP</span>
+                              <input
+                                type="number"
+                                value={editHpMax}
+                                onChange={(e) => setEditHpMax(parseInt(e.target.value, 10) || 1)}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-slate-200"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEdit(c.id)}
+                              className="flex-1 py-1 text-xs font-bold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 transition"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCombatantId(null)}
+                              className="px-2 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        canEdit && (
+                          <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditing(c)}
+                              className="flex-1 py-1 px-2 text-[11px] font-semibold rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-1 transition"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Stats</span>
+                            </button>
+
+                            {isDm && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleVisibility(c.id)}
+                                className={`py-1 px-2 text-[11px] font-semibold rounded flex items-center gap-1 border transition ${
+                                  c.hidden || c.isSecret
+                                    ? 'bg-rose-950/80 border-rose-800 text-rose-300'
+                                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-slate-100'
+                                }`}
+                                title="Toggle visibility to players"
+                              >
+                                {c.hidden || c.isSecret ? (
+                                  <EyeOff className="w-3 h-3" />
+                                ) : (
+                                  <Eye className="w-3 h-3" />
+                                )}
+                                <span>{c.hidden || c.isSecret ? 'Hidden' : 'Visible'}</span>
+                              </button>
+                            )}
+
+                            {isDm && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCombatant(c.id)}
+                                className="p-1 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-800 text-rose-300 transition"
+                                title="Remove combatant"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* 3. FOOTER DOCK: Compact "+ Add Combatant" button and Encounter Reset */}
+      <div className="h-10 px-2.5 bg-slate-950/95 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setNewType(isDm ? 'monster' : 'player');
+              setIsAddModalOpen(true);
+            }}
+            className="h-7 px-2.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 shadow transition cursor-pointer"
+            title="Add Combatant to Encounter"
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Add Combatant</span>
+          </button>
+
           {isDm && (
             <button
               type="button"
               onClick={handleRollAllInitiatives}
               disabled={combatants.length === 0}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-amber-300 transition cursor-pointer disabled:opacity-40"
-              title="Roll 1d20 initiative for all combatants and sort descending"
+              className="h-7 px-2 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-amber-300 flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+              title="Roll 1d20 for all combatants and sort descending"
             >
               <Dices className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Roll All</span>
+              <span>Roll All</span>
             </button>
           )}
+        </div>
 
-          {/* Bug Fix: Reset Round Counter Button */}
+        <div className="flex items-center gap-1.5">
           {isDm && (
             <button
               type="button"
-              onClick={handleResetRound}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-amber-300 transition cursor-pointer"
-              title="Reset Round Counter back to Round 1"
+              onClick={() => setIsClearModalOpen(true)}
+              disabled={combatants.length === 0}
+              className="h-7 px-2 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-rose-950 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300 flex items-center gap-1 transition cursor-pointer disabled:opacity-30"
+              title="Reset encounter to a blank slate"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Reset Round</span>
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset</span>
             </button>
           )}
-
-          {/* Clear Combat / Blank Slate Button (DM Only) */}
-          {isDm && (
-            <button
-              type="button"
-              onClick={() => setIsClearCombatModalOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/70 text-rose-300 hover:text-white transition cursor-pointer shadow-sm"
-              title="End combat and clear all combatants (Blank Slate)"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-              <span className="hidden sm:inline">Clear Combat</span>
-            </button>
-          )}
-
-          {/* Add Combatant Trigger (Available to DM and Players for PC / Ally) */}
-          <button
-            type="button"
-            onClick={() => {
-              setNewType('player');
-              setIsAddModalOpen(true);
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition cursor-pointer shadow"
-            title={isDm ? 'Add combatant to encounter' : 'Add Player (PC) or NPC / Ally to encounter'}
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[3]" />
-            <span>{isDm ? 'Add Combatant' : 'Add PC / Ally'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* THREE-COLUMN DASHBOARD LAYOUT */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        
-        {/* COLUMN 1: LEFT - QUICK-GLANCE INITIATIVE LIST (3/12 cols) */}
-        <div className="lg:col-span-3">
-          <QuickGlanceInitiative
-            combatants={combatants}
-            activeTurnIndex={activeTurnIndex}
-            activeCombatantId={activeCombatantId}
-            isDm={isDm}
-            onSelectCombatant={(idx, id) =>
-              preserveScroll(() => {
-                setActiveTurnIndex(idx);
-                const selectedId = id || combatants[idx]?.id || null;
-                if (selectedId) {
-                  setActiveCombatantId(selectedId);
-                  broadcastCombat(combatants, idx, round, selectedId, combatStatus);
-                }
-              })
-            }
-            onMoveCombatant={handleMoveCombatant}
-            onToggleVisibility={(id) => preserveScroll(() => handleToggleVisibility(id))}
-          />
-        </div>
-
-        {/* COLUMN 2: CENTER - MAIN COMBATANT CARDS VIEW (6/12 cols) - ACTIVE TURN ANCHORED AT TOP */}
-        <div className="lg:col-span-6 space-y-3.5">
-          {/* Setup Banner if Encounter Ready but Combat not started */}
-          {combatStatus === 'setup' && combatants.length > 0 && (
-            <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/50 text-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-md">
-              <div className="flex items-center gap-2.5">
-                <Swords className="w-5 h-5 text-amber-400 shrink-0" />
-                <div>
-                  <h4 className="text-xs font-bold font-display text-amber-300 uppercase tracking-wider">
-                    Encounter Prepared ({combatants.length} Combatant{combatants.length > 1 ? 's' : ''})
-                  </h4>
-                  <p className="text-[11px] text-slate-300">
-                    Ready to begin? Click &ldquo;Start Combat&rdquo; to sort initiative strictly descending and lock Turn 1 onto the highest score.
-                  </p>
-                </div>
-              </div>
-              {isDm && (
-                <button
-                  type="button"
-                  onClick={handleStartCombat}
-                  className="px-4 py-1.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl transition cursor-pointer shadow flex items-center gap-1.5"
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Start Combat</span>
-                </button>
-              )}
-            </div>
-          )}
-
-          {visibleCombatants.length === 0 ? (
-            <div className="p-12 text-center rounded-2xl bg-slate-900/60 border-2 border-dashed border-slate-800 space-y-3">
-              <Swords className="w-10 h-10 text-slate-500 mx-auto opacity-40" />
-              <h3 className="text-sm font-bold text-slate-300 font-display">
-                {combatants.length === 0 ? 'Blank Slate Encounter' : 'No Combatants Currently Visible'}
-              </h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                {combatants.length === 0
-                  ? 'All combatants have been cleared. Click "+ Add Combatant" to create new entities for the encounter.'
-                  : isDm
-                  ? 'Click "+ Add Combatant" above to spawn players, monsters, bosses, or custom environmental initiatives.'
-                  : 'Waiting for the Dungeon Master to reveal active combatants.'}
-              </p>
-              {combatants.length === 0 && (
-                <div className="pt-2 flex items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewType('player');
-                      setIsAddModalOpen(true);
-                    }}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl cursor-pointer transition shadow"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>{isDm ? 'Add First Combatant' : 'Add First PC / Ally'}</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            orderedCenterCombatants.map((combatant) => {
-              const isActive = combatant.id === (activeCombatantId || combatants[activeTurnIndex]?.id);
-
-              return (
-                <CombatantCard
-                  key={combatant.id}
-                  combatant={combatant}
-                  isActive={isActive}
-                  isDm={isDm}
-                  onUpdate={(updates) => handleUpdateCombatant(combatant.id, updates)}
-                  onDelete={() => handleDeleteCombatant(combatant.id)}
-                  onAddLog={addFeedLog}
-                  onRollInitiative={() => handleRollInitiative(combatant.id)}
-                  onToggleVisibility={() => preserveScroll(() => handleToggleVisibility(combatant.id))}
-                />
-              );
-            })
-          )}
-        </div>
-
-        {/* COLUMN 3: RIGHT - LIVE ROOM & DICE CHAMBER FEED (3/12 cols) */}
-        <div className="lg:col-span-3">
-          <LiveCombatFeed
-            isDm={isDm}
-            playerName={rollerIdentity}
-          />
         </div>
       </div>
 
       {/* MODAL: ADD COMBATANT */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Plus className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-bold text-slate-100 font-display">
-                  {isDm ? 'Add Combatant to Encounter' : 'Add PC / Ally to Encounter'}
-                </h3>
-              </div>
+        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-xl p-4 shadow-2xl space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-slate-100 font-display flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-amber-400" />
+                <span>Add Combatant</span>
+              </h3>
               <button
                 type="button"
                 onClick={() => setIsAddModalOpen(false)}
@@ -1044,227 +1161,174 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
               </button>
             </div>
 
-            <form onSubmit={handleSaveNewCombatant} className="space-y-4">
-              {/* Name */}
+            <form onSubmit={handleSaveNewCombatant} className="space-y-2.5">
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Name / Identifier *
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                  Name *
                 </label>
                 <input
                   type="text"
-                  placeholder={isDm ? "e.g. Goblin Archer, Valerius, Lair Collapse" : "e.g. Valerius, Sir Gareth, Ranger Companion"}
+                  placeholder="e.g. Valerius, Goblin Archer, Dragon"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
                   required
                   autoFocus
                 />
               </div>
 
-              {/* Role Type Selection: Players only have access to Player (PC) and NPC / Ally */}
+              {/* Role Type */}
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Entity Role / Type *
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                  Type / Allegiance
                 </label>
-                <select
-                  value={newType}
-                  onChange={(e) => setNewType(e.target.value as CombatantType)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 cursor-pointer font-medium"
-                >
-                  <option value="player">Player (PC) - Full Details Visible</option>
-                  <option value="ally">NPC / Ally - Full Details Visible</option>
-                  {isDm && (
-                    <>
-                      <option value="monster">Monster - Fog of War (Stats Hidden)</option>
-                      <option value="boss">Boss - Fog of War (Stats Hidden)</option>
-                      <option value="custom">Custom (Lair Action, Hazard, Event) - Fog of War</option>
-                    </>
+                <div className="grid grid-cols-3 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewType('player')}
+                    className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
+                      newType === 'player'
+                        ? 'bg-cyan-500 text-slate-950 font-bold border-cyan-400'
+                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    PC (Player)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewType('ally')}
+                    className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
+                      newType === 'ally'
+                        ? 'bg-emerald-500 text-slate-950 font-bold border-emerald-400'
+                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    NPC / Ally
+                  </button>
+                  {isDm ? (
+                    <button
+                      type="button"
+                      onClick={() => setNewType('monster')}
+                      className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
+                        newType === 'monster'
+                          ? 'bg-rose-500 text-slate-950 font-bold border-rose-400'
+                          : 'bg-slate-950 text-slate-400 border-slate-800'
+                      }`}
+                    >
+                      Monster
+                    </button>
+                  ) : (
+                    <div />
                   )}
-                </select>
+                </div>
               </div>
 
-              {/* Free-text field for CUSTOM role label (DM only) */}
-              {isDm && newType === 'custom' && (
-                <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-600/40 space-y-1">
-                  <label className="text-xs font-semibold text-amber-300 block">
-                    Custom Initiative Label (Free-text)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Lair Action, Regional Effect, Mass Combat Phase, Hazard"
-                    value={newCustomLabel}
-                    onChange={(e) => setNewCustomLabel(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
-                  />
-                  <p className="text-[10px] text-slate-400">
-                    Label displayed on the initiative tile and card header.
-                  </p>
-                </div>
-              )}
-
-              {/* Numerical Stats: Initiative, AC, Max HP */}
-              <div className="grid grid-cols-3 gap-3">
+              {/* Numerical Stats */}
+              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
                     Initiative
                   </label>
                   <input
                     type="number"
                     value={newInitiative}
                     onChange={(e) => setNewInitiative(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 text-center"
+                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-amber-300"
                   />
                 </div>
-
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Armor Class
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                    AC
                   </label>
                   <input
                     type="number"
-                    min="1"
                     value={newAc}
                     onChange={(e) => setNewAc(parseInt(e.target.value, 10) || 10)}
-                    className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 text-center"
+                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-200"
                   />
                 </div>
-
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
                     Max HP
                   </label>
                   <input
                     type="number"
-                    min="1"
                     value={newHp}
                     onChange={(e) => setNewHp(parseInt(e.target.value, 10) || 1)}
-                    className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 text-center"
+                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-200"
                   />
                 </div>
               </div>
 
-              {/* Privacy & Stealth Settings: Hidden / Secret & Fog of War (DM Only) */}
+              {/* FoW Toggles for DM */}
               {isDm && (
-                <div className="space-y-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
-                  <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Privacy &amp; Stealth Settings (GM Only)
-                  </span>
-
-                  <label className="flex items-start gap-2.5 cursor-pointer">
+                <div className="flex items-center gap-3 pt-1 text-[11px] text-slate-300">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={newHidden || newIsSecret}
-                      onChange={(e) => {
-                        setNewHidden(e.target.checked);
-                        setNewIsSecret(e.target.checked);
-                      }}
-                      className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-0 mt-0.5"
+                      checked={newHidden}
+                      onChange={(e) => setNewHidden(e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-amber-400 cursor-pointer"
                     />
-                    <div className="text-xs">
-                      <span className="font-semibold text-slate-200 block">
-                        Mark as Secret / Hidden (Secret Boss &amp; Stealth FoW)
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        Suppresses all feed announcements &amp; toasts completely. Kept completely invisible from player initiative until revealed.
-                      </span>
-                    </div>
+                    <span>Hidden (FoW)</span>
                   </label>
-
-                  <label className="flex items-start gap-2.5 cursor-pointer pt-1 border-t border-slate-800/60">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={newFogOfWar}
-                      onChange={(e) => setNewFogOfWar(e.target.checked)}
-                      className="rounded bg-slate-900 border-slate-700 text-purple-400 focus:ring-0 mt-0.5"
+                      checked={newIsSecret}
+                      onChange={(e) => setNewIsSecret(e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-amber-400 cursor-pointer"
                     />
-                    <div className="text-xs">
-                      <span className="font-semibold text-purple-300 block">
-                        Fog of War (Conceal Stats &amp; Active Conditions)
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        Hides numerical HP, AC, damage details, and health status badges from players.
-                      </span>
-                    </div>
+                    <span>Secret Boss</span>
                   </label>
                 </div>
               )}
 
-              {/* Modal Buttons */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
+                  className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-xl transition shadow"
+                  className="px-4 py-1.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shadow"
                 >
-                  Save &amp; Enter Combat
+                  Add to Order
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-      {/* MODAL: CLEAR COMBAT / BLANK SLATE CONFIRMATION (TWO-STEP VERIFICATION) */}
-      {isClearCombatModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-slate-900 border border-rose-800/80 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-100 font-display">
-                  Clear Combat Encounter?
-                </h3>
-                <p className="text-xs text-rose-300 font-medium">
-                  Two-step safety confirmation (Blank Slate)
-                </p>
-              </div>
-            </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Are you sure you want to end this combat and clear all combatants? This action cannot be undone.
+      {/* CONFIRMATION MODAL: RESET ENCOUNTER */}
+      {isClearModalOpen && (
+        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xs bg-slate-900 border border-rose-800/80 rounded-xl p-4 shadow-2xl space-y-3 text-center">
+            <RotateCcw className="w-8 h-8 text-rose-400 mx-auto" />
+            <h4 className="text-sm font-bold text-slate-100 font-display">
+              Reset Encounter?
+            </h4>
+            <p className="text-xs text-slate-400">
+              This will clear all combatants and reset the round counter to Round 1.
             </p>
-
-            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-400 space-y-1.5 font-mono">
-              <div className="flex items-center gap-2">
-                <span className="text-rose-400 font-bold">•</span>
-                <span>Purges all active combatants &amp; custom roles</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-rose-400 font-bold">•</span>
-                <span>Wipes all initiative scores &amp; active status conditions</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-rose-400 font-bold">•</span>
-                <span>Resets round counter back to Round 1</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-rose-400 font-bold">•</span>
-                <span>Prepares a clean blank slate for a brand-new encounter</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="flex items-center justify-center gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setIsClearCombatModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                onClick={() => setIsClearModalOpen(false)}
+                className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleConfirmClearCombat}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer shadow-md shadow-rose-950/50"
+                onClick={handleClearCombat}
+                className="px-3 py-1 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Confirm Clear Combat</span>
+                Confirm Reset
               </button>
             </div>
           </div>
