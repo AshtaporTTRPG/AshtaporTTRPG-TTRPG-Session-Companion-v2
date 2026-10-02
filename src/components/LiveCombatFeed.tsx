@@ -422,6 +422,41 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
                             )}
                           </div>
                         </div>
+                      ) : evt.rollDetails?.individualLineItems && evt.rollDetails.individualLineItems.length > 1 ? (
+                        <div className="space-y-1.5 pt-0.5">
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-xs font-mono font-bold text-amber-300">
+                              {formula || evt.message}
+                            </span>
+                            <span className="text-base font-bold font-mono text-slate-100">
+                              {total}
+                            </span>
+                          </div>
+                          <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 space-y-0.5 text-[11px] font-mono">
+                            {evt.rollDetails.individualLineItems.map((line, idx) => {
+                              const isTotal = line.startsWith('Total:');
+                              const isMod = line.startsWith('Modifier:');
+                              const parts = line.split(':');
+                              const label = parts[0];
+                              const val = parts.slice(1).join(':').trim();
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`flex items-center justify-between ${
+                                    isTotal
+                                      ? 'font-bold text-amber-300 pt-0.5 border-t border-slate-800/60'
+                                      : isMod
+                                      ? 'text-slate-400 font-medium'
+                                      : 'text-slate-300'
+                                  }`}
+                                >
+                                  <span>{label}:</span>
+                                  <span className="tabular-nums font-semibold">{val}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       ) : (
                         <div className="flex items-baseline justify-between">
                           <div className="text-[11px] font-mono text-slate-400 truncate max-w-[200px] sm:max-w-none">

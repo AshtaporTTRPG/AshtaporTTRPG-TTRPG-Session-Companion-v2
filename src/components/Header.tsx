@@ -7,12 +7,15 @@ import {
   Swords,
   Dices,
   Ruler,
+  BookOpen,
 } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from '../utils/audio';
 
+export type ActiveTab = 'combat' | 'dice' | 'geometry' | 'grimoire';
+
 interface HeaderProps {
-  activeTab: 'combat' | 'dice' | 'geometry';
-  setActiveTab: (tab: 'combat' | 'dice' | 'geometry') => void;
+  activeTab: ActiveTab;
+  setActiveTab: (tab: ActiveTab) => void;
   isDm: boolean;
   playerName: string;
 }
@@ -31,26 +34,18 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-10 px-2.5 bg-slate-950 border-b border-slate-800/90 flex items-center justify-between shrink-0 select-none z-30">
-      {/* Brand wordmark - compact */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className="text-xs font-bold tracking-wider text-amber-400 font-display flex items-center gap-1">
-          <Swords className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          <span className="hidden xs:inline">Ashtapor</span>
-        </span>
-      </div>
-
-      {/* Center: 3 Compact Icon Tabs [Combat] [Dice] [3D Range] */}
-      <nav className="flex items-center gap-1 p-0.5 bg-slate-900 rounded-lg border border-slate-800">
+    <header className="h-11 shrink-0 z-40 border-b border-neutral-800 bg-neutral-900/95 px-2 flex items-center justify-between select-none">
+      {/* 4 Compact Tabs on Single Header Row: [⚔️ Combat] [🎲 Dice] [📐 3D Range] [📖 Grimoire] */}
+      <nav className="flex items-center gap-1 p-0.5 bg-neutral-950/80 rounded-lg border border-neutral-800">
         <button
           type="button"
           onClick={() => setActiveTab('combat')}
           className={`flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
             activeTab === 'combat'
-              ? 'bg-amber-400 text-slate-950 shadow-sm font-bold'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
           }`}
-          title="Unified Combat Tracker"
+          title="Combat Tracker"
         >
           <Swords className="w-3.5 h-3.5 shrink-0" />
           <span>Combat</span>
@@ -61,10 +56,10 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveTab('dice')}
           className={`flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
             activeTab === 'dice'
-              ? 'bg-amber-400 text-slate-950 shadow-sm font-bold'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
           }`}
-          title="Dice Tray & Multi-D20 Engine"
+          title="Dice Tray & Staged Pool"
         >
           <Dices className="w-3.5 h-3.5 shrink-0" />
           <span>Dice</span>
@@ -75,17 +70,31 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveTab('geometry')}
           className={`flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
             activeTab === 'geometry'
-              ? 'bg-amber-400 text-slate-950 shadow-sm font-bold'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
           }`}
-          title="3D Range & Triangle Geometry"
+          title="3D Range & Jump/Fall Calculator"
         >
           <Ruler className="w-3.5 h-3.5 shrink-0" />
           <span>3D Range</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('grimoire')}
+          className={`flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+            activeTab === 'grimoire'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
+          }`}
+          title="Ashtapor Homebrew Grimoire"
+        >
+          <BookOpen className="w-3.5 h-3.5 shrink-0" />
+          <span>Grimoire</span>
+        </button>
       </nav>
 
-      {/* Right: Role indicator & Sound Toggle */}
+      {/* Right Controls: Role Badge & Sound Mute Toggle */}
       <div className="flex items-center gap-1.5 shrink-0">
         <div
           className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
@@ -106,11 +115,15 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={handleToggleSound}
-          title={soundOn ? 'Mute Sounds' : 'Unmute Sounds'}
-          aria-label={soundOn ? 'Mute Sounds' : 'Unmute Sounds'}
-          className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+          title={soundOn ? 'Mute Audio' : 'Unmute Audio'}
+          aria-label={soundOn ? 'Mute Audio' : 'Unmute Audio'}
+          className="p-1 rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
         >
-          {soundOn ? <Volume2 className="w-3.5 h-3.5 text-emerald-400" /> : <VolumeX className="w-3.5 h-3.5 text-slate-500" />}
+          {soundOn ? (
+            <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+          ) : (
+            <VolumeX className="w-3.5 h-3.5 text-neutral-500" />
+          )}
         </button>
       </div>
     </header>

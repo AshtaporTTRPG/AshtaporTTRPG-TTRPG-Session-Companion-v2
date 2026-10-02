@@ -794,7 +794,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none relative">
       {/* FLOATING TURN ALERT BANNER */}
       {playerTurnAlert && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 pointer-events-none px-3 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs shadow-xl flex items-center gap-1.5 animate-fadeIn">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs shadow-xl flex items-center gap-1.5 animate-fadeIn">
           <Sparkles className="w-3.5 h-3.5 shrink-0" />
           <span>{playerTurnAlert}</span>
         </div>
@@ -902,7 +902,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
               <div
                 key={c.id}
                 className={`min-h-[56px] py-1.5 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 text-xs select-none ${
-                  isMenuOpen ? 'relative z-50 ring-2 ring-amber-400/60 shadow-2xl' : 'relative z-0'
+                  isMenuOpen ? 'relative z-30 ring-2 ring-amber-400/60 shadow-2xl' : 'relative z-0'
                 } ${
                   isActive
                     ? 'bg-amber-950/30 border-amber-500/80 shadow-md border-l-4 border-l-amber-400 ring-1 ring-amber-400/20'
@@ -1061,10 +1061,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     <MoreVertical className="w-3.5 h-3.5" />
                   </button>
 
-                  {/* FLYOUT MENU WITH z-50 AND CLEAN POSITIONING */}
+                  {/* FLYOUT MENU WITH z-30 AND CLEAN POSITIONING */}
                   {isMenuOpen && (
                     <div
-                      className={`absolute right-0 z-50 w-64 bg-slate-900 border border-slate-700 rounded-xl p-3 shadow-2xl space-y-2.5 text-xs animate-fadeIn ${
+                      className={`absolute right-0 z-30 w-64 bg-slate-900 border border-slate-700 rounded-xl p-3 shadow-2xl space-y-2.5 text-xs animate-fadeIn ${
                         isNearBottom ? 'bottom-8' : 'top-8'
                       }`}
                     >
@@ -1373,7 +1373,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
       {/* MODAL: ADD COMBATANT */}
       {isAddModalOpen && (
-        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
+        <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-xl p-4 shadow-2xl space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h3 className="text-sm font-bold text-slate-100 font-display flex items-center gap-1.5">
@@ -1574,7 +1574,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
       {/* CONFIRMATION MODAL: RESET ENCOUNTER */}
       {isClearModalOpen && (
-        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xs bg-slate-900 border border-rose-800/80 rounded-xl p-4 shadow-2xl space-y-3 text-center">
             <RotateCcw className="w-8 h-8 text-rose-400 mx-auto" />
             <h4 className="text-sm font-bold text-slate-100 font-display">

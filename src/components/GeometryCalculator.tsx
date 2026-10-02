@@ -23,13 +23,14 @@ export const GeometryCalculator: React.FC = () => {
   // Accordion active sections
   const [activeAccordion, setActiveAccordion] = useState<'none' | 'jump' | 'fall'>('jump');
 
-  // Jump Calculator state
-  const [strengthScore, setStrengthScore] = useState<number>(14);
+  // Ashtapor Homebrew Jump Calculator state
+  const [strModifier, setStrModifier] = useState<number>(3);
+  const [dexModifier, setDexModifier] = useState<number>(2);
   const [hasRunningStart, setHasRunningStart] = useState<boolean>(true);
 
-  // Fall Damage Calculator state
+  // Ashtapor Homebrew Fall Damage Calculator state
   const [fallDistance, setFallDistance] = useState<number>(30);
-  const [safeLandingAcrobatics, setSafeLandingAcrobatics] = useState<boolean>(false);
+  const [isIncapacitated, setIsIncapacitated] = useState<boolean>(false);
 
   // 1. 3D Range Calculations
   const trueDistance = Math.sqrt(
@@ -89,38 +90,28 @@ export const GeometryCalculator: React.FC = () => {
     };
   }, [groundDistance, altitudeDiff]);
 
-  // 2. Jump Calculator Outputs (5e Rules)
-  // STR modifier = Math.floor((STR - 10) / 2)
-  const strModifier = Math.floor((strengthScore - 10) / 2);
-  const longJumpDistance = hasRunningStart ? strengthScore : Math.max(1, Math.floor(strengthScore / 2));
-  const rawHighJump = 3 + strModifier;
-  const highJumpDistance = hasRunningStart
-    ? Math.max(1, rawHighJump)
-    : Math.max(1, Math.floor(rawHighJump / 2));
+  // 2. Ashtapor Homebrew Jump Calculations
+  // Logic: Jump distance uses Math.max(STR mod, DEX mod).
+  // Standing Jump: Math.max(0, 5 + Math.max(strMod, dexMod)) ft.
+  // Running Jump: Math.max(0, 10 + Math.max(strMod, dexMod)) ft.
+  const bestJumpMod = Math.max(strModifier, dexModifier);
+  const standingJumpDistance = Math.max(0, 5 + bestJumpMod);
+  const runningJumpDistance = Math.max(0, 10 + bestJumpMod);
+  const activeJumpDistance = hasRunningStart ? runningJumpDistance : standingJumpDistance;
 
-  // 3. Fall Damage Calculator Outputs (1d6 per 10ft, max 20d6)
-  const effectiveFall = safeLandingAcrobatics ? Math.max(0, fallDistance - 10) : fallDistance;
-  const fallDamageDiceCount = Math.min(20, Math.floor(effectiveFall / 10));
+  // 3. Ashtapor Homebrew Fall Damage Calculation
+  // Normal fall: If distance <= 15 ft -> 0 damage. If distance > 15 ft -> (distance - 15) flat damage.
+  // Incapacitated fall: 1 flat damage per foot from 0 ft (distance * 1).
+  const flatFallDamage = isIncapacitated
+    ? Math.max(0, fallDistance) * 1
+    : fallDistance <= 15
+    ? 0
+    : Math.max(0, fallDistance - 15);
 
-  // Handle Roll Fall Damage
-  const handleRollFallDamage = () => {
-    if (fallDamageDiceCount <= 0) {
-      liveFeedSync.recordCombatLog(
-        `💫 Fall from ${fallDistance}ft resulted in 0 damage (soft landing or <10ft).`,
-        true
-      );
-      return;
-    }
-
-    const rollResult = executeDiceRoll({
-      diceType: 'd6',
-      count: fallDamageDiceCount,
-      rollType: 'Damage',
-      label: `Fall Damage (${fallDistance}ft fall${safeLandingAcrobatics ? ', Acrobatics DC passed' : ''})`,
-      visibility: 'public',
-    });
-
-    liveFeedSync.recordDiceRoll(rollResult, true);
+  // 1-click button to log the fall damage to the live feed
+  const handleLogFallDamage = () => {
+    const msg = `💥 Flat Fall Damage (${fallDistance} ft${isIncapacitated ? ', Incapacitated' : ' Normal'}): ${flatFallDamage} HP flat damage.`;
+    liveFeedSync.recordCombatLog(msg, true);
   };
 
   return (
@@ -423,9 +414,9 @@ export const GeometryCalculator: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. COLLAPSIBLE ACCORDIONS: Jump Calculator & Fall Damage Calculator */}
+      {/* 4. COLLAPSIBLE ACCORDIONS: Ashtapor Homebrew Jump Calculator & Fall Damage Calculator */}
       <div className="space-y-1.5 shrink-0">
-        {/* ACCORDION 1: JUMP CALCULATOR */}
+        {/* ACCORDION 1: ASHTAPOR JUMP CALCULATOR */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
           <button
             type="button"
@@ -434,9 +425,9 @@ export const GeometryCalculator: React.FC = () => {
           >
             <div className="flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5 text-amber-400" />
-              <span>Jump Calculator (5e Rules)</span>
+              <span>Ashtapor Jump Calculator</span>
               <span className="text-[10px] font-mono text-emerald-400 font-semibold">
-                Long: {longJumpDistance}ft · High: {highJumpDistance}ft
+                {activeJumpDistance} ft ({hasRunningStart ? 'Running' : 'Standing'})
               </span>
             </div>
             {activeAccordion === 'jump' ? (
@@ -447,37 +438,35 @@ export const GeometryCalculator: React.FC = () => {
           </button>
 
           {activeAccordion === 'jump' && (
-            <div className="p-3 border-t border-slate-800/80 space-y-2 text-xs">
-              <div className="grid grid-cols-2 gap-3 items-center">
-                {/* Strength Score input */}
+            <div className="p-3 border-t border-slate-800/80 space-y-2.5 text-xs">
+              <div className="grid grid-cols-2 gap-2.5 items-center">
+                {/* STR Modifier input */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[11px] font-semibold text-slate-300">
-                      Strength Score:
+                      STR Modifier
                     </label>
                     <span className="text-[10px] font-mono text-amber-300 font-bold">
-                      Mod: {strModifier >= 0 ? `+${strModifier}` : strModifier}
+                      {strModifier >= 0 ? `+${strModifier}` : strModifier}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setStrengthScore((prev) => Math.max(1, prev - 1))}
+                      onClick={() => setStrModifier((prev) => prev - 1)}
                       className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
                     >
                       <Minus className="w-3 h-3" />
                     </button>
                     <input
                       type="number"
-                      min="1"
-                      max="30"
-                      value={strengthScore}
-                      onChange={(e) => setStrengthScore(Math.max(1, parseInt(e.target.value, 10) || 10))}
+                      value={strModifier}
+                      onChange={(e) => setStrModifier(parseInt(e.target.value, 10) || 0)}
                       className="flex-1 min-w-0 h-7 text-center font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100"
                     />
                     <button
                       type="button"
-                      onClick={() => setStrengthScore((prev) => Math.min(30, prev + 1))}
+                      onClick={() => setStrModifier((prev) => prev + 1)}
                       className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
@@ -485,62 +474,109 @@ export const GeometryCalculator: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Running Start Checkbox */}
-                <div className="flex flex-col justify-end pt-3">
-                  <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
+                {/* DEX Modifier input */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-semibold text-slate-300">
+                      DEX Modifier
+                    </label>
+                    <span className="text-[10px] font-mono text-cyan-300 font-bold">
+                      {dexModifier >= 0 ? `+${dexModifier}` : dexModifier}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDexModifier((prev) => prev - 1)}
+                      className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
                     <input
-                      type="checkbox"
-                      checked={hasRunningStart}
-                      onChange={(e) => setHasRunningStart(e.target.checked)}
-                      className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-amber-400 cursor-pointer"
+                      type="number"
+                      value={dexModifier}
+                      onChange={(e) => setDexModifier(parseInt(e.target.value, 10) || 0)}
+                      className="flex-1 min-w-0 h-7 text-center font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100"
                     />
-                    <div className="text-[11px] leading-tight">
-                      <span className="font-semibold text-slate-200 block">Running Start</span>
-                      <span className="text-[9px] text-slate-400">10 ft lead-up (5e RAW)</span>
-                    </div>
-                  </label>
+                    <button
+                      type="button"
+                      onClick={() => setDexModifier((prev) => prev + 1)}
+                      className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              {/* Running Start Checkbox */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
+                  <input
+                    type="checkbox"
+                    checked={hasRunningStart}
+                    onChange={(e) => setHasRunningStart(e.target.checked)}
+                    className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-amber-400 cursor-pointer"
+                  />
+                  <div className="text-[11px] leading-tight">
+                    <span className="font-semibold text-slate-200 block">Running Start (10-ft lead)</span>
+                    <span className="text-[10px] text-slate-400">Uses 10 ft base instead of 5 ft base</span>
+                  </div>
+                </label>
               </div>
 
               {/* Jump Outputs display */}
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                <div
+                  className={`p-2 rounded-lg border transition ${
+                    !hasRunningStart
+                      ? 'bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30'
+                      : 'bg-slate-950 border-slate-800 opacity-75'
+                  }`}
+                >
                   <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                    Long Jump Distance
+                    Standing Jump
                   </span>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-base font-mono font-bold text-amber-300">
-                      {longJumpDistance} ft
+                    <span className="text-lg font-mono font-bold text-amber-300">
+                      {standingJumpDistance} ft
                     </span>
                     <span className="text-[10px] text-slate-500">
-                      ({hasRunningStart ? 'STR score' : 'Half STR score'})
+                      (5 + {bestJumpMod >= 0 ? `+${bestJumpMod}` : bestJumpMod})
                     </span>
                   </div>
                 </div>
 
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                <div
+                  className={`p-2 rounded-lg border transition ${
+                    hasRunningStart
+                      ? 'bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30'
+                      : 'bg-slate-950 border-slate-800 opacity-75'
+                  }`}
+                >
                   <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                    High Jump Distance
+                    Running Jump
                   </span>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-base font-mono font-bold text-cyan-300">
-                      {highJumpDistance} ft
+                    <span className="text-lg font-mono font-bold text-cyan-300">
+                      {runningJumpDistance} ft
                     </span>
                     <span className="text-[10px] text-slate-500">
-                      ({hasRunningStart ? '3 + Mod' : 'Half (3+Mod)'})
+                      (10 + {bestJumpMod >= 0 ? `+${bestJumpMod}` : bestJumpMod})
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="text-[10px] text-slate-400 italic">
-                * Note: Reach during a high jump allows grabbing an extra 1.5× character height (e.g. up to {Math.round(highJumpDistance + 9)} ft total reach for a 6 ft tall humanoid).
+              {/* Required subtext */}
+              <div className="text-[10px] text-slate-400 italic bg-slate-950/60 p-2 rounded-lg border border-slate-800/70">
+                No check required; limited by total movement speed.
               </div>
             </div>
           )}
         </div>
 
-        {/* ACCORDION 2: FALL DAMAGE CALCULATOR */}
+        {/* ACCORDION 2: ASHTAPOR FALL DAMAGE CALCULATOR */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
           <button
             type="button"
@@ -549,9 +585,9 @@ export const GeometryCalculator: React.FC = () => {
           >
             <div className="flex items-center gap-1.5">
               <Flame className="w-3.5 h-3.5 text-rose-400" />
-              <span>Fall Damage Calculator (5e RAW)</span>
+              <span>Ashtapor Fall Damage Calculator</span>
               <span className="text-[10px] font-mono text-rose-400 font-semibold">
-                {fallDamageDiceCount}d6 Bludgeoning
+                Flat {flatFallDamage} HP
               </span>
             </div>
             {activeAccordion === 'fall' ? (
@@ -562,81 +598,105 @@ export const GeometryCalculator: React.FC = () => {
           </button>
 
           {activeAccordion === 'fall' && (
-            <div className="p-3 border-t border-slate-800/80 space-y-2 text-xs">
-              <div className="grid grid-cols-2 gap-3 items-center">
+            <div className="p-3 border-t border-slate-800/80 space-y-2.5 text-xs">
+              <div className="grid grid-cols-2 gap-2.5 items-center">
                 {/* Fall Distance Input */}
                 <div>
                   <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                    Fall Distance (ft):
+                    Fall Distance (ft)
                   </label>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setFallDistance((prev) => Math.max(0, prev - 10))}
+                      onClick={() => setFallDistance((prev) => Math.max(0, prev - 5))}
                       className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
-                      title="-10 ft"
+                      title="-5 ft"
                     >
                       <Minus className="w-3 h-3" />
                     </button>
                     <input
                       type="number"
                       min="0"
-                      step="10"
+                      step="5"
                       value={fallDistance}
                       onChange={(e) => setFallDistance(Math.max(0, parseInt(e.target.value, 10) || 0))}
                       className="flex-1 min-w-0 h-7 text-center font-mono font-bold rounded bg-slate-950 border border-slate-700 text-rose-300"
                     />
                     <button
                       type="button"
-                      onClick={() => setFallDistance((prev) => prev + 10)}
+                      onClick={() => setFallDistance((prev) => prev + 5)}
                       className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
-                      title="+10 ft"
+                      title="+5 ft"
                     >
                       <Plus className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
 
-                {/* Safe Landing Toggle */}
-                <div className="flex flex-col justify-end pt-3">
-                  <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
+                {/* Incapacitated Creature Checkbox */}
+                <div className="flex flex-col justify-end pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
                     <input
                       type="checkbox"
-                      checked={safeLandingAcrobatics}
-                      onChange={(e) => setSafeLandingAcrobatics(e.target.checked)}
-                      className="rounded bg-slate-900 border-slate-700 text-emerald-400 focus:ring-emerald-400 cursor-pointer"
+                      checked={isIncapacitated}
+                      onChange={(e) => setIsIncapacitated(e.target.checked)}
+                      className="rounded bg-slate-900 border-slate-700 text-rose-500 focus:ring-rose-500 cursor-pointer"
                     />
                     <div className="text-[11px] leading-tight">
-                      <span className="font-semibold text-slate-200 block">Safe Landing / DC 15</span>
-                      <span className="text-[9px] text-slate-400">Absorbs first 10 ft</span>
+                      <span className="font-semibold text-rose-300 block">Incapacitated Creature</span>
+                      <span className="text-[9px] text-slate-400">1 flat dmg/ft from 0 ft</span>
                     </div>
                   </label>
                 </div>
               </div>
 
-              {/* Damage Summary & Roll Button */}
-              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
-                    Calculated Impact
-                  </span>
-                  <div className="text-sm font-mono font-bold text-rose-300">
-                    {fallDamageDiceCount > 0 ? `${fallDamageDiceCount}d6 Bludgeoning` : '0 Damage (<10ft)'}
+              {/* Quick Distance Preset Buttons */}
+              <div className="flex items-center gap-1">
+                {[10, 15, 20, 30, 45, 60].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setFallDistance(d)}
+                    className={`flex-1 py-0.5 text-[9px] font-mono rounded border transition cursor-pointer ${
+                      fallDistance === d
+                        ? 'bg-rose-950 border-rose-500 text-rose-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {d}ft
+                  </button>
+                ))}
+              </div>
+
+              {/* Prominent Flat Fall Damage Output & 1-click log button */}
+              <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-600/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-rose-400/90 block">
+                      Calculated Ashtapor Impact
+                    </span>
+                    <div className="text-base font-mono font-bold text-rose-200">
+                      Flat Fall Damage: <span className="text-lg text-rose-400">{flatFallDamage} HP</span>
+                    </div>
                   </div>
-                  <span className="text-[9px] text-slate-500">
-                    Max 20d6 (caps at 200ft) · Falls prone unless DC 15 Acrobatics
-                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleLogFallDamage}
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 text-white shadow-md transition cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    <Flame className="w-3.5 h-3.5" />
+                    <span>Log to Live Feed</span>
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleRollFallDamage}
-                  disabled={fallDamageDiceCount <= 0}
-                  className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white shadow transition cursor-pointer flex items-center gap-1.5 shrink-0"
-                >
-                  <Dices className="w-3.5 h-3.5" />
-                  <span>Roll Fall Damage</span>
-                </button>
+                <div className="text-[10px] text-rose-300/80 border-t border-rose-800/40 pt-1.5">
+                  {isIncapacitated
+                    ? 'Incapacitated fall: 1 flat damage per foot from 0 ft (takes full distance as damage).'
+                    : fallDistance <= 15
+                    ? 'Normal fall: ≤ 15 ft causes 0 damage (acrobatic recovery threshold).'
+                    : `Normal fall: 0 damage for first 15 ft, then 1 flat damage per foot beyond 15 ft (${fallDistance} - 15 = ${flatFallDamage} HP).`}
+                </div>
               </div>
             </div>
           )}

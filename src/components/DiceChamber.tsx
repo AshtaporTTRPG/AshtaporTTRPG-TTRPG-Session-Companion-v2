@@ -7,7 +7,7 @@ import {
   PairedD20Roll,
   CustomMacro,
 } from '../types/ttrpg';
-import { executeDiceRoll, parseDiceFormula } from '../utils/dice';
+import { executeDiceRoll, parseDiceFormula, addDieToFormula, setFormulaModifier } from '../utils/dice';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import {
   loadCustomMacros,
@@ -202,11 +202,22 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  // INTERACTIVE DICE BUTTON CLICK: Updates formula bar and triggers immediate roll
+  // INTERACTIVE DICE STAGING: Appends die or increments count in staged pool without rolling
   const handleDieButtonClick = (die: DieType) => {
-    const formula = modifier !== 0 ? `1${die}${modifier > 0 ? `+${modifier}` : modifier}` : `1${die}`;
-    setFormulaInput(formula);
-    handleRollFormula(formula);
+    setFormulaInput((prev) => addDieToFormula(prev, die));
+  };
+
+  // CLEAR STAGED FORMULA
+  const handleClearFormula = () => {
+    setFormulaInput('');
+    setModifier(0);
+  };
+
+  // STEP MODIFIER (Syncs with formula)
+  const handleModifierStep = (delta: number) => {
+    const newMod = modifier + delta;
+    setModifier(newMod);
+    setFormulaInput((prev) => setFormulaModifier(prev, newMod));
   };
 
   // ROLL CUSTOM MACRO
@@ -338,20 +349,32 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
       {/* 2. ROW 1: FORMULA BAR & INTERACTIVE DICE ROW */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
         <div className="flex items-center gap-1.5">
-          {/* Formula Text Input */}
-          <input
-            type="text"
-            value={formulaInput}
-            onChange={(e) => setFormulaInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleRollFormula();
-              }
-            }}
-            placeholder="e.g. 1d20+5, 2d6+3, 8d6"
-            className="flex-1 min-w-0 px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition"
-          />
+          {/* Formula Text Input with clear button */}
+          <div className="relative flex-1 min-w-0 flex items-center">
+            <input
+              type="text"
+              value={formulaInput}
+              onChange={(e) => setFormulaInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleRollFormula();
+                }
+              }}
+              placeholder="e.g. 1d8 + 1d6 + 1d4 + 4"
+              className="w-full px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition pr-6"
+            />
+            {formulaInput && (
+              <button
+                type="button"
+                onClick={handleClearFormula}
+                className="absolute right-1.5 p-0.5 text-slate-400 hover:text-slate-200 transition"
+                title="Clear formula"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
 
           {/* Roll Button */}
           <button
@@ -365,8 +388,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
 
         {/* Interactive Dice Selection Button Row: [d4] [d6] [d8] [d10] [d12] [d20] [d100] */}
         <div className="flex items-center justify-between gap-1 pt-0.5">
-          <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider shrink-0">
-            Dice:
+          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider shrink-0 font-semibold">
+            Stage Pool:
           </span>
           <div className="flex items-center gap-1 flex-1 justify-end overflow-x-auto">
             {INTERACTIVE_DICE.map((die) => (
@@ -375,9 +398,9 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                 type="button"
                 onClick={() => handleDieButtonClick(die)}
                 className="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-400 text-amber-300 hover:text-amber-200 transition cursor-pointer shadow-sm shrink-0"
-                title={`Click to set ${die} and roll immediately`}
+                title={`Click to append or increment ${die} in staged pool`}
               >
-                {die}
+                +{die}
               </button>
             ))}
           </div>
@@ -419,7 +442,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => setModifier((prev) => prev - 1)}
+                onClick={() => handleModifierStep(-1)}
                 className="h-6 w-6 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 flex items-center justify-center transition cursor-pointer"
                 title="Decrease modifier"
               >
@@ -430,7 +453,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
               </span>
               <button
                 type="button"
-                onClick={() => setModifier((prev) => prev + 1)}
+                onClick={() => handleModifierStep(1)}
                 className="h-6 w-6 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 flex items-center justify-center transition cursor-pointer"
                 title="Increase modifier"
               >
@@ -710,13 +733,30 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                         </div>
                       ))}
                     </div>
-                  ) : roll.individualLineItems && roll.individualLineItems.length > 1 ? (
-                    <div className="pt-1 mt-1 border-t border-slate-800/80 space-y-0.5 text-[11px] font-mono text-slate-400">
-                      {roll.individualLineItems.map((line, idx) => (
-                        <div key={idx} className="truncate">
-                          {line}
-                        </div>
-                      ))}
+                  ) : roll.individualLineItems && roll.individualLineItems.length > 0 ? (
+                    <div className="pt-1 mt-1 border-t border-slate-800/80 space-y-0.5 text-[11px] font-mono">
+                      {roll.individualLineItems.map((line, idx) => {
+                        const isTotal = line.startsWith('Total:');
+                        const isMod = line.startsWith('Modifier:');
+                        const parts = line.split(':');
+                        const label = parts[0];
+                        const val = parts.slice(1).join(':').trim();
+                        return (
+                          <div
+                            key={idx}
+                            className={`flex items-center justify-between ${
+                              isTotal
+                                ? 'font-bold text-amber-300 pt-0.5 border-t border-slate-800/60'
+                                : isMod
+                                ? 'text-slate-400 font-medium'
+                                : 'text-slate-300'
+                            }`}
+                          >
+                            <span>{label}:</span>
+                            <span className="tabular-nums font-semibold">{val}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="text-[11px] font-mono text-slate-400 pt-0.5">

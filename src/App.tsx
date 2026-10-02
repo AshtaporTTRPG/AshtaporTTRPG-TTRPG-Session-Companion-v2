@@ -5,14 +5,15 @@
 
 import React, { useState, useEffect } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
-import { Header } from './components/Header';
+import { Header, ActiveTab } from './components/Header';
 import { CombatTracker } from './components/CombatTracker';
 import { DiceChamber } from './components/DiceChamber';
 import { GeometryCalculator } from './components/GeometryCalculator';
+import { Grimoire } from './components/Grimoire';
 import { liveFeedSync } from './utils/liveFeedSync';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'combat' | 'dice' | 'geometry'>('combat');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('combat');
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isGM, setIsGM] = useState<boolean>(false);
   const [playerName, setPlayerName] = useState<string>('Adventurer');
@@ -111,8 +112,8 @@ export default function App() {
   }
 
   return (
-    <div className="w-full max-w-[480px] h-[720px] max-h-[720px] mx-auto bg-[#0b0f17] text-slate-200 flex flex-col overflow-hidden relative border border-slate-800/80 shadow-2xl selection:bg-amber-500/30 selection:text-amber-200">
-      {/* Fixed h-10 Navigation Bar with compact icon tabs [Combat] [Dice] [3D Range] */}
+    <div className="w-[480px] h-[720px] max-h-screen flex flex-col bg-neutral-950 text-neutral-100 overflow-hidden select-none">
+      {/* Static Navigation Header (Row 1): Fixed h-11 shrink-0 z-40 border-b border-neutral-800 bg-neutral-900/95 px-2 flex items-center justify-between */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -120,8 +121,8 @@ export default function App() {
         playerName={playerName}
       />
 
-      {/* Main View Area: Locked to remaining height with overflow-hidden on parent */}
-      <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
+      {/* Tab Content Container (Row 2): flex-1 min-h-0 overflow-y-auto relative p-2 */}
+      <main className="flex-1 min-h-0 overflow-y-auto relative p-2 flex flex-col">
         {activeTab === 'combat' && (
           <CombatTracker isDm={isGM} playerName={playerName} />
         )}
@@ -130,6 +131,9 @@ export default function App() {
         )}
         {activeTab === 'geometry' && (
           <GeometryCalculator />
+        )}
+        {activeTab === 'grimoire' && (
+          <Grimoire isDm={isGM} />
         )}
       </main>
     </div>

@@ -95,6 +95,7 @@ export function executeDiceRoll({
 
   const primaryDieType = poolEntries[0]?.diceType || 'd20';
   let totalDiceCount = 0;
+  const isMixedPool = poolEntries.length > 1;
 
   poolEntries.forEach((entry) => {
     const sides = DIE_SIDES[entry.diceType] || 20;
@@ -105,10 +106,6 @@ export function executeDiceRoll({
 
     if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
       // MULTI-PAIR GENERATION (Advantage / Disadvantage):
-      // When rolling N d20s with Advantage/Disadvantage:
-      // - Advantage: Roll N independent pairs of 2d20, keep Math.max(die1, die2), and discard the other.
-      // - Disadvantage: Roll N independent pairs of 2d20, keep Math.min(die1, die2), and discard the other.
-      // - Modifier Application: (selectedDie + modifier) added to each evaluated roll.
       const numPairs = entry.count;
       for (let k = 0; k < numPairs; k++) {
         const valA = rollSingleDie(20);
@@ -137,16 +134,34 @@ export function executeDiceRoll({
         groupRawRolls.push(valA, valB);
         allIndividualLineItems.push(lineItem);
 
-        // Crits and Fumbles evaluated strictly on the resolved winning dice
         if (selected === 20) hasCrit = true;
         if (selected === 1) hasFumble = true;
       }
 
-      // Sum Mode sums ONLY the winning dice values; discarded values are completely excluded!
       const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
       sumTotal += groupSum;
+    } else if (isMixedPool || displayMode === 'sum') {
+      // Mixed pool or Sum mode:
+      // Roll independent dice for this entry.
+      // Modifier is NOT added to individual line items; it is added ONCE to final sum.
+      for (let i = 0; i < entry.count; i++) {
+        const val = rollSingleDie(sides);
+        groupRolls.push(val);
+        groupRawRolls.push(val);
+
+        if (entry.diceType === 'd20') {
+          if (val === 20) hasCrit = true;
+          if (val === 1 && !hasCrit) hasFumble = true;
+        }
+      }
+      const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
+      sumTotal += groupSum;
+
+      // Format as exact die rolled, e.g. "1d8: [5]" or "2d6: [4, 2]"
+      const dieLabel = `${entry.count}${entry.diceType}`;
+      allIndividualLineItems.push(`${dieLabel}: [${groupRolls.join(', ')}]`);
     } else {
-      // Straight roll (d20 or polyhedral): Roll N independent dice
+      // Dedicated individual straight roll (Multi-D20 individual attacks):
       for (let i = 0; i < entry.count; i++) {
         const val = rollSingleDie(sides);
         const evaluatedTotal = val + modifier;
@@ -177,6 +192,14 @@ export function executeDiceRoll({
   });
 
   const total = sumTotal + modifier;
+
+  // Append Modifier and Total once for mixed pools or multi-dice sum pools
+  if (isMixedPool || (poolEntries.length >= 1 && displayMode === 'sum' && advantageMode === 'normal')) {
+    if (modifier !== 0) {
+      allIndividualLineItems.push(`Modifier: ${modifier > 0 ? `+${modifier}` : modifier}`);
+    }
+    allIndividualLineItems.push(`Total: ${total}`);
+  }
 
   // Build formula string, e.g. "5d20 (advantage) + 4"
   const formulaParts = poolEntries.map((e) => {
@@ -259,7 +282,12 @@ export function parseDiceFormula(formula: string): {
     const count = match[1] ? parseInt(match[1], 10) : 1;
     const diceType = (`d${match[2]}`) as DieType;
     if (pool.length === 0) primaryDie = diceType;
-    pool.push({ diceType, count });
+    const existing = pool.find((p) => p.diceType === diceType);
+    if (existing) {
+      existing.count += count;
+    } else {
+      pool.push({ diceType, count });
+    }
     totalCount += count;
   }
 
@@ -281,4 +309,45 @@ export function parseDiceFormula(formula: string): {
     modifier,
     pool,
   };
+}
+
+export function addDieToFormula(currentFormula: string, die: DieType): string {
+  const cleaned = currentFormula.trim();
+  if (!cleaned) {
+    return `1${die}`;
+  }
+
+  const parsed = parseDiceFormula(cleaned);
+  if (!parsed || !parsed.pool || parsed.pool.length === 0) {
+    return `1${die}`;
+  }
+
+  const pool = parsed.pool.map((p) => ({ ...p }));
+  const existing = pool.find((p) => p.diceType === die);
+  if (existing) {
+    existing.count += 1;
+  } else {
+    pool.push({ diceType: die, count: 1 });
+  }
+
+  const formulaParts = pool.map((p) => `${p.count}${p.diceType}`);
+  let result = formulaParts.join(' + ');
+  if (parsed.modifier !== 0) {
+    result += parsed.modifier > 0 ? ` + ${parsed.modifier}` : ` - ${Math.abs(parsed.modifier)}`;
+  }
+  return result;
+}
+
+export function setFormulaModifier(currentFormula: string, newMod: number): string {
+  const cleaned = currentFormula.trim();
+  const parsed = parseDiceFormula(cleaned);
+  if (!parsed || !parsed.pool || parsed.pool.length === 0) {
+    return newMod !== 0 ? (newMod > 0 ? `+${newMod}` : `${newMod}`) : '';
+  }
+  const formulaParts = parsed.pool.map((p) => `${p.count}${p.diceType}`);
+  let result = formulaParts.join(' + ');
+  if (newMod !== 0) {
+    result += newMod > 0 ? ` + ${newMod}` : ` - ${Math.abs(newMod)}`;
+  }
+  return result;
 }
