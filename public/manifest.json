@@ -4,8 +4,8 @@
   "manifest_version": 1,
   "action": {
     "title": "Ashtapor Companion",
-    "icon": "/vite.svg",
-    "popover": "/",
+    "icon": "./vite.svg",
+    "popover": "./index.html",
     "width": 480,
     "height": 720
   }
