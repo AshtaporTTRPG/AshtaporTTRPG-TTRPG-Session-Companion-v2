@@ -3,12 +3,12 @@ import { CustomMacro, RollTypeCategory } from '../types/ttrpg';
 const MACRO_STORAGE_KEY = 'ttrpg_custom_macros';
 
 export const DEFAULT_STARTER_MACROS: CustomMacro[] = [
-  { id: 'm-1', name: 'Attack (Longsword)', formula: '1d20+5', rollType: 'Attack roll' },
-  { id: 'm-2', name: 'Damage (Longsword)', formula: '1d8+3', rollType: 'Damage' },
-  { id: 'm-3', name: 'Sneak Attack', formula: '3d6', rollType: 'Damage' },
-  { id: 'm-4', name: 'Fireball', formula: '8d6', rollType: 'Damage' },
-  { id: 'm-5', name: 'Perception Check', formula: '1d20+3', rollType: 'Skill check' },
-  { id: 'm-6', name: 'Fate Die', formula: '1d20', rollType: 'Fate' },
+  { id: 'm-1', name: 'Attack (Longsword)', formula: '1d20+5', rollType: 'Attack roll', advantageMode: 'normal', modifier: 5 },
+  { id: 'm-2', name: 'Damage (Longsword)', formula: '1d8+3', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-3', name: 'Sneak Attack', formula: '3d6', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-4', name: 'Fireball', formula: '8d6', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-5', name: 'Perception Check', formula: '1d20+3', rollType: 'Skill check', advantageMode: 'normal', modifier: 3 },
+  { id: 'm-6', name: 'Fate Die', formula: '1d20', rollType: 'Fate', advantageMode: 'normal', modifier: 0 },
 ];
 
 /**
@@ -51,6 +51,8 @@ export function saveCustomMacros(macros: CustomMacro[]): void {
 export function addCustomMacro(
   name: string,
   formula: string,
+  advantageMode: 'normal' | 'advantage' | 'disadvantage' = 'normal',
+  modifier: number = 0,
   rollType: RollTypeCategory = 'Straight roll'
 ): CustomMacro {
   const current = loadCustomMacros();
@@ -58,11 +60,26 @@ export function addCustomMacro(
     id: `macro-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     name: name.trim(),
     formula: formula.trim(),
+    advantageMode,
+    modifier,
     rollType,
   };
   const updated = [...current, newMacro];
   saveCustomMacros(updated);
   return newMacro;
+}
+
+/**
+ * Updates an existing macro by ID.
+ */
+export function updateCustomMacro(
+  id: string,
+  updatedFields: Partial<Omit<CustomMacro, 'id'>>
+): CustomMacro[] {
+  const current = loadCustomMacros();
+  const updated = current.map((m) => (m.id === id ? { ...m, ...updatedFields } : m));
+  saveCustomMacros(updated);
+  return updated;
 }
 
 /**

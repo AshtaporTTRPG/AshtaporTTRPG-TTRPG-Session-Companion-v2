@@ -84,6 +84,8 @@ export interface CustomMacro {
   name: string;
   formula: string;
   rollType?: RollTypeCategory;
+  advantageMode?: 'normal' | 'advantage' | 'disadvantage';
+  modifier?: number;
 }
 
 export type RollDisplayMode = 'sum' | 'individual';
