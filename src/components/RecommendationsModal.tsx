@@ -63,8 +63,8 @@ const IMPROVEMENT_AREAS = [
         description: 'Send critical hits, natural 20s, and DM announcements directly into your campaign Discord server via a simple webhook URL.',
       },
       {
-        title: 'WebRTC Peer-to-Peer Live Sync',
-        description: 'Allow remote players to join the same room across the web without requiring a backend database, using serverless peer data channels.',
+        title: 'Native Owlbear Rodeo Tabletop Sync',
+        description: 'Synchronize initiative, HP, and dice events directly with native OBR room metadata without external brokers.',
       },
       {
         title: 'Secret Whispers & Hidden Rolls',

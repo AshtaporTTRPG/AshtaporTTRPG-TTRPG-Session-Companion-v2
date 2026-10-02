@@ -8,7 +8,6 @@ import {
   RollDisplayMode,
 } from '../types/ttrpg';
 import { executeDiceRoll, parseDiceFormula } from '../utils/dice';
-import { roomSync } from '../utils/roomSync';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import {
   loadCustomMacros,
@@ -127,10 +126,7 @@ const DEFAULT_INITIAL_MACROS: CustomMacro[] = [
 ];
 
 export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) => {
-  const [roomCode, setRoomCode] = useState<string>(() => roomSync.getRoomCode());
-  const [userName, setUserName] = useState<string>(() => {
-    return playerName?.trim() || roomSync.getPeerName();
-  });
+  const currentRollerName = playerName?.trim() || 'Adventurer';
   const [diceHistory, setDiceHistory] = useState<DiceRollResult[]>(() => {
     // Populate directly from shared liveFeedSync history on initial render
     const feed = liveFeedSync.getFeed();
@@ -250,31 +246,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     return () => unsubFeed();
   }, []);
 
-  // Synchronize roller displayName with incoming prop changes or roomSync presence updates
-  useEffect(() => {
-    const current = playerName?.trim() || roomSync.getPeerName();
-    if (current && current !== userName) {
-      setUserName(current);
-    }
-  }, [playerName]);
-
-  useEffect(() => {
-    const unsubPresence = roomSync.subscribePresence(() => {
-      const current = roomSync.getPeerName();
-      if (current && current !== userName) {
-        setUserName(current);
-      }
-    });
-    return () => unsubPresence();
-  }, [userName]);
-
-  const handleRollerNameChange = (newName: string) => {
-    setUserName(newName);
-    if (newName.trim()) {
-      roomSync.configure(roomCode, newName.trim(), isDm);
-    }
-  };
-
   // Total dice count in currently staged pool
   const totalStagedDice = (Object.values(stagedPool) as number[]).reduce((a, b) => a + b, 0);
 
@@ -357,7 +328,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     // Default to 1d20 if pool is empty
     const finalPool = poolToRoll.length > 0 ? poolToRoll : [{ diceType: 'd20' as DieType, count: 1 }];
 
-    const author = userName.trim() || roomSync.getPeerName();
+    const author = currentRollerName;
     const result = executeDiceRoll({
       pool: finalPool,
       modifier: mod,
@@ -434,16 +405,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     setCustomMacros(defaults);
   };
 
-  const handleCopyRoom = () => {
-    navigator.clipboard?.writeText(roomCode);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
   // Filter rolls based on player/DM view
   const visibleRolls = diceHistory.filter((roll) => {
     // If it's a self roll: only visible to the user who rolled it
-    if (roll.visibility === 'self' && roll.sender !== userName) {
+    if (roll.visibility === 'self' && roll.sender !== currentRollerName) {
       return false;
     }
     return true;
@@ -453,40 +418,27 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       {/* Left Column: Dice Controls & Room Settings */}
       <div className="lg:col-span-7 space-y-6">
-        {/* Room Header & Identity */}
+        {/* Native OBR Identity & Chamber Header */}
         <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-4 shadow-sm">
           <div className="flex items-center gap-3">
             <div>
               <span className="text-xs uppercase tracking-wider text-slate-400 font-medium block">
-                Synchronized Dice Chamber
+                Synchronized Table Dice Chamber
               </span>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-sm font-semibold text-slate-200">Room:</span>
-                <input
-                  type="text"
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                  className="w-32 px-2 py-0.5 text-xs font-mono font-semibold rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400"
-                />
-                <button
-                  onClick={handleCopyRoom}
-                  title="Copy Room ID to share with players"
-                  className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-600/50">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Owlbear Table Sync Active
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">Roller Name:</span>
-            <input
-              type="text"
-              value={userName}
-              onChange={(e) => handleRollerNameChange(e.target.value)}
-              className="w-36 px-2.5 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
-            />
+          <div className="flex items-center gap-2 bg-slate-950/70 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
+            <span className="text-slate-400">Attributed to:</span>
+            <span className="font-semibold text-amber-300 font-mono">
+              {currentRollerName} ({isDm ? 'GM' : 'Player'})
+            </span>
           </div>
         </div>
 
@@ -1046,7 +998,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
           {visibleRolls.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 p-8 my-auto">
               <Dices className="w-10 h-10 mb-3 opacity-30 text-slate-400" />
-              <p className="text-sm font-medium text-slate-400">No rolls in room {roomCode} yet.</p>
+              <p className="text-sm font-medium text-slate-400">No table rolls recorded yet.</p>
               <p className="text-xs text-slate-500 mt-1 max-w-xs">
                 Select your Roll Type, choose a die or click any custom macro to roll live for the party!
               </p>
@@ -1060,7 +1012,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
               });
 
               const isSecretRoll = roll.visibility === 'dm' || !!roll.isSecret;
-              const canSeeSecretDetails = isDm || roll.sender === userName;
+              const canSeeSecretDetails = isDm || roll.sender === currentRollerName;
 
               // Secret DM Dice Rolls: Other players must only see a generic log notice
               if (isSecretRoll && !canSeeSecretDetails) {

@@ -4,7 +4,8 @@ import { QuickGlanceInitiative } from './QuickGlanceInitiative';
 import { CombatantCard } from './CombatantCard';
 import { LiveCombatFeed } from './LiveCombatFeed';
 import { liveFeedSync } from '../utils/liveFeedSync';
-import { roomSync, RoomMessage } from '../utils/roomSync';
+import OBR from '@owlbear-rodeo/sdk';
+import { COMBAT_STATE_KEY, CombatState } from '../utils/obrCombatSync';
 import { playTurnSound } from '../utils/audio';
 import { executeDiceRoll } from '../utils/dice';
 import {
@@ -24,11 +25,11 @@ import {
 
 interface CombatTrackerProps {
   isDm: boolean;
-  roomCode?: string;
+  playerName?: string;
 }
 
-export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) => {
-  const currentRoomCode = roomCode || roomSync.getRoomCode();
+export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }) => {
+  const rollerIdentity = playerName || liveFeedSync.getPlayerName();
 
   // Combat State - initialized to an empty array [] if no active session data exists
   const [combatants, setCombatants] = useState<Combatant[]>(() => {
@@ -145,39 +146,50 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     } catch {}
   }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus]);
 
-  // Listen for real-time room sync
+  // Fetch initial state from OBR metadata if present
   useEffect(() => {
-    const unsub = roomSync.subscribe((msg: RoomMessage) => {
-      if (msg.type === 'COMBAT_SYNC' && msg.payload) {
-        if (Array.isArray(msg.payload.combatants)) setCombatants(msg.payload.combatants);
-        if (msg.payload.activeCombatantId !== undefined) {
-          setActiveCombatantId(msg.payload.activeCombatantId);
-        }
-        if (typeof msg.payload.activeTurnIndex === 'number') {
-          setActiveTurnIndex(msg.payload.activeTurnIndex);
-        }
-        if (typeof msg.payload.round === 'number') setRound(msg.payload.round);
-        if (msg.payload.combatStatus) setCombatStatus(msg.payload.combatStatus);
-      }
-
-      // Sync real-time damage toast alert across peers
-      if (msg.type === 'COMBAT_FEED_EVENT' && msg.payload?.event) {
-        const evt = msg.payload.event;
-        if (evt.type === 'combat') {
-          const alertMsg = !isDm && evt.playerMessage ? evt.playerMessage : evt.message;
-          if (alertMsg && (alertMsg.includes('took') || alertMsg.includes('damage'))) {
-            setDamageToastAlert(alertMsg.replace(/^[⚔️💚⚡⚙️✨💀➕]\s*/u, ''));
-            if (damageToastTimerRef.current) clearTimeout(damageToastTimerRef.current);
-            damageToastTimerRef.current = setTimeout(() => setDamageToastAlert(null), 4000);
+    if (!OBR.isReady) return;
+    OBR.room
+      .getMetadata()
+      .then((metadata) => {
+        const state = metadata[COMBAT_STATE_KEY] as CombatState | undefined;
+        if (state) {
+          if (Array.isArray(state.combatants)) setCombatants(state.combatants);
+          if (state.activeCombatantId !== undefined) {
+            setActiveCombatantId(state.activeCombatantId);
           }
+          if (typeof state.activeTurnIndex === 'number') {
+            setActiveTurnIndex(state.activeTurnIndex);
+          }
+          if (typeof state.round === 'number') setRound(state.round);
+          if (state.combatStatus) setCombatStatus(state.combatStatus);
         }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Listen for native OBR table metadata changes on all clients
+  useEffect(() => {
+    if (!OBR.isReady) return;
+    const unsub = OBR.room.onMetadataChange((metadata) => {
+      const state = metadata[COMBAT_STATE_KEY] as CombatState | undefined;
+      if (state) {
+        if (Array.isArray(state.combatants)) setCombatants(state.combatants);
+        if (state.activeCombatantId !== undefined) {
+          setActiveCombatantId(state.activeCombatantId);
+        }
+        if (typeof state.activeTurnIndex === 'number') {
+          setActiveTurnIndex(state.activeTurnIndex);
+        }
+        if (typeof state.round === 'number') setRound(state.round);
+        if (state.combatStatus) setCombatStatus(state.combatStatus);
       }
     });
     return () => unsub();
-  }, [isDm]);
+  }, []);
 
-  // Broadcast combat updates when state is modified (DM and authorized player PC/Ally updates)
-  const broadcastCombat = (
+  // Broadcast combat updates when state is modified by writing to OBR room metadata
+  const broadcastCombat = async (
     updatedCombatants: Combatant[],
     updatedTurn: number,
     updatedRound: number,
@@ -185,14 +197,25 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     updatedCombatStatus?: 'setup' | 'active'
   ) => {
     const statusToBroadcast = updatedCombatStatus || combatStatus;
-    roomSync.broadcast('COMBAT_SYNC', {
+    const updatedState: CombatState = {
       combatants: updatedCombatants,
       activeTurnIndex: updatedTurn,
       activeCombatantId:
         updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
       round: updatedRound,
       combatStatus: statusToBroadcast,
-    });
+      lastUpdated: Date.now(),
+    };
+
+    try {
+      if (OBR.isReady) {
+        await OBR.room.setMetadata({
+          [COMBAT_STATE_KEY]: updatedState,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to set OBR combat metadata:', e);
+    }
   };
 
   // Scroll position preservation helper to eliminate layout jump and unwanted auto-scroll
@@ -444,7 +467,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
       const isTargetPlayerOrAlly = target.type === 'player' || target.type === 'ally';
       if (!isDm && (!isTargetPlayerOrAlly || isTargetFoW)) return;
 
-      const rollerName = roomSync.getPeerName();
+      const rollerName = rollerIdentity;
 
       const rollResult = executeDiceRoll({
         diceType: 'd20',
@@ -485,7 +508,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
     preserveScroll(() => {
       if (!isDm || combatants.length === 0) return;
 
-      const dmRoller = roomSync.getPeerName();
+      const dmRoller = rollerIdentity;
 
       const updated = combatants.map((c) => {
         const roll = Math.floor(Math.random() * 20) + 1;
@@ -995,8 +1018,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, roomCode }) 
         {/* COLUMN 3: RIGHT - LIVE ROOM & DICE CHAMBER FEED (3/12 cols) */}
         <div className="lg:col-span-3">
           <LiveCombatFeed
-            roomCode={currentRoomCode}
             isDm={isDm}
+            playerName={rollerIdentity}
           />
         </div>
       </div>

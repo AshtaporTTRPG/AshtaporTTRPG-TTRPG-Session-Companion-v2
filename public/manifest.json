@@ -1,0 +1,12 @@
+{
+  "name": "Ashtapor Session Companion",
+  "version": "2.0.0",
+  "manifest_version": 1,
+  "action": {
+    "title": "Ashtapor Companion",
+    "icon": "/vite.svg",
+    "popover": "/",
+    "width": 480,
+    "height": 720
+  }
+}

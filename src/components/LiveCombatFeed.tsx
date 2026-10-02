@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { liveFeedSync, UnifiedFeedItem } from '../utils/liveFeedSync';
-import { roomSync } from '../utils/roomSync';
 import { playDiceRollSound } from '../utils/audio';
 import { executeDiceRoll } from '../utils/dice';
 import { DieType } from '../types/ttrpg';
@@ -13,11 +12,12 @@ import {
 } from 'lucide-react';
 
 interface LiveCombatFeedProps {
-  roomCode: string;
   isDm: boolean;
+  playerName?: string;
 }
 
-export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }) => {
+export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName }) => {
+  const currentUserName = playerName || liveFeedSync.getPlayerName();
   const [feedItems, setFeedItems] = useState<UnifiedFeedItem[]>(() => liveFeedSync.getFeed());
   const [chatInput, setChatInput] = useState('');
   const [advantageMode, setAdvantageMode] = useState<'normal' | 'adv' | 'dis'>('normal');
@@ -39,10 +39,10 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
     return () => unsub();
   }, []);
 
-  // Quick Dice Roll Function - Connected to shared liveFeedSync and roomSync
+  // Quick Dice Roll Function - Connected to shared liveFeedSync
   const handleQuickRoll = (sides: number) => {
     playDiceRollSound();
-    const rollerName = roomSync.getPeerName();
+    const rollerName = currentUserName;
     const advMode =
       sides === 20
         ? advantageMode === 'adv'
@@ -70,7 +70,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
     e.preventDefault();
     if (!chatInput.trim()) return;
 
-    const senderName = roomSync.getPeerName();
+    const senderName = currentUserName;
     liveFeedSync.recordChat(senderName, isDm, chatInput.trim(), true);
     setChatInput('');
   };
@@ -87,15 +87,16 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
         <div className="flex items-center gap-2">
           <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
           <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-display">
-            Live Room Feed
+            Live Table Feed
           </h3>
           <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
             ({feedItems.length})
           </span>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-full">
-            Room {roomCode}
+          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            Table Feed
           </span>
           {/* Clear Log button consistently available across all tabs for BOTH DM and Players */}
           {feedItems.length > 0 && (
@@ -146,7 +147,6 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ roomCode, isDm }
 
             // Dice Roll event - Unified with Dice Chamber
             if (evt.type === 'dice') {
-              const currentUserName = roomSync.getPeerName();
               const isSecretRoll =
                 evt.rollDetails?.visibility === 'dm' || evt.rollDetails?.isSecret || evt.isSecretRoll;
               const canSeeSecretRoll = isDm || evt.sender === currentUserName;

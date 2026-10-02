@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MapPin, PinCategory, PinPrivacy } from '../types/ttrpg';
-import { roomSync } from '../utils/roomSync';
+import OBR from '@owlbear-rodeo/sdk';
 import { processMapImageFile } from '../utils/imageProcess';
 import { useMapStorage, CampaignMapWithBlob } from '../hooks/useMapStorage';
 import { MapGridSettings, getMapTypeBadge, STANDARD_MAP_TYPES } from '../utils/mapStorage';
@@ -52,7 +52,7 @@ const PIN_CATEGORY_CONFIG: Record<
   settlement: { label: 'Settlement', color: 'text-cyan-400', bgColor: 'bg-cyan-600', icon: '🏰' },
 };
 
-export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
+export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm, playerName }) => {
   // Persistent IndexedDB Map Storage Hook
   const {
     maps,
@@ -73,6 +73,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
     saveViewport,
     saveGridSettings,
   } = useMapStorage(isDm);
+
+  const currentAuthorName = playerName || 'Adventurer';
 
   // Pins state for the selected map
   const [pins, setPins] = useState<MapPin[]>([]);
@@ -182,59 +184,48 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
     }
   }, [pins, selectedMapId]);
 
-  // Real-time multi-user room sync
+  // Real-time table pin sync via OBR metadata
   useEffect(() => {
-    const unsubscribe = roomSync.subscribe((msg) => {
-      if (msg.type === 'MAP_UPLOAD' && msg.payload?.map) {
-        const incomingMap: UploadedCampaignMap = msg.payload.map;
-        setMaps((prev) => {
-          if (prev.some((m) => m.id === incomingMap.id)) return prev;
-          return [incomingMap, ...prev];
-        });
-        setSelectedMapId(incomingMap.id);
-      }
-
-      if (msg.type === 'MAP_DELETE' && msg.payload?.mapId) {
-        setMaps((prev) => prev.filter((m) => m.id !== msg.payload.mapId));
-        if (selectedMapId === msg.payload.mapId) {
-          setSelectedMapId('');
+    if (!OBR.isReady || !selectedMapId) return;
+    OBR.room
+      .getMetadata()
+      .then((metadata) => {
+        const pinData = metadata[`com.ashtapor.companion/map-pins-${selectedMapId}`] as
+          | MapPin[]
+          | undefined;
+        if (Array.isArray(pinData) && pinData.length > 0) {
+          setPins(pinData);
         }
-      }
+      })
+      .catch(() => {});
+  }, [selectedMapId]);
 
-      if (msg.type === 'MAP_METADATA_UPDATE' && msg.payload?.mapId) {
-        setMaps((prev) =>
-          prev.map((m) =>
-            m.id === msg.payload.mapId
-              ? { ...m, name: msg.payload.name, type: msg.payload.type }
-              : m
-          )
-        );
-      }
-
-      if (msg.type === 'MAP_PIN_SYNC' && msg.payload?.mapId === selectedMapId) {
-        const incomingPin: MapPin = msg.payload.pin;
-        setPins((prev) => {
-          const index = prev.findIndex((p) => p.id === incomingPin.id);
-          if (index >= 0) {
-            const copy = [...prev];
-            copy[index] = incomingPin;
-            return copy;
-          }
-          return [...prev, incomingPin];
-        });
-        if (activePin?.id === incomingPin.id) {
-          setActivePin(incomingPin);
+  useEffect(() => {
+    if (!OBR.isReady || !selectedMapId) return;
+    const unsubscribe = OBR.room.onMetadataChange((metadata) => {
+      const pinData = metadata[`com.ashtapor.companion/map-pins-${selectedMapId}`] as
+        | MapPin[]
+        | undefined;
+      if (Array.isArray(pinData)) {
+        setPins(pinData);
+        if (activePin) {
+          const match = pinData.find((p) => p.id === activePin.id);
+          if (match) setActivePin(match);
         }
-      }
-
-      if (msg.type === 'MAP_PIN_DELETE' && msg.payload?.mapId === selectedMapId) {
-        setPins((prev) => prev.filter((p) => p.id !== msg.payload.pinId));
-        if (activePin?.id === msg.payload.pinId) setActivePin(null);
       }
     });
 
     return () => unsubscribe();
   }, [selectedMapId, activePin]);
+
+  const syncPinsToObr = async (updatedPins: MapPin[]) => {
+    if (!OBR.isReady || !selectedMapId) return;
+    try {
+      await OBR.room.setMetadata({
+        [`com.ashtapor.companion/map-pins-${selectedMapId}`]: updatedPins,
+      });
+    } catch {}
+  };
 
   // Zoom handlers
   const handleZoomChange = (newScale: number) => {
@@ -320,19 +311,19 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
       category: draftCategory,
       description: draftSharedNote.trim(),
       privacy: draftPrivacy,
-      author: roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Adventurer'),
+      author: currentAuthorName,
       personalNotes: draftPersonalNote.trim() || undefined,
       dmNotes: isDm && draftDmNote.trim() ? draftDmNote.trim() : undefined,
       isRevealed: draftPrivacy !== 'dm',
     };
 
-    setPins((prev) => [...prev, newPin]);
+    setPins((prev) => {
+      const next = [...prev, newPin];
+      syncPinsToObr(next);
+      return next;
+    });
     setActivePin(newPin);
     setPendingPinCoords(null);
-
-    if (newPin.privacy === 'shared') {
-      roomSync.broadcast('MAP_PIN_SYNC', { mapId: selectedMapId, pin: newPin });
-    }
   };
 
   // Start editing active pin
@@ -362,17 +353,19 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
       privacy: editPrivacy,
     };
 
-    setPins((prev) => prev.map((p) => (p.id === activePin.id ? updatedPin : p)));
+    setPins((prev) => {
+      const next = prev.map((p) => (p.id === activePin.id ? updatedPin : p));
+      syncPinsToObr(next);
+      return next;
+    });
     setActivePin(updatedPin);
     setIsEditingPin(false);
-
-    roomSync.broadcast('MAP_PIN_SYNC', { mapId: selectedMapId, pin: updatedPin });
   };
 
   // DM Reveal Pin Intel to Party
   const handleRevealPinToPlayers = (pinId: string) => {
-    setPins((prev) =>
-      prev.map((p) => {
+    setPins((prev) => {
+      const next = prev.map((p) => {
         if (p.id !== pinId) return p;
         const revealedDescription = p.dmNotes
           ? `${p.description ? p.description + '\n\n' : ''}✨ [REVEALED INTEL]: ${p.dmNotes}`
@@ -385,16 +378,20 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
           description: revealedDescription,
         };
 
-        roomSync.broadcast('MAP_PIN_SYNC', { mapId: selectedMapId, pin: updated });
         if (activePin?.id === pinId) setActivePin(updated);
         return updated;
-      })
-    );
+      });
+      syncPinsToObr(next);
+      return next;
+    });
   };
 
   const handleDeletePin = (pinId: string) => {
-    setPins((prev) => prev.filter((p) => p.id !== pinId));
-    roomSync.broadcast('MAP_PIN_DELETE', { mapId: selectedMapId, pinId });
+    setPins((prev) => {
+      const next = prev.filter((p) => p.id !== pinId);
+      syncPinsToObr(next);
+      return next;
+    });
     if (activePin?.id === pinId) {
       setActivePin(null);
       setIsEditingPin(false);
@@ -451,7 +448,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
         file: targetFile,
         name: uploadMapName.trim(),
         type: uploadMapType,
-        author: roomSync.getPeerName() || (isDm ? 'Dungeon Master' : 'Player'),
+        author: currentAuthorName,
       });
 
       setIsUploadModalOpen(false);
@@ -514,7 +511,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
   const visiblePins = pins.filter((p) => {
     if (!isDm) {
       if (p.privacy === 'dm' && !p.isRevealed) return false;
-      if (p.privacy === 'personal' && p.author !== roomSync.getPeerName()) return false;
+      if (p.privacy === 'personal' && p.author !== currentAuthorName) return false;
     }
     if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
     if (searchQuery.trim()) {
@@ -1221,7 +1218,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ isDm }) => {
                     </div>
 
                     {/* Personal Notes (Player Private) */}
-                    {(activePin.personalNotes || activePin.author === roomSync.getPeerName()) && (
+                    {(activePin.personalNotes || activePin.author === currentAuthorName) && (
                       <div className="space-y-1">
                         <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1">
                           <Lock className="w-3 h-3 text-cyan-400" />

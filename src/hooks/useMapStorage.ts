@@ -18,7 +18,6 @@ import {
   generateStarterFantasyMapDataUrl,
 } from '../utils/mapStorage';
 import { processMapImageFile } from '../utils/imageProcess';
-import { roomSync } from '../utils/roomSync';
 
 export interface CampaignMapWithBlob {
   id: string;
@@ -242,22 +241,6 @@ export function useMapStorage(isDm: boolean) {
           viewport: campaignMap.viewport,
         });
 
-        // Broadcast to party room safely
-        try {
-          roomSync.broadcast('MAP_UPLOAD', {
-            map: {
-              id: campaignMap.id,
-              name: campaignMap.name,
-              type: campaignMap.type,
-              url: optimizedDataUrl,
-              author: campaignMap.author,
-              createdAt: campaignMap.createdAt,
-            },
-          });
-        } catch (syncErr) {
-          console.warn('Room sync broadcast skipped for map upload:', syncErr);
-        }
-
         triggerSaveFeedback();
         return campaignMap;
       } catch (err: any) {
@@ -415,10 +398,6 @@ export function useMapStorage(isDm: boolean) {
         }
 
         setMaps(remaining);
-
-        try {
-          roomSync.broadcast('MAP_DELETE', { mapId });
-        } catch {}
       } catch (err: any) {
         console.error('Error deleting map from storage:', err);
         setErrorMessage('Failed to delete map from storage.');
@@ -487,15 +466,6 @@ export function useMapStorage(isDm: boolean) {
           cachedMaps = updated;
           return updated;
         });
-
-        // Broadcast to party room safely
-        try {
-          roomSync.broadcast('MAP_METADATA_UPDATE', {
-            mapId,
-            name: trimmedName,
-            type: mapType,
-          });
-        } catch {}
 
         triggerSaveFeedback();
       } catch (err: any) {
