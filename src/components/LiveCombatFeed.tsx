@@ -43,6 +43,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
   const handleQuickRoll = (sides: number) => {
     playDiceRollSound();
     const rollerName = currentUserName;
+    const currentUserId = liveFeedSync.getPlayerId();
     const advMode =
       sides === 20
         ? advantageMode === 'adv'
@@ -57,6 +58,8 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
       count: 1,
       advantageMode: advMode,
       sender: rollerName,
+      rollerName,
+      rollerId: currentUserId,
       isDm,
       visibility: 'public',
       rollType: 'Straight roll',
@@ -147,30 +150,39 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
 
             // Dice Roll event - Unified with Dice Chamber
             if (evt.type === 'dice') {
-              const isSecretRoll =
-                evt.rollDetails?.visibility === 'dm' || evt.rollDetails?.isSecret || evt.isSecretRoll;
-              const canSeeSecretRoll = isDm || evt.sender === currentUserName;
+              const visibility = evt.rollDetails?.visibility || (evt.isSecretRoll ? 'gm_only' : 'public');
+              const isGmOnly = visibility === 'gm_only';
+              const isSelf = visibility === 'self';
 
-              // Secret DM Dice Rolls: Other players must only see a generic log notice
-              if (isSecretRoll && !canSeeSecretRoll) {
+              const currentUserId = liveFeedSync.getPlayerId();
+              const rollerId = evt.rollerId || evt.rollDetails?.rollerId;
+              const rollerName = evt.rollerName || evt.rollDetails?.rollerName || evt.sender;
+
+              const isRoller = (rollerId && rollerId === currentUserId) || (rollerName === currentUserName);
+              const isGm = isDm || liveFeedSync.getIsGm();
+              const canSeeSecretRoll = isGm || isRoller;
+
+              // If visibility === 'self': Only render on the roller's local client
+              if (isSelf && !isRoller) {
+                return null;
+              }
+
+              // Other Players (role !== 'GM' and not the roller): Mask the roll completely.
+              // Render ONLY a subtle notification card: "${rollerName} made a secret roll to the DM 🔒"
+              // (Hide all formula text, dice values, modifiers, and total sums completely).
+              if (isGmOnly && !canSeeSecretRoll) {
                 return (
                   <div
                     key={evt.id}
-                    className="p-2.5 rounded-xl bg-purple-950/30 border border-purple-800/60 text-xs space-y-1 shadow-sm"
+                    className="p-2.5 rounded-xl bg-purple-950/20 border border-purple-800/40 text-xs shadow-sm flex items-center justify-between gap-2"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-purple-300 flex items-center gap-1.5 flex-wrap">
-                        <Dices className="w-3.5 h-3.5 text-purple-400" />
-                        <span>{evt.sender}</span>
-                        <span className="text-[9px] text-purple-300 font-semibold px-1.5 py-0.2 rounded bg-purple-950 border border-purple-700/70">
-                          Secret Roll
-                        </span>
+                    <div className="flex items-center gap-2 text-purple-300">
+                      <Dices className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      <span className="font-medium text-slate-200">
+                        {rollerName} made a secret roll to the DM 🔒
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono">{time}</span>
                     </div>
-                    <p className="text-slate-300 font-medium italic">
-                      {evt.sender} rolled a secret check to the DM.
-                    </p>
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0">{time}</span>
                   </div>
                 );
               }
@@ -196,7 +208,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
                       ? 'bg-amber-950/40 border-amber-500/70 shadow-amber-950/30'
                       : isNat1
                       ? 'bg-rose-950/40 border-rose-500/60 shadow-rose-950/30'
-                      : isSecretRoll
+                      : isGmOnly
                       ? 'bg-purple-950/30 border-purple-800/60'
                       : 'bg-slate-950 border-slate-800'
                   }`}
@@ -204,15 +216,16 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-cyan-300 flex items-center gap-1.5 flex-wrap">
                       <Dices className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{evt.sender}</span>
+                      <span>{rollerName}</span>
                       {evt.isDm && (
                         <span className="text-[9px] text-amber-400 font-semibold px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/60">
                           DM
                         </span>
                       )}
-                      {isSecretRoll && (
-                        <span className="text-[9px] text-purple-300 font-semibold px-1.5 py-0.2 rounded bg-purple-950/80 border border-purple-700/70">
-                          Secret to DM
+                      {isGmOnly && (
+                        <span className="text-[9px] text-purple-300 font-semibold px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-700/70 inline-flex items-center gap-1">
+                          <span>🔒</span>
+                          <span>Secret to GM</span>
                         </span>
                       )}
                       {rollType && rollType !== 'Straight roll' && (

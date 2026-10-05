@@ -67,17 +67,14 @@ export function isCombatantFoW(combatant: Combatant): boolean {
  * Maintains stable insertion order as tie-breaker.
  */
 export function sortInitiativeStrictDescending(combatants: Combatant[]): Combatant[] {
-  return [...combatants].sort((a, b) => {
-    if (b.initiative !== a.initiative) {
-      return b.initiative - a.initiative;
-    }
-    return 0; // Stable tie-breaker: preserves existing insertion order
-  });
+  return [...combatants].sort(
+    (a, b) => b.initiative - a.initiative || a.id.localeCompare(b.id)
+  );
 }
 
 export type DieType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20' | 'd100';
 
-export type RollVisibility = 'public' | 'dm' | 'self';
+export type RollVisibility = 'public' | 'gm_only' | 'self' | 'dm';
 
 export type RollTypeCategory =
   | 'Straight roll'
@@ -120,6 +117,8 @@ export interface DiceRollResult {
   id: string;
   timestamp: number;
   sender: string;
+  rollerName?: string;
+  rollerId?: string;
   isDm: boolean;
   isSecret?: boolean;
   visibility?: RollVisibility;
@@ -128,6 +127,7 @@ export interface DiceRollResult {
   count: number;
   modifier: number;
   rolls: number[]; // winning/resolved dice values for all dice (length = count)
+  breakdown?: string[];
   rawRolls?: number[]; // raw rolls including discarded
   pairedRolls?: PairedD20Roll[]; // for d20 rolls with advantage/disadvantage
   total: number;

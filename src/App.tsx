@@ -53,10 +53,14 @@ export default function App() {
         const role = await OBR.player.getRole();
         const isGmRole = role === 'GM';
         const name = (await OBR.player.getName()) || (isGmRole ? 'Game Master' : 'Player');
+        let playerId = '';
+        try {
+          playerId = await OBR.player.getId();
+        } catch {}
 
         setIsGM(isGmRole);
         setPlayerName(name);
-        liveFeedSync.setIdentity(name, isGmRole);
+        liveFeedSync.setIdentity(name, isGmRole, playerId);
 
         // Read ashtapor_pinned from localStorage and apply the initial disableClickAway setting
         const savedPinned = localStorage.getItem('ashtapor_pinned') === 'true';
@@ -103,15 +107,14 @@ export default function App() {
   useEffect(() => {
     if (!isReady || !OBR.isReady) return;
     const unsub = OBR.player.onChange((player) => {
+      const isGmRole = player.role ? player.role === 'GM' : isGM;
       if (player.role) {
-        const isGmRole = player.role === 'GM';
         setIsGM(isGmRole);
-        liveFeedSync.setIdentity(player.name || playerName, isGmRole);
       }
       if (player.name) {
         setPlayerName(player.name);
-        liveFeedSync.setIdentity(player.name, isGM);
       }
+      liveFeedSync.setIdentity(player.name || playerName, isGmRole, player.id);
     });
     return () => unsub();
   }, [isReady, isGM, playerName]);

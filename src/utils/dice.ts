@@ -36,6 +36,8 @@ export interface ExecuteRollOptions {
   advantageMode?: 'normal' | 'advantage' | 'disadvantage';
   displayMode?: RollDisplayMode;
   sender?: string;
+  rollerName?: string;
+  rollerId?: string;
   isDm?: boolean;
   isSecret?: boolean;
   visibility?: RollVisibility;
@@ -51,6 +53,8 @@ export function executeDiceRoll({
   advantageMode = 'normal',
   displayMode = 'sum',
   sender,
+  rollerName,
+  rollerId,
   isDm = false,
   isSecret = false,
   visibility = 'public',
@@ -58,7 +62,9 @@ export function executeDiceRoll({
   label = '',
 }: ExecuteRollOptions): DiceRollResult {
   const resolvedSender =
-    sender && sender.trim()
+    rollerName && rollerName.trim()
+      ? rollerName.trim()
+      : sender && sender.trim()
       ? sender.trim()
       : typeof window !== 'undefined' && localStorage.getItem('ttrpg_player_name')?.trim()
       ? localStorage.getItem('ttrpg_player_name')!.trim()
@@ -267,6 +273,8 @@ export function executeDiceRoll({
     id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     timestamp: Date.now(),
     sender: resolvedSender,
+    rollerName: resolvedSender,
+    rollerId,
     isDm,
     isSecret: isActuallySecret,
     visibility,
@@ -275,6 +283,10 @@ export function executeDiceRoll({
     count: totalDiceCount,
     modifier,
     rolls: allResolvedRolls,
+    breakdown:
+      allIndividualLineItems.length > 0
+        ? allIndividualLineItems
+        : allResolvedRolls.map((r) => String(r)),
     rawRolls: allRawRolls,
     pairedRolls: allPairedRolls.length > 0 ? allPairedRolls : undefined,
     total,

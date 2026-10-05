@@ -78,14 +78,17 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
           id: item.id,
           timestamp: item.timestamp,
           sender: item.sender,
+          rollerName: item.rollerName || item.rollDetails.rollerName || item.sender,
+          rollerId: item.rollerId || item.rollDetails.rollerId,
           isDm: !!item.isDm,
           visibility: (item.rollDetails.visibility as RollVisibility) || 'public',
           rollType: item.rollDetails.rollType || 'Straight roll',
           diceType: item.rollDetails.diceType || 'd20',
           count: item.rollDetails.count || 1,
           modifier: item.rollDetails.modifier || 0,
-          rolls: item.rollDetails.rolls || [item.rollDetails.total],
-          total: item.rollDetails.total,
+          rolls: item.rollDetails.rolls || [item.rollDetails.total || 0],
+          breakdown: item.rollDetails.breakdown,
+          total: item.rollDetails.total ?? 0,
           advantageMode: item.rollDetails.advantageMode || 'normal',
           isCrit: item.rollDetails.isCrit,
           isFumble: item.rollDetails.isFumble,
@@ -121,14 +124,17 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
             id: item.id,
             timestamp: item.timestamp,
             sender: item.sender,
+            rollerName: item.rollerName || item.rollDetails.rollerName || item.sender,
+            rollerId: item.rollerId || item.rollDetails.rollerId,
             isDm: !!item.isDm,
             visibility: (item.rollDetails.visibility as RollVisibility) || 'public',
             rollType: item.rollDetails.rollType || 'Straight roll',
             diceType: item.rollDetails.diceType || 'd20',
             count: item.rollDetails.count || 1,
             modifier: item.rollDetails.modifier || 0,
-            rolls: item.rollDetails.rolls || [item.rollDetails.total],
-            total: item.rollDetails.total,
+            rolls: item.rollDetails.rolls || [item.rollDetails.total || 0],
+            breakdown: item.rollDetails.breakdown,
+            total: item.rollDetails.total ?? 0,
             advantageMode: item.rollDetails.advantageMode || 'normal',
             isCrit: item.rollDetails.isCrit,
             isFumble: item.rollDetails.isFumble,
@@ -153,6 +159,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     e?.preventDefault();
     e?.stopPropagation();
 
+    const currentUserId = liveFeedSync.getPlayerId();
     const result = executeDiceRoll({
       diceType: 'd20',
       count,
@@ -160,6 +167,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
       displayMode,
       modifier,
       sender: rollerName,
+      rollerName,
+      rollerId: currentUserId,
       isDm,
       visibility,
       rollType: 'Straight roll',
@@ -175,6 +184,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     const expr = customExpr !== undefined ? customExpr : formulaInput;
     if (!expr.trim()) return;
 
+    const currentUserId = liveFeedSync.getPlayerId();
     const parsed = parseDiceFormula(expr);
     const activeAdvMode = customMode !== undefined ? customMode : advantageMode;
     const finalMod = customMod !== undefined ? customMod : (parsed ? parsed.modifier : modifier);
@@ -187,6 +197,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
         advantageMode: activeAdvMode,
         modifier: finalMod,
         sender: rollerName,
+        rollerName,
+        rollerId: currentUserId,
         isDm,
         visibility,
         label: expr,
@@ -200,6 +212,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
       modifier: finalMod,
       advantageMode: activeAdvMode,
       sender: rollerName,
+      rollerName,
+      rollerId: currentUserId,
       isDm,
       visibility,
       label: expr,
@@ -338,9 +352,9 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
           </button>
           <button
             type="button"
-            onClick={() => setVisibility('dm')}
+            onClick={() => setVisibility('gm_only')}
             className={`px-2 py-0.5 rounded font-semibold transition cursor-pointer ${
-              visibility === 'dm'
+              visibility === 'gm_only' || visibility === 'dm'
                 ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -678,6 +692,37 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
           ) : (
             rollHistory.map((roll) => {
               const hasPairs = roll.pairedRolls && roll.pairedRolls.length > 0;
+              const isGmOnly = roll.visibility === 'gm_only' || roll.visibility === 'dm' || roll.isSecret;
+              const isSelf = roll.visibility === 'self';
+              const currentUserId = liveFeedSync.getPlayerId();
+              const isRoller =
+                (roll.rollerId && roll.rollerId === currentUserId) ||
+                roll.sender === rollerName ||
+                roll.rollerName === rollerName;
+              const canSeeSecret = isDm || liveFeedSync.getIsGm() || isRoller;
+
+              if (isSelf && !isRoller) {
+                return null;
+              }
+
+              if (isGmOnly && !canSeeSecret) {
+                return (
+                  <div
+                    key={roll.id}
+                    className="p-2 rounded-lg bg-purple-950/20 border border-purple-800/40 text-xs select-none shadow-sm flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2 text-purple-300">
+                      <Dices className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      <span className="font-medium text-slate-200">
+                        {roll.rollerName || roll.sender} made a secret roll to the DM 🔒
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0">
+                      {new Date(roll.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -687,22 +732,29 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                       ? 'bg-amber-950/40 border-amber-500/80 ring-1 ring-amber-400/30'
                       : roll.isFumble
                       ? 'bg-rose-950/40 border-rose-600/80 ring-1 ring-rose-500/30'
+                      : isGmOnly
+                      ? 'bg-purple-950/30 border-purple-800/60'
                       : 'bg-slate-950/80 border-slate-800/90'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1.5">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="font-semibold text-slate-300 truncate max-w-[90px]">
-                        {roll.sender}
+                        {roll.rollerName || roll.sender}
                       </span>
                       <span className="text-[10px] text-slate-500 font-mono">
                         {roll.formula || `${roll.count}${roll.diceType}`}
                       </span>
-                      {roll.visibility !== 'public' && (
-                        <span className="text-[9px] px-1 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                          {roll.visibility}
+                      {isGmOnly ? (
+                        <span className="text-[9px] text-purple-300 font-semibold px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-700/70 inline-flex items-center gap-1">
+                          <span>🔒</span>
+                          <span>Secret to GM</span>
                         </span>
-                      )}
+                      ) : roll.visibility === 'self' ? (
+                        <span className="text-[9px] px-1 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                          Self
+                        </span>
+                      ) : null}
                     </div>
 
                     {/* Mode Indicator or Total Score */}

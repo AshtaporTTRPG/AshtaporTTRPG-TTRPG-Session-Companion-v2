@@ -276,8 +276,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       return;
     }
 
+    const sorted = sortInitiativeStrictDescending(combatants);
+
     if (activeCombatantId) {
-      const foundIdx = combatants.findIndex((c) => c.id === activeCombatantId);
+      const foundIdx = sorted.findIndex((c) => c.id === activeCombatantId);
       if (foundIdx !== -1) {
         if (foundIdx !== activeTurnIndex) {
           setActiveTurnIndex(foundIdx);
@@ -286,11 +288,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
     }
 
-    const safeIdx = Math.min(Math.max(0, activeTurnIndex), combatants.length - 1);
-    const resolved = combatants[safeIdx];
-    if (resolved) {
-      setActiveCombatantId(resolved.id);
-      setActiveTurnIndex(safeIdx);
+    const first = sorted[0];
+    if (first) {
+      setActiveCombatantId(first.id);
+      setActiveTurnIndex(0);
     }
   }, [combatants, activeCombatantId, activeTurnIndex]);
 
@@ -398,24 +399,29 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   // Turn management: NEXT TURN
   const handleNextTurn = () => {
     if (combatants.length === 0) return;
-    const currentIdx = activeCombatantId
-      ? combatants.findIndex((c) => c.id === activeCombatantId)
-      : activeTurnIndex;
-    const validCurrentIdx = currentIdx >= 0 ? currentIdx : activeTurnIndex;
+    const sorted = [...combatants].sort(
+      (a, b) => b.initiative - a.initiative || a.id.localeCompare(b.id)
+    );
 
-    let nextIndex = validCurrentIdx + 1;
+    const currentIndex = activeCombatantId
+      ? sorted.findIndex((c) => c.id === activeCombatantId)
+      : -1;
+
+    let nextActiveId: string;
     let nextRound = round;
 
-    if (nextIndex >= combatants.length) {
-      nextIndex = 0;
+    if (currentIndex === -1 || currentIndex >= sorted.length - 1) {
+      nextActiveId = sorted[0].id;
       nextRound = round + 1;
       liveFeedSync.recordCombatLog(`🔔 --- Round ${nextRound} Began ---`, true);
+    } else {
+      nextActiveId = sorted[currentIndex + 1].id;
     }
 
-    const activeCombatant = combatants[nextIndex];
-    const nextId = activeCombatant ? activeCombatant.id : null;
+    const nextIndex = sorted.findIndex((c) => c.id === nextActiveId);
+    const activeCombatant = sorted[nextIndex];
 
-    setActiveCombatantId(nextId);
+    setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextIndex);
     setRound(nextRound);
     playTurnSound();
@@ -423,7 +429,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     if (activeCombatant) {
       const isHidden = activeCombatant.hidden || activeCombatant.isSecret;
       if (!isHidden) {
-        const announcement = `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
+        const announcement = `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
         liveFeedSync.recordTurnAnnouncement(announcement, true);
         if (activeCombatant.type === 'player') {
           setPlayerTurnAlert(`⚔️ ${activeCombatant.name.toUpperCase()}'S TURN!`);
@@ -433,40 +439,49 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         }
       } else {
         liveFeedSync.recordCombatLog(
-          `⚔️ Turn ${nextIndex + 1}/${combatants.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
+          `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
           true,
-          `⚔️ Turn ${nextIndex + 1}/${combatants.length}: An unseen entity takes their turn... (Round ${nextRound})`
+          `⚔️ Turn ${nextIndex + 1}/${sorted.length}: An unseen entity takes their turn... (Round ${nextRound})`
         );
         setPlayerTurnAlert(null);
       }
     }
 
-    broadcastCombat(combatants, nextIndex, nextRound, nextId, combatStatus);
+    broadcastCombat(sorted, nextIndex, nextRound, nextActiveId, combatStatus);
   };
 
   // PREV TURN
   const handlePrevTurn = () => {
     if (combatants.length === 0) return;
-    const currentIdx = activeCombatantId
-      ? combatants.findIndex((c) => c.id === activeCombatantId)
-      : activeTurnIndex;
-    const validCurrentIdx = currentIdx >= 0 ? currentIdx : activeTurnIndex;
+    const sorted = [...combatants].sort(
+      (a, b) => b.initiative - a.initiative || a.id.localeCompare(b.id)
+    );
 
-    let prevIndex = validCurrentIdx - 1;
+    const currentIndex = activeCombatantId
+      ? sorted.findIndex((c) => c.id === activeCombatantId)
+      : 0;
+
+    let prevActiveId: string;
     let prevRound = round;
 
-    if (prevIndex < 0) {
-      prevIndex = Math.max(0, combatants.length - 1);
-      prevRound = Math.max(1, round - 1);
+    if (currentIndex <= 0) {
+      if (round > 1) {
+        prevActiveId = sorted[sorted.length - 1].id;
+        prevRound = round - 1;
+      } else {
+        prevActiveId = sorted[0].id;
+        prevRound = 1;
+      }
+    } else {
+      prevActiveId = sorted[currentIndex - 1].id;
     }
 
-    const activeCombatant = combatants[prevIndex];
-    const prevId = activeCombatant ? activeCombatant.id : null;
+    const prevIndex = sorted.findIndex((c) => c.id === prevActiveId);
 
-    setActiveCombatantId(prevId);
+    setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
-    broadcastCombat(combatants, prevIndex, prevRound, prevId, combatStatus);
+    broadcastCombat(sorted, prevIndex, prevRound, prevActiveId, combatStatus);
   };
 
   // START COMBAT
@@ -1003,16 +1018,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           </div>
         ) : (
           visibleCombatants.map((c, index) => {
-            const isActive = c.id === (activeCombatantId || combatants[activeTurnIndex]?.id);
+            const isActive = activeCombatantId
+              ? c.id === activeCombatantId
+              : index === activeTurnIndex;
             const isBossOrMonster = c.type === 'boss' || c.type === 'monster';
             const isFoW = isCombatantFoW(c) || isBossOrMonster;
             const isPlayerOrAlly = c.type === 'player' || c.type === 'ally';
             // Permission rule: players can only edit PC & Ally; GM can edit all
             const canEdit = isDm || isPlayerOrAlly;
-            const isMenuOpen = actionMenuCombatantId === c.id;
-            const isEditing = editingCombatantId === c.id;
             const health = getHealthThreshold(c.hpCurrent, c.hpMax);
-            const isLowerHalf = index >= visibleCombatants.length / 2;
             const visibleConditions = c.conditions
               .map(normalizeCondition)
               .filter((cond) => isDm || !cond.isSecret);
@@ -1020,8 +1034,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             return (
               <div
                 key={c.id}
-                className={`min-h-[56px] py-1.5 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 text-xs select-none ${
-                  isMenuOpen ? 'relative z-50 ring-2 ring-amber-400/60 shadow-2xl' : 'relative z-0'
+                className={`min-h-[56px] py-1.5 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 text-xs select-none relative ${
+                  actionMenuCombatantId === c.id ? 'ring-1 ring-amber-400/50' : ''
                 } ${
                   isActive
                     ? 'bg-amber-950/30 border-amber-500/80 shadow-md border-l-4 border-l-amber-400 ring-1 ring-amber-400/20'
@@ -1224,295 +1238,29 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 </div>
 
                 {/* COL 4: Options / Conditions Menu Toggle */}
-                <div className="relative shrink-0">
+                <div className="shrink-0">
                   <button
                     type="button"
                     onClick={() => {
-                      setActionMenuCombatantId(actionMenuCombatantId === c.id ? null : c.id);
-                      setConditionInput('');
-                      setConditionIsSecret(false);
+                      if (actionMenuCombatantId === c.id) {
+                        setActionMenuCombatantId(null);
+                        setEditingCombatantId(null);
+                      } else {
+                        setActionMenuCombatantId(c.id);
+                        setEditingCombatantId(null);
+                        setConditionInput('');
+                        setConditionIsSecret(false);
+                      }
                     }}
                     className={`h-7 w-7 rounded-lg flex items-center justify-center border transition cursor-pointer ${
-                      c.conditions.length > 0
+                      c.conditions.length > 0 || actionMenuCombatantId === c.id
                         ? 'bg-amber-950/70 border-amber-600/70 text-amber-300'
                         : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
                     }`}
-                    title="Conditions & Combatant Options"
+                    title="Edit Stats & Conditions"
                   >
                     <MoreVertical className="w-3.5 h-3.5" />
                   </button>
-
-                  {/* FLYOUT MENU: position absolute, z-50 with drop-shadow. Opens upward (bottom-full mb-1) in lower half of list */}
-                  {isMenuOpen && (
-                    <div
-                      className={`absolute right-0 z-50 w-64 bg-slate-900 border border-slate-700 rounded-xl p-3 shadow-2xl drop-shadow-2xl space-y-2.5 text-xs animate-fadeIn ${
-                        isLowerHalf ? 'bottom-full mb-1' : 'top-full mt-1'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="font-bold text-slate-100 truncate">{c.name}</span>
-                          {getTypeBadge(c.type, c.customRoleLabel)}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setActionMenuCombatantId(null)}
-                          className="text-slate-400 hover:text-slate-200 p-0.5 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      {/* Custom Condition Open Input with Secret Checkbox */}
-                      {canEdit && (
-                        <div className="space-y-1.5">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                            Add Condition
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              value={conditionInput}
-                              onChange={(e) => setConditionInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  handleAddCustomCondition(c.id);
-                                }
-                              }}
-                              placeholder="Type custom condition..."
-                              className="flex-1 px-2 py-1 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                            />
-                            {isDm && (
-                              <label
-                                className="flex items-center gap-1 text-[11px] text-slate-300 shrink-0 cursor-pointer select-none"
-                                title="Secret: GM only (concealed from players)"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={conditionIsSecret}
-                                  onChange={(e) => setConditionIsSecret(e.target.checked)}
-                                  className="rounded bg-slate-950 border-slate-700 text-rose-500 cursor-pointer"
-                                />
-                                <span className="text-[10px] font-bold text-rose-400">Secret</span>
-                              </label>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => handleAddCustomCondition(c.id)}
-                              className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 cursor-pointer shrink-0 transition"
-                            >
-                              Add
-                            </button>
-                          </div>
-
-                          {/* Quick Suggestion Badges */}
-                          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto p-0.5">
-                            {CONDITIONS_LIST.map((cond) => {
-                              const isAlreadyAdded = c.conditions.some(
-                                (item) => normalizeCondition(item).name === cond
-                              );
-                              return (
-                                <button
-                                  key={cond}
-                                  type="button"
-                                  onClick={() => handleAddCustomCondition(c.id, cond)}
-                                  className={`text-[9px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
-                                    isAlreadyAdded
-                                      ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
-                                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                                  }`}
-                                >
-                                  +{cond}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {/* Active Conditions in Menu with remove toggle */}
-                          {c.conditions.length > 0 && (
-                            <div className="pt-1.5 border-t border-slate-800/80">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                                Active Conditions:
-                              </span>
-                              <div className="flex flex-wrap gap-1">
-                                {c.conditions.map((item) => {
-                                  const cond = normalizeCondition(item);
-                                  if (!isDm && cond.isSecret) return null;
-                                  return (
-                                    <button
-                                      key={cond.id}
-                                      type="button"
-                                      onClick={() => handleRemoveCondition(c.id, cond.id)}
-                                      className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-pointer transition ${getConditionBadgeStyle(
-                                        cond.name
-                                      )} ${
-                                        cond.isSecret
-                                          ? 'border-dashed border-rose-500 text-rose-300 bg-rose-950'
-                                          : ''
-                                      }`}
-                                      title="Click to remove"
-                                    >
-                                      {cond.isSecret && (
-                                        <EyeOff className="w-2.5 h-2.5 text-rose-400" />
-                                      )}
-                                      <span>{cond.name}</span>
-                                      <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Edit Combatant Form or Controls */}
-                      {isEditing ? (
-                        <div className="space-y-2 pt-1 border-t border-slate-800">
-                          <input
-                            type="text"
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            placeholder="Combatant Name"
-                            className="w-full px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-slate-100"
-                          />
-
-                          {/* Role edit: GM can change to Monster/Boss/Custom; Players can only choose PC/Ally */}
-                          {isDm && (
-                            <div className="grid grid-cols-5 gap-1 text-[10px]">
-                              {(['player', 'ally', 'monster', 'boss', 'custom'] as CombatantType[]).map((t) => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  onClick={() => setEditType(t)}
-                                  className={`py-0.5 rounded border font-semibold capitalize ${
-                                    editType === t
-                                      ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold'
-                                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                                  }`}
-                                >
-                                  {t === 'player' ? 'PC' : t}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-
-                          {editType === 'custom' && isDm && (
-                            <input
-                              type="text"
-                              value={editCustomLabel}
-                              onChange={(e) => setEditCustomLabel(e.target.value)}
-                              placeholder="Role label (e.g. Lair Action)"
-                              className="w-full px-2 py-0.5 text-xs rounded bg-slate-950 border border-slate-700 text-amber-300"
-                            />
-                          )}
-
-                          <div className="grid grid-cols-4 gap-1 text-[11px]">
-                            <div>
-                              <span className="text-[10px] text-slate-400 block">Init</span>
-                              <input
-                                type="number"
-                                value={editInit}
-                                onChange={(e) => setEditInit(parseInt(e.target.value, 10) || 0)}
-                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-amber-300"
-                              />
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-slate-400 block">AC</span>
-                              <input
-                                type="number"
-                                value={editAc}
-                                onChange={(e) => setEditAc(parseInt(e.target.value, 10) || 10)}
-                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-slate-200"
-                              />
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-slate-400 block">Max HP</span>
-                              <input
-                                type="number"
-                                value={editHpMax}
-                                onChange={(e) => setEditHpMax(parseInt(e.target.value, 10) || 1)}
-                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-slate-200"
-                              />
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-slate-400 block">Temp HP</span>
-                              <input
-                                type="number"
-                                value={editTempHp}
-                                onChange={(e) => setEditTempHp(parseInt(e.target.value, 10) || 0)}
-                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-cyan-300"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => handleSaveEdit(c.id)}
-                              className="flex-1 py-1 text-xs font-bold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 transition"
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingCombatantId(null)}
-                              className="px-2 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        canEdit && (
-                          <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditing(c)}
-                              className="flex-1 py-1 px-2 text-[11px] font-semibold rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-1 transition"
-                            >
-                              <Edit2 className="w-3 h-3" />
-                              <span>Edit Stats</span>
-                            </button>
-
-                            {/* GM Only: Toggle FoW/Secret visibility */}
-                            {isDm && (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleVisibility(c.id)}
-                                className={`py-1 px-2 text-[11px] font-semibold rounded flex items-center gap-1 border transition ${
-                                  c.hidden || c.isSecret
-                                    ? 'bg-rose-950/80 border-rose-800 text-rose-300'
-                                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-slate-100'
-                                }`}
-                                title="Toggle visibility to players"
-                              >
-                                {c.hidden || c.isSecret ? (
-                                  <EyeOff className="w-3 h-3" />
-                                ) : (
-                                  <Eye className="w-3 h-3" />
-                                )}
-                                <span>{c.hidden || c.isSecret ? 'Hidden' : 'Visible'}</span>
-                              </button>
-                            )}
-
-                            {/* GM Only: Remove combatant */}
-                            {isDm && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteCombatant(c.id)}
-                                className="p-1 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-800 text-rose-300 transition"
-                                title="Remove combatant"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        )
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             );
@@ -1536,11 +1284,21 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             </span>
 
             {/* Collapsed 1-line latest log preview */}
-            {!isCombatFeedExpanded && latestCombatEvent && (
-              <span className="text-[10px] text-slate-400 truncate max-w-[200px] ml-1 opacity-80">
-                • {!isDm && latestCombatEvent.playerMessage ? latestCombatEvent.playerMessage : latestCombatEvent.message}
-              </span>
-            )}
+            {!isCombatFeedExpanded && latestCombatEvent && (() => {
+              const isSecret = latestCombatEvent.isSecretRoll || latestCombatEvent.rollDetails?.visibility === 'gm_only';
+              const currentUserId = liveFeedSync.getPlayerId();
+              const isRoller = (latestCombatEvent.rollerId && latestCombatEvent.rollerId === currentUserId) || latestCombatEvent.sender === rollerIdentity;
+              const isAuthorized = isDm || isRoller;
+              const previewMsg = (isSecret && !isAuthorized)
+                ? `${latestCombatEvent.rollerName || latestCombatEvent.sender} made a secret roll to the DM 🔒`
+                : (!isDm && latestCombatEvent.playerMessage ? latestCombatEvent.playerMessage : latestCombatEvent.message);
+
+              return (
+                <span className="text-[10px] text-slate-400 truncate max-w-[200px] ml-1 opacity-80">
+                  • {previewMsg}
+                </span>
+              );
+            })()}
 
             {isCombatFeedExpanded ? (
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -1577,7 +1335,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                   minute: '2-digit',
                   second: '2-digit',
                 });
-                const msg = !isDm && evt.playerMessage ? evt.playerMessage : evt.message;
+                const isSecret = evt.isSecretRoll || evt.rollDetails?.visibility === 'gm_only';
+                const currentUserId = liveFeedSync.getPlayerId();
+                const isRoller = (evt.rollerId && evt.rollerId === currentUserId) || evt.sender === rollerIdentity;
+                const isAuthorized = isDm || isRoller;
+                const msg = (isSecret && !isAuthorized)
+                  ? `${evt.rollerName || evt.sender} made a secret roll to the DM 🔒`
+                  : (!isDm && evt.playerMessage ? evt.playerMessage : evt.message);
                 const isDamage = msg.includes('took');
                 const isHeal = msg.includes('healed');
 
@@ -1892,6 +1656,301 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           </div>
         </div>
       )}
+
+      {/* MODAL: COMBATANT ACTION / CONDITION POPUP (OPTION A) */}
+      {actionMenuCombatantId && (() => {
+        const menuCombatant = combatants.find((c) => c.id === actionMenuCombatantId);
+        if (!menuCombatant) return null;
+        const isPlayerOrAlly = menuCombatant.type === 'player' || menuCombatant.type === 'ally';
+        const canEdit = isDm || isPlayerOrAlly;
+        const isEditing = editingCombatantId === menuCombatant.id;
+
+        return (
+          <>
+            {/* Clear backdrop */}
+            <div
+              className="fixed inset-0 bg-black/60 z-50 backdrop-blur-[2px]"
+              onClick={() => {
+                setActionMenuCombatantId(null);
+                setEditingCombatantId(null);
+              }}
+            />
+
+            {/* Dedicated modal dialog */}
+            <div className="fixed inset-x-4 top-16 z-50 bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl p-3 max-h-[70vh] overflow-y-auto space-y-2.5 text-xs animate-fadeIn">
+              <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                <div className="flex items-center gap-1.5 truncate">
+                  <span className="font-bold text-slate-100 text-sm truncate">{menuCombatant.name}</span>
+                  {getTypeBadge(menuCombatant.type, menuCombatant.customRoleLabel)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionMenuCombatantId(null);
+                    setEditingCombatantId(null);
+                  }}
+                  className="text-neutral-400 hover:text-slate-100 p-1 rounded hover:bg-neutral-800 cursor-pointer transition"
+                  title="Close dialog"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Custom Condition Open Input with Secret Checkbox */}
+              {canEdit && (
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Add Condition
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={conditionInput}
+                      onChange={(e) => setConditionInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomCondition(menuCombatant.id);
+                        }
+                      }}
+                      placeholder="Type custom condition..."
+                      className="flex-1 px-2 py-1 text-xs rounded-lg bg-neutral-950 border border-neutral-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    />
+                    {isDm && (
+                      <label
+                        className="flex items-center gap-1 text-[11px] text-slate-300 shrink-0 cursor-pointer select-none"
+                        title="Secret: GM only (concealed from players)"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={conditionIsSecret}
+                          onChange={(e) => setConditionIsSecret(e.target.checked)}
+                          className="rounded bg-neutral-950 border-neutral-700 text-rose-500 cursor-pointer"
+                        />
+                        <span className="text-[10px] font-bold text-rose-400">Secret</span>
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleAddCustomCondition(menuCombatant.id)}
+                      className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 cursor-pointer shrink-0 transition"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  {/* Quick Suggestion Badges */}
+                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-0.5">
+                    {CONDITIONS_LIST.map((cond) => {
+                      const isAlreadyAdded = menuCombatant.conditions.some(
+                        (item) => normalizeCondition(item).name === cond
+                      );
+                      return (
+                        <button
+                          key={cond}
+                          type="button"
+                          onClick={() => handleAddCustomCondition(menuCombatant.id, cond)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                            isAlreadyAdded
+                              ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                              : 'bg-neutral-950 border-neutral-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          +{cond}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Active Conditions in Menu with remove toggle */}
+                  {menuCombatant.conditions.length > 0 && (
+                    <div className="pt-1.5 border-t border-neutral-800">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        Active Conditions:
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {menuCombatant.conditions.map((item) => {
+                          const cond = normalizeCondition(item);
+                          if (!isDm && cond.isSecret) return null;
+                          return (
+                            <button
+                              key={cond.id}
+                              type="button"
+                              onClick={() => handleRemoveCondition(menuCombatant.id, cond.id)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-pointer transition ${getConditionBadgeStyle(
+                                cond.name
+                              )} ${
+                                cond.isSecret
+                                  ? 'border-dashed border-rose-500 text-rose-300 bg-rose-950'
+                                  : ''
+                              }`}
+                              title="Click to remove"
+                            >
+                              {cond.isSecret && (
+                                <EyeOff className="w-2.5 h-2.5 text-rose-400" />
+                              )}
+                              <span>{cond.name}</span>
+                              <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Edit Combatant Form or Controls */}
+              {isEditing ? (
+                <div className="space-y-2 pt-1 border-t border-neutral-800">
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Combatant Name"
+                    className="w-full px-2 py-1 text-xs rounded bg-neutral-950 border border-neutral-700 text-slate-100"
+                  />
+
+                  {/* Role edit: GM can change to Monster/Boss/Custom; Players can only choose PC/Ally */}
+                  {isDm && (
+                    <div className="grid grid-cols-5 gap-1 text-[10px]">
+                      {(['player', 'ally', 'monster', 'boss', 'custom'] as CombatantType[]).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setEditType(t)}
+                          className={`py-0.5 rounded border font-semibold capitalize cursor-pointer ${
+                            editType === t
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold'
+                              : 'bg-neutral-950 border-neutral-800 text-slate-400'
+                          }`}
+                        >
+                          {t === 'player' ? 'PC' : t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {editType === 'custom' && isDm && (
+                    <input
+                      type="text"
+                      value={editCustomLabel}
+                      onChange={(e) => setEditCustomLabel(e.target.value)}
+                      placeholder="Role label (e.g. Lair Action)"
+                      className="w-full px-2 py-0.5 text-xs rounded bg-neutral-950 border border-neutral-700 text-amber-300"
+                    />
+                  )}
+
+                  <div className="grid grid-cols-4 gap-1 text-[11px]">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Init</span>
+                      <input
+                        type="number"
+                        value={editInit}
+                        onChange={(e) => setEditInit(parseInt(e.target.value, 10) || 0)}
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-amber-300"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">AC</span>
+                      <input
+                        type="number"
+                        value={editAc}
+                        onChange={(e) => setEditAc(parseInt(e.target.value, 10) || 10)}
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Max HP</span>
+                      <input
+                        type="number"
+                        value={editHpMax}
+                        onChange={(e) => setEditHpMax(parseInt(e.target.value, 10) || 1)}
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Temp HP</span>
+                      <input
+                        type="number"
+                        value={editTempHp}
+                        onChange={(e) => setEditTempHp(parseInt(e.target.value, 10) || 0)}
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-cyan-300"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEdit(menuCombatant.id)}
+                      className="flex-1 py-1 text-xs font-bold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingCombatantId(null)}
+                      className="px-2 py-1 text-xs rounded bg-neutral-800 text-slate-300 hover:bg-neutral-700 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                canEdit && (
+                  <div className="flex items-center gap-1.5 pt-1.5 border-t border-neutral-800">
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditing(menuCombatant)}
+                      className="flex-1 py-1 px-2 text-[11px] font-semibold rounded bg-neutral-800 hover:bg-neutral-700 text-slate-200 flex items-center justify-center gap-1 transition cursor-pointer"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>Edit Stats</span>
+                    </button>
+
+                    {/* GM Only: Toggle FoW/Secret visibility */}
+                    {isDm && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleVisibility(menuCombatant.id)}
+                        className={`py-1 px-2 text-[11px] font-semibold rounded flex items-center gap-1 border transition cursor-pointer ${
+                          menuCombatant.hidden || menuCombatant.isSecret
+                            ? 'bg-rose-950/80 border-rose-800 text-rose-300'
+                            : 'bg-neutral-800 border-neutral-700 text-slate-300 hover:text-slate-100'
+                        }`}
+                        title="Toggle visibility to players"
+                      >
+                        {menuCombatant.hidden || menuCombatant.isSecret ? (
+                          <EyeOff className="w-3 h-3" />
+                        ) : (
+                          <Eye className="w-3 h-3" />
+                        )}
+                        <span>{menuCombatant.hidden || menuCombatant.isSecret ? 'Hidden' : 'Visible'}</span>
+                      </button>
+                    )}
+
+                    {/* GM Only: Remove combatant */}
+                    {isDm && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteCombatant(menuCombatant.id);
+                          setActionMenuCombatantId(null);
+                        }}
+                        className="p-1 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-800 text-rose-300 transition cursor-pointer"
+                        title="Remove combatant"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )
+              )}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 };

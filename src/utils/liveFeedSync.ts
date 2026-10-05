@@ -15,15 +15,23 @@ export interface UnifiedFeedItem {
   id: string;
   type: FeedEventType;
   sender: string;
+  rollerName?: string;
+  rollerId?: string;
   isDm?: boolean;
   message: string;
-  playerMessage?: string; // Obfuscated or generic message for player view (e.g. FoW damage)
+  playerMessage?: string; // Obfuscated or generic message for player view (e.g. FoW damage or masked secret roll)
   isSecretRoll?: boolean;
   secretSender?: string;
   timestamp: number;
   rollDetails?: {
+    id?: string;
+    rollerName?: string;
+    rollerId?: string;
+    visibility: 'public' | 'gm_only' | 'self';
     formula: string;
-    total: number;
+    breakdown: string[];
+    total: number | null;
+    timestamp?: number;
     rolls?: number[];
     rawRolls?: number[];
     pairedRolls?: PairedD20Roll[];
@@ -34,7 +42,6 @@ export interface UnifiedFeedItem {
     isCrit?: boolean;
     isFumble?: boolean;
     rollType?: RollTypeCategory;
-    visibility?: RollVisibility;
     isSecret?: boolean;
     label?: string;
     displayMode?: RollDisplayMode;
@@ -59,6 +66,7 @@ class LiveFeedSyncManager {
   private initialized = false;
   private currentName = 'Adventurer';
   private currentRoleIsGm = false;
+  private currentId = '';
 
   constructor() {
     this.init();
@@ -95,12 +103,24 @@ class LiveFeedSyncManager {
     try {
       if (typeof window !== 'undefined') {
         OBR.onReady(() => {
+          OBR.player.getId().then((id) => {
+            if (id) {
+              this.currentId = id;
+              try { localStorage.setItem('ashtapor_player_id', id); } catch {}
+            }
+          }).catch(() => {});
           OBR.player.getName().then((n) => {
             if (n) this.currentName = n;
           }).catch(() => {});
           OBR.player.getRole().then((r) => {
             this.currentRoleIsGm = r === 'GM';
           }).catch(() => {});
+
+          OBR.player.onChange((player) => {
+            if (player.id) this.currentId = player.id;
+            if (player.name) this.currentName = player.name;
+            if (player.role) this.currentRoleIsGm = player.role === 'GM';
+          });
 
           OBR.room.onMetadataChange((metadata) => {
             const feedPayload = metadata[FEED_EVENT_KEY] as { item: UnifiedFeedItem } | undefined;
@@ -115,9 +135,32 @@ class LiveFeedSyncManager {
     }
   }
 
-  public setIdentity(name: string, isGm: boolean) {
+  public setIdentity(name: string, isGm: boolean, id?: string) {
     this.currentName = name;
     this.currentRoleIsGm = isGm;
+    if (id) {
+      this.currentId = id;
+      try {
+        localStorage.setItem('ashtapor_player_id', id);
+      } catch {}
+    }
+  }
+
+  public getPlayerId(): string {
+    if (this.currentId) return this.currentId;
+    try {
+      const saved = localStorage.getItem('ashtapor_player_id');
+      if (saved) {
+        this.currentId = saved;
+        return saved;
+      }
+      const gen = `player-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      localStorage.setItem('ashtapor_player_id', gen);
+      this.currentId = gen;
+      return gen;
+    } catch {
+      return 'local-player';
+    }
   }
 
   public getPlayerName(): string {
@@ -132,14 +175,13 @@ class LiveFeedSyncManager {
     // Prevent duplicate entries
     if (this.items.some((it) => it.id === item.id)) return;
 
-    // Visibility rules: don't show self-only rolls from other players
-    if (item.rollDetails?.visibility === 'self' && item.sender !== this.currentName) {
-      return;
-    }
+    const visibility = item.rollDetails?.visibility || (item.isSecretRoll ? 'gm_only' : 'public');
+    const rollerId = item.rollerId || item.rollDetails?.rollerId;
+    const isRoller = (rollerId && rollerId === this.getPlayerId()) || item.sender === this.currentName;
 
-    // Secret roll to DM: if not GM and not sender, show obfuscated message if provided, or hide
-    if (item.isSecretRoll && !this.currentRoleIsGm && item.sender !== this.currentName) {
-      if (!item.playerMessage) return;
+    // Visibility rules: don't show self-only rolls from other players
+    if (visibility === 'self' && !isRoller) {
+      return;
     }
 
     this.items.push(item);
@@ -195,8 +237,18 @@ class LiveFeedSyncManager {
   }
 
   public recordDiceRoll(roll: DiceRollResult, broadcast: boolean = true) {
-    const isSecretRoll = roll.visibility === 'dm';
-    const isSelfRoll = roll.visibility === 'self';
+    const rawVis = roll.visibility || (roll.isSecret ? 'gm_only' : 'public');
+    const visibility: 'public' | 'gm_only' | 'self' =
+      rawVis === 'dm' || rawVis === 'gm_only'
+        ? 'gm_only'
+        : rawVis === 'self'
+        ? 'self'
+        : 'public';
+    const isSecretRoll = visibility === 'gm_only';
+    const isSelfRoll = visibility === 'self';
+
+    const rollerId = roll.rollerId || this.getPlayerId();
+    const rollerName = roll.rollerName || roll.sender || this.currentName;
 
     const formula = roll.formula || formatFormula(roll.count, roll.diceType, roll.modifier);
     const isCrit = roll.isCrit || (roll.diceType === 'd20' && roll.rolls.includes(20));
@@ -221,22 +273,42 @@ class LiveFeedSyncManager {
       message = `🎲 ${roll.label ? `${roll.label}: ` : ''}${formula} ➔ ${roll.total}${outcomeSuffix}`;
     }
 
+    const breakdown: string[] =
+      roll.breakdown && roll.breakdown.length > 0
+        ? roll.breakdown
+        : roll.individualLineItems && roll.individualLineItems.length > 0
+        ? roll.individualLineItems
+        : roll.pairedRolls && roll.pairedRolls.length > 0
+        ? roll.pairedRolls.map((p) => p.lineItem || `[${p.selected}, ~~${p.discarded}~~]`)
+        : roll.rolls.map((r) => String(r));
+
+    const total = isIndividual ? null : roll.total;
+
+    // Mask secret roll for other players
     const playerMessage = isSecretRoll
-      ? `🤫 ${roll.sender || 'A player'} made a blind roll secretly to the GM.`
+      ? `${rollerName} made a secret roll to the DM 🔒`
       : message;
 
     const feedItem: UnifiedFeedItem = {
       id: roll.id || `roll-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       type: 'dice',
-      sender: roll.sender || this.currentName,
+      sender: rollerName,
+      rollerName,
+      rollerId,
       isDm: !!roll.isDm,
       message,
       playerMessage,
       isSecretRoll,
       timestamp: roll.timestamp || Date.now(),
       rollDetails: {
+        id: roll.id || `roll-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        rollerName,
+        rollerId,
+        visibility,
         formula,
-        total: roll.total,
+        breakdown,
+        total,
+        timestamp: roll.timestamp || Date.now(),
         rolls: roll.rolls,
         rawRolls: roll.rawRolls,
         pairedRolls: roll.pairedRolls,
@@ -247,7 +319,6 @@ class LiveFeedSyncManager {
         isCrit,
         isFumble,
         rollType: roll.rollType,
-        visibility: roll.visibility,
         isSecret: isSecretRoll,
         label: roll.label,
         displayMode: roll.displayMode,
@@ -262,6 +333,7 @@ class LiveFeedSyncManager {
     this.persistFeed();
     this.notifyListeners(feedItem);
 
+    // If visibility === 'self': Only render on the roller's local client; do not broadcast to room metadata.
     if (broadcast && !isSelfRoll) {
       this.broadcastFeedItem(feedItem);
     }
