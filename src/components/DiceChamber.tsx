@@ -7,7 +7,13 @@ import {
   PairedD20Roll,
   CustomMacro,
 } from '../types/ttrpg';
-import { executeDiceRoll, parseDiceFormula, addDieToFormula, setFormulaModifier } from '../utils/dice';
+import {
+  executeDiceRoll,
+  parseDiceFormula,
+  addDieToFormula,
+  setFormulaModifier,
+  combineFormulaWithModifier,
+} from '../utils/dice';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import {
   loadCustomMacros,
@@ -191,7 +197,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
 
     const result = executeDiceRoll({
       pool: parsed.pool,
-      modifier: parsed.modifier,
+      modifier: finalMod,
       advantageMode: activeAdvMode,
       sender: rollerName,
       isDm,
@@ -220,15 +226,26 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
     setFormulaInput((prev) => setFormulaModifier(prev, newMod));
   };
 
-  // ROLL CUSTOM MACRO
+  // ROLL CUSTOM MACRO: Combines staged tray modifier with macro formula
   const handleRollMacro = (macro: CustomMacro, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
     const mode = macro.advantageMode || 'normal';
-    const mod = macro.modifier ?? 0;
-    setFormulaInput(macro.formula);
-    handleRollFormula(macro.formula, mode, mod);
+
+    // If active modifier is not 0, combine staged UI modifier with the macro formula
+    // (e.g. 2d6+2 with active mod +3 evaluates as 2d6 + 5; 1d20 with active mod +4 evaluates as 1d20 + 4)
+    if (modifier !== 0) {
+      const { formula: combinedFormula, combinedModifier } = combineFormulaWithModifier(
+        macro.formula,
+        modifier
+      );
+      setFormulaInput(combinedFormula);
+      handleRollFormula(combinedFormula, mode, combinedModifier);
+    } else {
+      setFormulaInput(macro.formula);
+      handleRollFormula(macro.formula, mode, macro.modifier ?? 0);
+    }
   };
 
   // OPEN ADD MACRO FORM
@@ -630,8 +647,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
         )}
       </div>
 
-      {/* 5. ROW 3: ROLL FEED (flex-1 with overflow-y-auto to dynamically fill vertical space) */}
-      <div className="flex-1 flex flex-col min-h-0 bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 overflow-hidden shadow-sm">
+      {/* 5. ROW 3: ROLL FEED (flex-1 min-h-[180px] overflow-y-auto to utilize taller window height) */}
+      <div className="flex-1 min-h-[180px] overflow-y-auto flex flex-col bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 shadow-sm">
         <div className="flex items-center justify-between pb-1.5 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -688,25 +705,90 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isDm, playerName }) =>
                       )}
                     </div>
 
-                    {/* Total Score */}
-                    <div className="flex items-baseline gap-1 shrink-0">
-                      <span className="text-[10px] text-slate-400">Total:</span>
-                      <span
-                        className={`text-sm font-mono font-bold tabular-nums ${
-                          roll.isCrit
-                            ? 'text-amber-400'
-                            : roll.isFumble
-                            ? 'text-rose-400'
-                            : 'text-slate-100'
-                        }`}
-                      >
-                        {roll.total}
-                      </span>
-                    </div>
+                    {/* Mode Indicator or Total Score */}
+                    {roll.displayMode === 'individual' ? (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-600/70 text-amber-300">
+                          Indiv ({roll.count} {roll.count === 1 ? 'roll' : 'rolls'})
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-baseline gap-1 shrink-0">
+                        <span className="text-[10px] text-slate-400">Total:</span>
+                        <span
+                          className={`text-sm font-mono font-bold tabular-nums ${
+                            roll.isCrit
+                              ? 'text-amber-400'
+                              : roll.isFumble
+                              ? 'text-rose-400'
+                              : 'text-slate-100'
+                          }`}
+                        >
+                          {roll.total}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Paired Multi-d20 Breakdown with Strike-Through Notation */}
-                  {hasPairs ? (
+                  {/* Rolls Breakdown */}
+                  {roll.displayMode === 'individual' ? (
+                    <div className="pt-1.5 mt-1 border-t border-slate-800/80 space-y-1 text-[11px] font-mono">
+                      {hasPairs ? (
+                        roll.pairedRolls!.map((pair: PairedD20Roll) => (
+                          <div
+                            key={pair.pairIndex}
+                            className="flex items-center justify-between text-slate-300 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/60"
+                          >
+                            <span className="text-slate-400 font-semibold">Roll {pair.pairIndex}:</span>
+                            <span className="tabular-nums">
+                              [{pair.selected},{' '}
+                              <span className="line-through text-slate-500">
+                                {pair.discarded}
+                              </span>
+                              ]
+                              {roll.modifier !== 0 && (
+                                <span className="text-slate-400">
+                                  {roll.modifier > 0 ? ` + ${roll.modifier}` : ` - ${Math.abs(roll.modifier)}`}
+                                </span>
+                              )}{' '}
+                              ={' '}
+                              <strong className="text-amber-300 font-bold">
+                                {pair.totalWithModifier ?? (pair.selected + (roll.modifier || 0))}
+                              </strong>
+                            </span>
+                          </div>
+                        ))
+                      ) : roll.individualLineItems && roll.individualLineItems.length > 0 ? (
+                        roll.individualLineItems
+                          .filter((line) => !line.startsWith('Total:') && !line.startsWith('Modifier:'))
+                          .map((line, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between text-slate-300 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/60"
+                            >
+                              <span className="font-semibold text-slate-200">{line}</span>
+                            </div>
+                          ))
+                      ) : (
+                        roll.rolls.map((r, idx) => {
+                          const modVal = roll.modifier || 0;
+                          const evaluated = r + modVal;
+                          const modStr = modVal > 0 ? ` + ${modVal}` : modVal < 0 ? ` - ${Math.abs(modVal)}` : '';
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between text-slate-300 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/60"
+                            >
+                              <span className="text-slate-400 font-semibold">Roll {idx + 1}:</span>
+                              <span className="tabular-nums">
+                                [{r}]{modStr} = <strong className="text-amber-300 font-bold">{evaluated}</strong>
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  ) : hasPairs ? (
                     <div className="pt-1.5 mt-1 border-t border-slate-800/80 space-y-0.5">
                       {roll.pairedRolls!.map((pair: PairedD20Roll) => (
                         <div

@@ -20,6 +20,13 @@ export type Condition =
   | 'Concentration'
   | 'Exhaustion';
 
+export interface CustomCondition {
+  id: string;
+  name: string;
+  isSecret: boolean;
+  turnsLeft?: number;
+}
+
 export interface Combatant {
   id: string;
   name: string;
@@ -30,7 +37,8 @@ export interface Combatant {
   hpCurrent: number;
   hpMax: number;
   hpTemp: number;
-  conditions: { name: string; turnsLeft?: number }[];
+  tempHp?: number;
+  conditions: CustomCondition[];
   deathSaves?: {
     successes: number;
     failures: number;

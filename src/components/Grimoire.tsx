@@ -551,18 +551,20 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
                 className="bg-neutral-900/80 border border-neutral-800 rounded-xl overflow-hidden shadow-sm transition-all"
               >
                 {/* Header row */}
-                <button
-                  type="button"
-                  onClick={() => toggleRule(rule.id)}
-                  className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-neutral-800/60 transition cursor-pointer gap-2"
+                <div
+                  className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-neutral-800/60 transition gap-2 group"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => toggleRule(rule.id)}
+                    className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                  >
                     {isCombat && <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
                     {isMovement && <Footprints className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
                     {isRest && <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
                     {isWorld && <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
 
-                    <span className="text-xs font-bold text-neutral-200 truncate">
+                    <span className="text-xs font-bold text-neutral-200 truncate group-hover:text-amber-300 transition-colors">
                       {rule.title}
                     </span>
 
@@ -579,14 +581,14 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
                     >
                       {rule.badge}
                     </span>
-                  </div>
+                  </button>
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
                       onClick={(e) => handleCopyRule(rule, e)}
                       title="Copy rule to clipboard"
-                      className="p-1 rounded text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 transition"
+                      className="p-1 rounded text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 transition cursor-pointer"
                     >
                       {copiedId === rule.id ? (
                         <Check className="w-3 h-3 text-emerald-400" />
@@ -594,13 +596,21 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
                         <Copy className="w-3 h-3" />
                       )}
                     </button>
-                    {isOpen ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-neutral-400" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggleRule(rule.id)}
+                      className="p-1 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer"
+                      title={isOpen ? 'Collapse rule' : 'Expand rule'}
+                      aria-label={isOpen ? 'Collapse rule' : 'Expand rule'}
+                    >
+                      {isOpen ? (
+                        <ChevronUp className="w-3.5 h-3.5 text-neutral-400" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
+                      )}
+                    </button>
                   </div>
-                </button>
+                </div>
 
                 {/* Body Content */}
                 {isOpen && (

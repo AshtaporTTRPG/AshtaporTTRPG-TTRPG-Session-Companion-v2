@@ -104,8 +104,62 @@ export function executeDiceRoll({
     const groupPairedRolls: PairedD20Roll[] = [];
     totalDiceCount += entry.count;
 
-    if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
-      // MULTI-PAIR GENERATION (Advantage / Disadvantage):
+    if (displayMode === 'individual') {
+      // INDIVIDUAL MODE:
+      // Each die/roll is its own standalone evaluated result with its own line item.
+      // Grand totals / sums are NOT aggregated or computed.
+      if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
+        for (let k = 0; k < entry.count; k++) {
+          const rollNumber = allIndividualLineItems.length + 1;
+          const valA = rollSingleDie(20);
+          const valB = rollSingleDie(20);
+          const selected = advantageMode === 'advantage' ? Math.max(valA, valB) : Math.min(valA, valB);
+          const discarded = advantageMode === 'advantage' ? Math.min(valA, valB) : Math.max(valA, valB);
+          const evaluatedTotal = selected + modifier;
+
+          const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+          const lineItem = `Roll ${rollNumber}: [${selected}, ~~${discarded}~~]${modStr} = ${evaluatedTotal}`;
+
+          const pair: PairedD20Roll = {
+            pairIndex: rollNumber,
+            die1: valA,
+            die2: valB,
+            selected,
+            discarded,
+            modifier,
+            totalWithModifier: evaluatedTotal,
+            lineItem,
+          };
+
+          groupPairedRolls.push(pair);
+          allPairedRolls.push(pair);
+          groupRolls.push(selected);
+          groupRawRolls.push(valA, valB);
+          allIndividualLineItems.push(lineItem);
+
+          if (selected === 20) hasCrit = true;
+          if (selected === 1) hasFumble = true;
+        }
+      } else {
+        for (let i = 0; i < entry.count; i++) {
+          const rollNumber = allIndividualLineItems.length + 1;
+          const val = rollSingleDie(sides);
+          const evaluatedTotal = val + modifier;
+          const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+          const lineItem = `Roll ${rollNumber}: [${val}]${modStr} = ${evaluatedTotal}`;
+
+          groupRolls.push(val);
+          groupRawRolls.push(val);
+          allIndividualLineItems.push(lineItem);
+
+          if (entry.diceType === 'd20') {
+            if (val === 20) hasCrit = true;
+            if (val === 1 && !hasCrit) hasFumble = true;
+          }
+        }
+      }
+    } else if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
+      // MULTI-PAIR GENERATION IN SUM MODE (Advantage / Disadvantage):
       const numPairs = entry.count;
       for (let k = 0; k < numPairs; k++) {
         const valA = rollSingleDie(20);
@@ -140,10 +194,10 @@ export function executeDiceRoll({
 
       const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
       sumTotal += groupSum;
-    } else if (isMixedPool || displayMode === 'sum') {
-      // Mixed pool or Sum mode:
+    } else {
+      // Sum mode (standard roll or mixed pool):
       // Roll independent dice for this entry.
-      // Modifier is NOT added to individual line items; it is added ONCE to final sum.
+      // Modifier is added once to final sumTotal, not per individual die.
       for (let i = 0; i < entry.count; i++) {
         const val = rollSingleDie(sides);
         groupRolls.push(val);
@@ -160,25 +214,6 @@ export function executeDiceRoll({
       // Format as exact die rolled, e.g. "1d8: [5]" or "2d6: [4, 2]"
       const dieLabel = `${entry.count}${entry.diceType}`;
       allIndividualLineItems.push(`${dieLabel}: [${groupRolls.join(', ')}]`);
-    } else {
-      // Dedicated individual straight roll (Multi-D20 individual attacks):
-      for (let i = 0; i < entry.count; i++) {
-        const val = rollSingleDie(sides);
-        const evaluatedTotal = val + modifier;
-        const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-        const lineItem = `Roll ${i + 1}: [${val}]${modStr} = ${evaluatedTotal}`;
-
-        groupRolls.push(val);
-        groupRawRolls.push(val);
-        allIndividualLineItems.push(lineItem);
-
-        if (entry.diceType === 'd20') {
-          if (val === 20) hasCrit = true;
-          if (val === 1 && !hasCrit) hasFumble = true;
-        }
-      }
-      const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
-      sumTotal += groupSum;
     }
 
     poolBreakdown.push({
@@ -191,10 +226,11 @@ export function executeDiceRoll({
     allRawRolls.push(...groupRawRolls);
   });
 
-  const total = sumTotal + modifier;
+  // Grand totals / sums are only computed and displayed when "sum" mode is explicitly selected
+  const total = displayMode === 'individual' ? 0 : (sumTotal + modifier);
 
-  // Append Modifier and Total once for mixed pools or multi-dice sum pools
-  if (isMixedPool || (poolEntries.length >= 1 && displayMode === 'sum' && advantageMode === 'normal')) {
+  // Append Modifier and Total once ONLY for Sum mode
+  if (displayMode === 'sum' && (isMixedPool || (poolEntries.length >= 1 && advantageMode === 'normal'))) {
     if (modifier !== 0) {
       allIndividualLineItems.push(`Modifier: ${modifier > 0 ? `+${modifier}` : modifier}`);
     }
@@ -350,4 +386,49 @@ export function setFormulaModifier(currentFormula: string, newMod: number): stri
     result += newMod > 0 ? ` + ${newMod}` : ` - ${Math.abs(newMod)}`;
   }
   return result;
+}
+
+/**
+ * Combines a base macro formula (e.g. 2d6+2 or 1d20) with an active tray modifier (e.g. +3 or +4).
+ * Example: 2d6+2 with active tray modifier +3 => 2d6 + 5 (modifier: 5)
+ * Example: 1d20 with active tray modifier +4 => 1d20 + 4 (modifier: 4)
+ * Ensures modifier is combined once cleanly for the entire roll total.
+ */
+export function combineFormulaWithModifier(
+  formula: string,
+  stagedModifier: number
+): {
+  formula: string;
+  combinedModifier: number;
+} {
+  const cleaned = formula.trim();
+  if (stagedModifier === 0) {
+    const parsed = parseDiceFormula(cleaned);
+    return {
+      formula: cleaned,
+      combinedModifier: parsed ? parsed.modifier : 0,
+    };
+  }
+
+  const parsed = parseDiceFormula(cleaned);
+  if (!parsed || !parsed.pool || parsed.pool.length === 0) {
+    const combinedModifier = stagedModifier;
+    const formulaStr = `${cleaned}${stagedModifier > 0 ? ` + ${stagedModifier}` : ` - ${Math.abs(stagedModifier)}`}`;
+    return {
+      formula: formulaStr,
+      combinedModifier,
+    };
+  }
+
+  const combinedModifier = parsed.modifier + stagedModifier;
+  const poolParts = parsed.pool.map((p) => `${p.count}${p.diceType}`);
+  let combinedFormula = poolParts.join(' + ');
+  if (combinedModifier !== 0) {
+    combinedFormula += combinedModifier > 0 ? ` + ${combinedModifier}` : ` - ${Math.abs(combinedModifier)}`;
+  }
+
+  return {
+    formula: combinedFormula,
+    combinedModifier,
+  };
 }

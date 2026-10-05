@@ -3,6 +3,7 @@ import {
   Combatant,
   CombatantType,
   Condition,
+  CustomCondition,
   isCombatantFoW,
   sortInitiativeStrictDescending,
 } from '../types/ttrpg';
@@ -96,6 +97,22 @@ const getConditionBadgeStyle = (name: string): string => {
   }
 };
 
+export const normalizeCondition = (c: any): CustomCondition => {
+  if (typeof c === 'string') {
+    return {
+      id: `cond-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: c,
+      isSecret: false,
+    };
+  }
+  return {
+    id: c.id || `cond-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    name: c.name || '',
+    isSecret: !!c.isSecret,
+    turnsLeft: c.turnsLeft,
+  };
+};
+
 const getTypeBadge = (type: CombatantType, customLabel?: string) => {
   switch (type) {
     case 'player':
@@ -110,6 +127,13 @@ const getTypeBadge = (type: CombatantType, customLabel?: string) => {
         <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950/80 border border-emerald-600/80 text-emerald-300 flex items-center gap-0.5 shrink-0">
           <Users className="w-2.5 h-2.5" />
           <span>Ally</span>
+        </span>
+      );
+    case 'monster':
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-950/80 border border-rose-800/80 text-rose-300 flex items-center gap-0.5 shrink-0">
+          <Skull className="w-2.5 h-2.5 text-rose-400" />
+          <span>Monster</span>
         </span>
       );
     case 'boss':
@@ -191,6 +215,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [actionMenuCombatantId, setActionMenuCombatantId] = useState<string | null>(null);
   const [editingCombatantId, setEditingCombatantId] = useState<string | null>(null);
 
+  // Transient deletion tombstone set (ID -> expiration timestamp) to prevent double-delete resurrections
+  const deletionTombstones = useRef<Map<string, number>>(new Map());
+
+  // Custom condition form state in combatant options menu
+  const [conditionInput, setConditionInput] = useState<string>('');
+  const [conditionIsSecret, setConditionIsSecret] = useState<boolean>(false);
+
+  // Inline Temp HP click-edit state
+  const [inlineThpId, setInlineThpId] = useState<string | null>(null);
+  const [inlineThpVal, setInlineThpVal] = useState<number>(0);
+
   // Combat Action Feed Dock state
   const [isCombatFeedExpanded, setIsCombatFeedExpanded] = useState<boolean>(false);
   const [combatFeedItems, setCombatFeedItems] = useState<UnifiedFeedItem[]>(() => {
@@ -205,6 +240,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [newInitiative, setNewInitiative] = useState(10);
   const [newAc, setNewAc] = useState(14);
   const [newHp, setNewHp] = useState(25);
+  const [newTempHp, setNewTempHp] = useState(0);
   const [newHidden, setNewHidden] = useState(false);
   const [newIsSecret, setNewIsSecret] = useState(false);
 
@@ -216,6 +252,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [editAc, setEditAc] = useState(14);
   const [editHpMax, setEditHpMax] = useState(25);
   const [editHpCurr, setEditHpCurr] = useState(25);
+  const [editTempHp, setEditTempHp] = useState(0);
 
   // Turn alert toast
   const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
@@ -280,8 +317,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       .then((metadata) => {
         const state = metadata[COMBAT_STATE_KEY] as CombatState | undefined;
         if (state) {
+          const now = Date.now();
+          for (const [id, expiry] of deletionTombstones.current.entries()) {
+            if (now > expiry) deletionTombstones.current.delete(id);
+          }
           if (Array.isArray(state.combatants)) {
-            setCombatants(sortInitiativeStrictDescending(state.combatants));
+            const filtered = state.combatants.filter((c) => !deletionTombstones.current.has(c.id));
+            setCombatants(sortInitiativeStrictDescending(filtered));
           }
           if (state.activeCombatantId !== undefined) {
             setActiveCombatantId(state.activeCombatantId);
@@ -296,14 +338,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       .catch(() => {});
   }, []);
 
-  // Listen for OBR metadata changes
+  // Listen for OBR metadata changes (filters out combatants matching active deletion tombstones for 500ms+)
   useEffect(() => {
     if (!OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((metadata) => {
       const state = metadata[COMBAT_STATE_KEY] as CombatState | undefined;
       if (state) {
+        const now = Date.now();
+        for (const [id, expiry] of deletionTombstones.current.entries()) {
+          if (now > expiry) deletionTombstones.current.delete(id);
+        }
         if (Array.isArray(state.combatants)) {
-          setCombatants(sortInitiativeStrictDescending(state.combatants));
+          const filtered = state.combatants.filter((c) => !deletionTombstones.current.has(c.id));
+          setCombatants(sortInitiativeStrictDescending(filtered));
         }
         if (state.activeCombatantId !== undefined) {
           setActiveCombatantId(state.activeCombatantId);
@@ -524,78 +571,138 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleHpDelta = (combatantId: string, delta: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isFoW = isCombatantFoW(target);
+    const isBossOrMonster = target.type === 'boss' || target.type === 'monster';
     const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
     // Players can only edit PC & Ally; GM can edit all
     if (!isDm && !isPlayerOrAlly) return;
 
-    let newCurrent = target.hpCurrent;
-    let newTemp = target.hpTemp || 0;
+    let currentTemp = target.tempHp ?? target.hpTemp ?? 0;
+    let currentHp = target.hpCurrent;
 
     if (delta < 0) {
-      // Damage: subtract from temp HP first
+      // Damage math: deduct from tempHp first before depleting currentHp
       const damage = Math.abs(delta);
       let rem = damage;
-      if (newTemp > 0) {
-        if (rem <= newTemp) {
-          newTemp -= rem;
+      if (currentTemp > 0) {
+        if (rem <= currentTemp) {
+          currentTemp -= rem;
           rem = 0;
         } else {
-          rem -= newTemp;
-          newTemp = 0;
+          rem -= currentTemp;
+          currentTemp = 0;
         }
       }
-      newCurrent = Math.max(0, newCurrent - rem);
+      currentHp = Math.max(0, currentHp - rem);
 
       // Concentration check
       if (isConcentrating(target)) {
         const dc = calculateConcentrationDC(damage);
         const dmMsg = `⚡ ${target.name} took ${damage} dmg while concentrating! DC ${dc} CON save required.`;
-        const pMsg = isFoW ? `⚔️ ${target.name} took damage.` : dmMsg;
+        const pMsg = isCombatantFoW(target) ? `⚔️ ${target.name} took damage.` : dmMsg;
         liveFeedSync.recordCombatLog(dmMsg, true, pMsg);
       }
 
-      const logDm = `⚔️ ${target.name} took ${damage} damage (${newCurrent}/${target.hpMax} HP)`;
-      const logP = isFoW ? `⚔️ ${target.name} took damage.` : logDm;
+      const logDm = `⚔️ ${target.name} took ${damage} damage (${currentHp}/${target.hpMax} HP${
+        currentTemp > 0 ? `, +${currentTemp} THP` : ''
+      })`;
+      const logP = isCombatantFoW(target) ? `⚔️ ${target.name} took damage.` : logDm;
       liveFeedSync.recordCombatLog(logDm, true, logP);
     } else {
-      // Heal
-      newCurrent = Math.min(target.hpMax, newCurrent + delta);
-      const logDm = `💚 ${target.name} healed +${delta} HP (${newCurrent}/${target.hpMax} HP)`;
-      const logP = isFoW ? `💚 ${target.name} healed.` : logDm;
+      // Healing: Healing never increases tempHp
+      currentHp = Math.min(target.hpMax, currentHp + delta);
+      const logDm = `💚 ${target.name} healed +${delta} HP (${currentHp}/${target.hpMax} HP)`;
+      const logP = isCombatantFoW(target) ? `💚 ${target.name} healed.` : logDm;
       liveFeedSync.recordCombatLog(logDm, true, logP);
     }
 
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, hpCurrent: newCurrent, hpTemp: newTemp } : c
+      c.id === combatantId
+        ? { ...c, hpCurrent: currentHp, hpTemp: currentTemp, tempHp: currentTemp }
+        : c
     );
     setCombatants(updated);
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
-  // TOGGLE CONDITION
-  const handleToggleCondition = (combatantId: string, conditionName: string) => {
+  // INLINE TEMP HP SAVE
+  const handleSaveInlineThp = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isFoW = isCombatantFoW(target);
     const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
-    // Players can only toggle conditions on PC & Ally; GM can on all
     if (!isDm && !isPlayerOrAlly) return;
 
-    const exists = target.conditions.some((c) => c.name === conditionName);
-    const newConditions = exists
-      ? target.conditions.filter((c) => c.name !== conditionName)
-      : [...target.conditions, { name: conditionName }];
+    const val = Math.max(0, inlineThpVal);
+    const updated = combatants.map((c) =>
+      c.id === combatantId ? { ...c, tempHp: val, hpTemp: val } : c
+    );
+    setCombatants(updated);
+    setInlineThpId(null);
+
+    const logDm = `🛡️ ${target.name} set Temp HP to +${val} THP.`;
+    const logP = isCombatantFoW(target) ? undefined : logDm;
+    liveFeedSync.recordCombatLog(logDm, true, logP);
+
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // ADD CUSTOM CONDITION WITH FOW PRIVACY
+  const handleAddCustomCondition = (combatantId: string, nameToUse?: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    if (!isDm && !isPlayerOrAlly) return;
+
+    const rawName = (nameToUse || conditionInput).trim();
+    if (!rawName) return;
+
+    const newCond: CustomCondition = {
+      id: `cond-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: rawName,
+      isSecret: isDm ? conditionIsSecret : false,
+    };
+
+    const existingNormalized = target.conditions.map(normalizeCondition);
+    const updatedConditions = [...existingNormalized, newCond];
 
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, conditions: newConditions } : c
+      c.id === combatantId ? { ...c, conditions: updatedConditions } : c
+    );
+    setCombatants(updated);
+    setConditionInput('');
+    setConditionIsSecret(false);
+
+    const logDm = `✨ Condition [${rawName}]${newCond.isSecret ? ' (Secret)' : ''} applied to ${target.name}.`;
+    const logP = newCond.isSecret ? undefined : `✨ Condition [${rawName}] applied to ${target.name}.`;
+    liveFeedSync.recordCombatLog(logDm, true, logP);
+
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // REMOVE CONDITION
+  const handleRemoveCondition = (combatantId: string, condIdOrName: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    if (!isDm && !isPlayerOrAlly) return;
+
+    const existingNormalized = target.conditions.map(normalizeCondition);
+    const condToRemove = existingNormalized.find(
+      (cond) => cond.id === condIdOrName || cond.name === condIdOrName
+    );
+    const updatedConditions = existingNormalized.filter(
+      (cond) => cond.id !== condIdOrName && cond.name !== condIdOrName
+    );
+
+    const updated = combatants.map((c) =>
+      c.id === combatantId ? { ...c, conditions: updatedConditions } : c
     );
     setCombatants(updated);
 
-    const action = exists ? 'removed from' : 'applied to';
-    const logDm = `✨ Condition [${conditionName}] ${action} ${target.name}.`;
-    const logP = isFoW ? undefined : logDm;
-    liveFeedSync.recordCombatLog(logDm, true, logP);
+    if (condToRemove) {
+      const logDm = `✨ Condition [${condToRemove.name}] removed from ${target.name}.`;
+      const logP = condToRemove.isSecret ? undefined : logDm;
+      liveFeedSync.recordCombatLog(logDm, true, logP);
+    }
 
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
@@ -613,7 +720,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         ? {
             ...c,
             hidden: willBeHidden,
-            isSecret: willBeHidden ? c.isSecret : false,
+            isSecret: willBeHidden ? (c.isSecret || false) : false,
           }
         : c
     );
@@ -626,9 +733,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
-  // DELETE COMBATANT (DM Only)
+  // DELETE COMBATANT (DM Only with double-delete lock)
   const handleDeleteCombatant = (combatantId: string) => {
     if (!isDm) return;
+    // Add to transient deletion lock / tombstone map for 800ms (> 500ms required)
+    deletionTombstones.current.set(combatantId, Date.now() + 800);
+
     const target = combatants.find((c) => c.id === combatantId);
     const updated = combatants.filter((c) => c.id !== combatantId);
     setCombatants(updated);
@@ -667,6 +777,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setEditAc(c.armorClass);
     setEditHpMax(c.hpMax);
     setEditHpCurr(c.hpCurrent);
+    setEditTempHp(c.tempHp ?? c.hpTemp ?? 0);
   };
 
   // SAVE EDITED COMBATANT
@@ -693,6 +804,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             armorClass: editAc,
             hpMax: editHpMax,
             hpCurrent: Math.min(editHpCurr, editHpMax),
+            hpTemp: Math.max(0, editTempHp),
+            tempHp: Math.max(0, editTempHp),
           }
         : c
     );
@@ -721,25 +834,26 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       allowedType = newType === 'ally' ? 'ally' : 'player';
     }
 
-    const isBossOrCustom = allowedType === 'boss' || allowedType === 'custom';
-    const isMarkedSecretOrHidden = isDm && (newHidden || newIsSecret || isBossOrCustom);
-    const isFoWCombatant = isDm && (isMarkedSecretOrHidden || newType === 'boss' || newType === 'custom');
+    const isBossOrMonsterOrCustom =
+      allowedType === 'boss' || allowedType === 'monster' || allowedType === 'custom';
     const isHiddenFromPlayers = isDm && (newHidden || newIsSecret);
 
     const newCombatant: Combatant = {
       id: `c-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: newName.trim(),
       type: allowedType,
-      customRoleLabel: allowedType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined,
+      customRoleLabel:
+        allowedType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined,
       initiative: newInitiative,
       armorClass: newAc,
       hpCurrent: newHp,
       hpMax: newHp,
-      hpTemp: 0,
+      hpTemp: Math.max(0, newTempHp),
+      tempHp: Math.max(0, newTempHp),
       conditions: [],
       hidden: isHiddenFromPlayers,
-      fogOfWar: isFoWCombatant,
-      isSecret: isDm && (newIsSecret || allowedType === 'boss'),
+      fogOfWar: isDm && (isBossOrMonsterOrCustom || newHidden || newIsSecret),
+      isSecret: isDm && newIsSecret,
     };
 
     const updated = sortInitiativeStrictDescending([...combatants, newCombatant]);
@@ -775,6 +889,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setNewInitiative(10);
     setNewAc(14);
     setNewHp(25);
+    setNewTempHp(0);
     setNewHidden(false);
     setNewIsSecret(false);
   };
@@ -791,7 +906,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const latestCombatEvent = combatFeedItems.length > 0 ? combatFeedItems[combatFeedItems.length - 1] : null;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none relative">
+    <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[#0b0f17] select-none relative rounded-lg border border-slate-800">
       {/* FLOATING TURN ALERT BANNER */}
       {playerTurnAlert && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs shadow-xl flex items-center gap-1.5 animate-fadeIn">
@@ -801,7 +916,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       )}
 
       {/* 1. HEADER ROW: Round Counter, Active Turn Name, Nav Buttons */}
-      <div className="h-11 px-2.5 bg-slate-950/95 border-b border-slate-800 flex items-center justify-between shrink-0 gap-2">
+      <div className="h-11 px-2.5 bg-slate-950/95 border-b border-slate-800 flex items-center justify-between shrink-0 gap-2 rounded-t-lg">
         <div className="flex items-center gap-2 min-w-0">
           {/* Round Counter */}
           <span className="px-2 py-0.5 rounded bg-amber-950/90 border border-amber-500/60 text-amber-300 font-mono font-bold text-[11px] shrink-0">
@@ -889,20 +1004,24 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         ) : (
           visibleCombatants.map((c, index) => {
             const isActive = c.id === (activeCombatantId || combatants[activeTurnIndex]?.id);
-            const isFoW = isCombatantFoW(c);
+            const isBossOrMonster = c.type === 'boss' || c.type === 'monster';
+            const isFoW = isCombatantFoW(c) || isBossOrMonster;
             const isPlayerOrAlly = c.type === 'player' || c.type === 'ally';
             // Permission rule: players can only edit PC & Ally; GM can edit all
             const canEdit = isDm || isPlayerOrAlly;
             const isMenuOpen = actionMenuCombatantId === c.id;
             const isEditing = editingCombatantId === c.id;
             const health = getHealthThreshold(c.hpCurrent, c.hpMax);
-            const isNearBottom = index >= visibleCombatants.length - 2 && visibleCombatants.length > 2;
+            const isLowerHalf = index >= visibleCombatants.length / 2;
+            const visibleConditions = c.conditions
+              .map(normalizeCondition)
+              .filter((cond) => isDm || !cond.isSecret);
 
             return (
               <div
                 key={c.id}
                 className={`min-h-[56px] py-1.5 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 text-xs select-none ${
-                  isMenuOpen ? 'relative z-30 ring-2 ring-amber-400/60 shadow-2xl' : 'relative z-0'
+                  isMenuOpen ? 'relative z-50 ring-2 ring-amber-400/60 shadow-2xl' : 'relative z-0'
                 } ${
                   isActive
                     ? 'bg-amber-950/30 border-amber-500/80 shadow-md border-l-4 border-l-amber-400 ring-1 ring-amber-400/20'
@@ -932,7 +1051,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                       {c.name}
                     </span>
 
-                    {/* Type Badge: PC / Ally / Boss / Custom */}
+                    {/* Type Badge: PC / Ally / Monster / Boss / Custom */}
                     {getTypeBadge(c.type, c.customRoleLabel)}
 
                     {/* FoW / Secret marker for DM */}
@@ -957,23 +1076,30 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     )}
                   </div>
 
-                  {/* Inline Condition Badges row directly adjacent to combatant */}
-                  {c.conditions.length > 0 && (!isFoW || isDm) && (
+                  {/* Inline Condition Badges row: In Player view, display only public conditions (!cond.isSecret) */}
+                  {visibleConditions.length > 0 && (
                     <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      {c.conditions.map((cond) => (
+                      {visibleConditions.map((cond) => (
                         <span
-                          key={cond.name}
+                          key={cond.id || cond.name}
                           onClick={(e) => {
                             if (canEdit) {
                               e.stopPropagation();
-                              handleToggleCondition(c.id, cond.name);
+                              handleRemoveCondition(c.id, cond.id || cond.name);
                             }
                           }}
                           className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0 transition ${getConditionBadgeStyle(
                             cond.name
-                          )} ${canEdit ? 'cursor-pointer hover:opacity-80' : ''}`}
-                          title={`${cond.name}${canEdit ? ' (click to remove)' : ''}`}
+                          )} ${
+                            cond.isSecret
+                              ? 'border-dashed border-rose-500/90 bg-rose-950/80 text-rose-300'
+                              : ''
+                          } ${canEdit ? 'cursor-pointer hover:opacity-80' : ''}`}
+                          title={`${cond.name}${cond.isSecret ? ' (Secret GM condition)' : ''}${
+                            canEdit ? ' (click to remove)' : ''
+                          }`}
                         >
+                          {cond.isSecret && <EyeOff className="w-2.5 h-2.5 text-rose-400" />}
                           <span>{cond.name}</span>
                           {canEdit && <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />}
                         </span>
@@ -982,11 +1108,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                   )}
                 </div>
 
-                {/* COL 3: Inline HP Controls */}
+                {/* COL 3: Inline HP Controls with FoW Masking for Boss/Monster */}
                 <div className="flex items-center gap-1 shrink-0">
-                  {isFoW && !isDm ? (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${health.badgeClass}`}>
-                      {health.status}
+                  {!isDm && isBossOrMonster ? (
+                    /* Boss and Monster in Player view: mask all HP (???/???), Temp HP, and AC */
+                    <span
+                      className="text-[11px] font-mono font-bold text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 tabular-nums shadow-inner"
+                      title="Enemy HP masked by Fog of War"
+                    >
+                      ???/???
                     </span>
                   ) : (
                     <>
@@ -1016,10 +1146,59 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                           {c.hpCurrent}
                         </span>
                         <span className="text-slate-500 font-normal text-[10px]">/{c.hpMax}</span>
-                        {c.hpTemp > 0 && (
-                          <span className="text-cyan-400 text-[9px] font-normal">+{c.hpTemp}</span>
-                        )}
                       </span>
+
+                      {/* Inline Click on Temp HP block (+X THP) */}
+                      {inlineThpId === c.id ? (
+                        <div className="flex items-center gap-0.5">
+                          <input
+                            type="number"
+                            value={inlineThpVal}
+                            onChange={(e) => setInlineThpVal(parseInt(e.target.value, 10) || 0)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveInlineThp(c.id);
+                              if (e.key === 'Escape') setInlineThpId(null);
+                            }}
+                            autoFocus
+                            className="w-10 px-1 py-0.5 text-[10px] font-mono rounded bg-slate-950 border border-cyan-500 text-cyan-300 text-center"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveInlineThp(c.id)}
+                            className="p-0.5 text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                            title="Save THP"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInlineThpId(null)}
+                            className="p-0.5 text-slate-400 hover:text-slate-300 cursor-pointer"
+                            title="Cancel"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (canEdit) {
+                              setInlineThpId(c.id);
+                              setInlineThpVal(c.tempHp ?? c.hpTemp ?? 0);
+                            }
+                          }}
+                          disabled={!canEdit}
+                          className={`text-[9px] font-mono px-1 py-0.5 rounded border transition cursor-pointer ${
+                            (c.tempHp ?? c.hpTemp ?? 0) > 0
+                              ? 'text-cyan-300 bg-cyan-950/80 border-cyan-600/70 hover:bg-cyan-900/80'
+                              : 'text-slate-500 bg-slate-900 border-slate-800 hover:text-slate-300'
+                          }`}
+                          title={canEdit ? 'Click to edit Temp HP (+THP)' : `Temp HP: ${c.tempHp ?? c.hpTemp ?? 0}`}
+                        >
+                          +{(c.tempHp ?? c.hpTemp ?? 0)} THP
+                        </button>
+                      )}
 
                       {/* Micro heal buttons (+1, +5) */}
                       <button
@@ -1048,9 +1227,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 <div className="relative shrink-0">
                   <button
                     type="button"
-                    onClick={() =>
-                      setActionMenuCombatantId(actionMenuCombatantId === c.id ? null : c.id)
-                    }
+                    onClick={() => {
+                      setActionMenuCombatantId(actionMenuCombatantId === c.id ? null : c.id);
+                      setConditionInput('');
+                      setConditionIsSecret(false);
+                    }}
                     className={`h-7 w-7 rounded-lg flex items-center justify-center border transition cursor-pointer ${
                       c.conditions.length > 0
                         ? 'bg-amber-950/70 border-amber-600/70 text-amber-300'
@@ -1061,11 +1242,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     <MoreVertical className="w-3.5 h-3.5" />
                   </button>
 
-                  {/* FLYOUT MENU WITH z-30 AND CLEAN POSITIONING */}
+                  {/* FLYOUT MENU: position absolute, z-50 with drop-shadow. Opens upward (bottom-full mb-1) in lower half of list */}
                   {isMenuOpen && (
                     <div
-                      className={`absolute right-0 z-30 w-64 bg-slate-900 border border-slate-700 rounded-xl p-3 shadow-2xl space-y-2.5 text-xs animate-fadeIn ${
-                        isNearBottom ? 'bottom-8' : 'top-8'
+                      className={`absolute right-0 z-50 w-64 bg-slate-900 border border-slate-700 rounded-xl p-3 shadow-2xl drop-shadow-2xl space-y-2.5 text-xs animate-fadeIn ${
+                        isLowerHalf ? 'bottom-full mb-1' : 'top-full mt-1'
                       }`}
                     >
                       <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
@@ -1076,39 +1257,113 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                         <button
                           type="button"
                           onClick={() => setActionMenuCombatantId(null)}
-                          className="text-slate-400 hover:text-slate-200 p-0.5"
+                          className="text-slate-400 hover:text-slate-200 p-0.5 cursor-pointer"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      {/* Quick Conditions Badges Toggle (Allowed for GM, or player editing PC/Ally) */}
+                      {/* Custom Condition Open Input with Secret Checkbox */}
                       {canEdit && (
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                            Toggle Conditions
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                            Add Condition
                           </span>
-                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto p-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={conditionInput}
+                              onChange={(e) => setConditionInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddCustomCondition(c.id);
+                                }
+                              }}
+                              placeholder="Type custom condition..."
+                              className="flex-1 px-2 py-1 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                            />
+                            {isDm && (
+                              <label
+                                className="flex items-center gap-1 text-[11px] text-slate-300 shrink-0 cursor-pointer select-none"
+                                title="Secret: GM only (concealed from players)"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={conditionIsSecret}
+                                  onChange={(e) => setConditionIsSecret(e.target.checked)}
+                                  className="rounded bg-slate-950 border-slate-700 text-rose-500 cursor-pointer"
+                                />
+                                <span className="text-[10px] font-bold text-rose-400">Secret</span>
+                              </label>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleAddCustomCondition(c.id)}
+                              className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 cursor-pointer shrink-0 transition"
+                            >
+                              Add
+                            </button>
+                          </div>
+
+                          {/* Quick Suggestion Badges */}
+                          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto p-0.5">
                             {CONDITIONS_LIST.map((cond) => {
-                              const isActiveCond = c.conditions.some((item) => item.name === cond);
+                              const isAlreadyAdded = c.conditions.some(
+                                (item) => normalizeCondition(item).name === cond
+                              );
                               return (
                                 <button
                                   key={cond}
                                   type="button"
-                                  onClick={() => handleToggleCondition(c.id, cond)}
-                                  className={`text-[10px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
-                                    isActiveCond
-                                      ? cond === 'Concentration'
-                                        ? 'bg-cyan-500 text-slate-950 font-bold border-cyan-400'
-                                        : 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                                  onClick={() => handleAddCustomCondition(c.id, cond)}
+                                  className={`text-[9px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                                    isAlreadyAdded
+                                      ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
                                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                                   }`}
                                 >
-                                  {cond}
+                                  +{cond}
                                 </button>
                               );
                             })}
                           </div>
+
+                          {/* Active Conditions in Menu with remove toggle */}
+                          {c.conditions.length > 0 && (
+                            <div className="pt-1.5 border-t border-slate-800/80">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                                Active Conditions:
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {c.conditions.map((item) => {
+                                  const cond = normalizeCondition(item);
+                                  if (!isDm && cond.isSecret) return null;
+                                  return (
+                                    <button
+                                      key={cond.id}
+                                      type="button"
+                                      onClick={() => handleRemoveCondition(c.id, cond.id)}
+                                      className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-pointer transition ${getConditionBadgeStyle(
+                                        cond.name
+                                      )} ${
+                                        cond.isSecret
+                                          ? 'border-dashed border-rose-500 text-rose-300 bg-rose-950'
+                                          : ''
+                                      }`}
+                                      title="Click to remove"
+                                    >
+                                      {cond.isSecret && (
+                                        <EyeOff className="w-2.5 h-2.5 text-rose-400" />
+                                      )}
+                                      <span>{cond.name}</span>
+                                      <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1123,10 +1378,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                             className="w-full px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-slate-100"
                           />
 
-                          {/* Role edit: GM can change to Boss/Custom; Players can only choose PC/Ally */}
+                          {/* Role edit: GM can change to Monster/Boss/Custom; Players can only choose PC/Ally */}
                           {isDm && (
-                            <div className="grid grid-cols-4 gap-1 text-[10px]">
-                              {(['player', 'ally', 'boss', 'custom'] as CombatantType[]).map((t) => (
+                            <div className="grid grid-cols-5 gap-1 text-[10px]">
+                              {(['player', 'ally', 'monster', 'boss', 'custom'] as CombatantType[]).map((t) => (
                                 <button
                                   key={t}
                                   type="button"
@@ -1153,7 +1408,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                             />
                           )}
 
-                          <div className="grid grid-cols-3 gap-1 text-[11px]">
+                          <div className="grid grid-cols-4 gap-1 text-[11px]">
                             <div>
                               <span className="text-[10px] text-slate-400 block">Init</span>
                               <input
@@ -1179,6 +1434,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                                 value={editHpMax}
                                 onChange={(e) => setEditHpMax(parseInt(e.target.value, 10) || 1)}
                                 className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-slate-200"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">Temp HP</span>
+                              <input
+                                type="number"
+                                value={editTempHp}
+                                onChange={(e) => setEditTempHp(parseInt(e.target.value, 10) || 0)}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-cyan-300"
                               />
                             </div>
                           </div>
@@ -1410,7 +1674,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 <label className="text-[11px] font-semibold text-slate-300 block mb-1">
                   Combatant Type
                 </label>
-                <div className={`grid gap-1 ${isDm ? 'grid-cols-4' : 'grid-cols-2'}`}>
+                <div className={`grid gap-1 ${isDm ? 'grid-cols-5' : 'grid-cols-2'}`}>
                   {/* PC: Player & GM */}
                   <button
                     type="button"
@@ -1437,6 +1701,21 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     Ally
                   </button>
 
+                  {/* Monster: GM Only */}
+                  {isDm && (
+                    <button
+                      type="button"
+                      onClick={() => setNewType('monster')}
+                      className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
+                        newType === 'monster'
+                          ? 'bg-rose-500 text-slate-950 font-bold border-rose-400'
+                          : 'bg-slate-950 text-slate-400 border-slate-800'
+                      }`}
+                    >
+                      Monster
+                    </button>
+                  )}
+
                   {/* Boss: GM Only */}
                   {isDm && (
                     <button
@@ -1444,7 +1723,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                       onClick={() => setNewType('boss')}
                       className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
                         newType === 'boss'
-                          ? 'bg-rose-500 text-slate-950 font-bold border-rose-400'
+                          ? 'bg-purple-600 text-amber-200 font-bold border-amber-400'
                           : 'bg-slate-950 text-slate-400 border-slate-800'
                       }`}
                     >
@@ -1470,7 +1749,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
                 {!isDm && (
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Players can create &amp; edit PC and Ally combatants. Boss &amp; Custom are GM exclusive.
+                    Players can create &amp; edit PC and Ally combatants. Monsters &amp; Bosses are GM exclusive.
                   </p>
                 )}
               </div>
@@ -1491,8 +1770,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 </div>
               )}
 
-              {/* Numerical Stats */}
-              <div className="grid grid-cols-3 gap-2">
+              {/* Numerical Stats: Initiative, AC, Max HP, Temp HP */}
+              <div className="grid grid-cols-4 gap-2">
                 <div>
                   <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
                     Initiative
@@ -1526,6 +1805,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-200"
                   />
                 </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                    Temp HP
+                  </label>
+                  <input
+                    type="number"
+                    value={newTempHp}
+                    onChange={(e) => setNewTempHp(parseInt(e.target.value, 10) || 0)}
+                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-cyan-300"
+                  />
+                </div>
               </div>
 
               {/* FoW Toggles for GM */}
@@ -1540,14 +1830,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     />
                     <span>Hidden (FoW)</span>
                   </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
+                  <label className="flex items-center gap-1.5 cursor-pointer" title="Secret Boss: Completely hidden from Player view and room logs until revealed">
                     <input
                       type="checkbox"
                       checked={newIsSecret}
                       onChange={(e) => setNewIsSecret(e.target.checked)}
-                      className="rounded bg-slate-950 border-slate-700 text-amber-400 cursor-pointer"
+                      className="rounded bg-slate-950 border-slate-700 text-rose-500 cursor-pointer"
                     />
-                    <span>Secret Boss</span>
+                    <span className="text-rose-400 font-semibold">Secret Boss</span>
                   </label>
                 </div>
               )}

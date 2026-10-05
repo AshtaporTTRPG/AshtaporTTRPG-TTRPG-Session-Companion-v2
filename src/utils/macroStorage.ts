@@ -1,6 +1,7 @@
 import { CustomMacro, RollTypeCategory } from '../types/ttrpg';
 
-const MACRO_STORAGE_KEY = 'ttrpg_custom_macros';
+const MACRO_STORAGE_KEY = 'ashtapor_macros_v2';
+const LEGACY_STORAGE_KEY = 'ttrpg_custom_macros';
 
 export const DEFAULT_STARTER_MACROS: CustomMacro[] = [
   { id: 'm-1', name: 'Attack (Longsword)', formula: '1d20+5', rollType: 'Attack roll', advantageMode: 'normal', modifier: 5 },
@@ -22,6 +23,15 @@ export function loadCustomMacros(): CustomMacro[] {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+    // Check legacy key for migration
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy !== null) {
+      const parsed = JSON.parse(legacy);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        saveCustomMacros(parsed);
         return parsed;
       }
     }

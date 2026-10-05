@@ -218,7 +218,14 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
       return;
     }
 
-    const updated = [...combatant.conditions, { name }];
+    const updated = [
+      ...combatant.conditions,
+      {
+        id: `cond-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name,
+        isSecret: false,
+      },
+    ];
     onUpdate({ conditions: updated });
     onAddLog && onAddLog(`⚡ ${combatant.name} gained condition: ${name}`);
     setCustomConditionInput('');
