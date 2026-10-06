@@ -34,6 +34,7 @@ export interface Combatant {
   customRoleLabel?: string; // DM free-text label for custom initiatives (e.g. Lair Action, Mass Combat)
   initiative: number;
   armorClass: number;
+  ac?: number; // Armor Class field (default 10)
   hpCurrent: number;
   hpMax: number;
   hpTemp: number;
@@ -47,6 +48,35 @@ export interface Combatant {
   hidden?: boolean; // Per-combatant DM visibility toggle (completely hidden from initiative)
   fogOfWar?: boolean; // Fog of War toggle (conceals active conditions, status badges, exact HP, and damage numbers)
   isSecret?: boolean; // Secret Boss / NPC marker (completely hidden from player initiative until revealed)
+  sortOrder?: number; // GM manual sorting priority order
+  updatedAt?: number; // State modification timestamp to prevent desync
+}
+
+/**
+ * Calculates effective AC dynamically accounting for temporary AC conditions:
+ * - +2 AC (Half Cover / Shield of Faith)
+ * - +5 AC (Shield Spell / Three-Quarters Cover)
+ */
+export function getEffectiveAc(combatant: Combatant): { effectiveAc: number; bonus: number; baseAc: number } {
+  const baseAc = combatant.ac ?? combatant.armorClass ?? 10;
+  let bonus = 0;
+  for (const c of combatant.conditions || []) {
+    const name = typeof c === 'string' ? c : c.name;
+    if (
+      name.includes('+2 AC') ||
+      name.toLowerCase().includes('half cover') ||
+      name.toLowerCase().includes('shield of faith')
+    ) {
+      bonus += 2;
+    } else if (
+      name.includes('+5 AC') ||
+      name.toLowerCase().includes('shield spell') ||
+      name.toLowerCase().includes('three-quarters cover')
+    ) {
+      bonus += 5;
+    }
+  }
+  return { effectiveAc: baseAc + bonus, bonus, baseAc };
 }
 
 /**
@@ -62,13 +92,12 @@ export function isCombatantFoW(combatant: Combatant): boolean {
 }
 
 /**
- * Strict descending initiative sort (b.initiative - a.initiative).
- * Enforces highest total initiative score at index 0.
- * Maintains stable insertion order as tie-breaker.
+ * Deterministic sort:
+ * sorted = [...combatants].sort((a, b) => b.initiative - a.initiative || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id.localeCompare(b.id))
  */
 export function sortInitiativeStrictDescending(combatants: Combatant[]): Combatant[] {
   return [...combatants].sort(
-    (a, b) => b.initiative - a.initiative || a.id.localeCompare(b.id)
+    (a, b) => b.initiative - a.initiative || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id.localeCompare(b.id)
   );
 }
 

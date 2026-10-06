@@ -19,6 +19,8 @@ import {
   Radio,
   X,
   Sparkles,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 
 export type NotesScope = 'my-notes' | 'table-notes' | 'dm-notes';
@@ -141,6 +143,26 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm }) => {
   const [editingNote, setEditingNote] = useState<DmSecretNote | null>(null);
   const [newNoteTitle, setNewNoteTitle] = useState<string>('');
   const [newNoteContent, setNewNoteContent] = useState<string>('');
+
+  // Collapsed / Expanded DM note states persisted per note ID in local storage
+  const [collapsedNotes, setCollapsedNotes] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('ashtapor_dm_notes_collapsed_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {};
+  });
+
+  const toggleNoteCollapsed = (noteId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setCollapsedNotes((prev) => {
+      const next = { ...prev, [noteId]: !prev[noteId] };
+      try {
+        localStorage.setItem('ashtapor_dm_notes_collapsed_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
 
   const [copiedNotice, setCopiedNotice] = useState<string | null>(null);
 
@@ -751,6 +773,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm }) => {
               </div>
             ) : (
               dmNotes.map((note) => {
+                const isCollapsed = !!collapsedNotes[note.id];
                 const timeStr = new Date(note.updatedAt || note.createdAt).toLocaleDateString([], {
                   month: 'short',
                   day: 'numeric',
@@ -759,39 +782,87 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm }) => {
                 return (
                   <div
                     key={note.id}
-                    className={`p-3 rounded-xl border transition flex flex-col gap-2 ${
+                    className={`p-2.5 rounded-xl border transition flex flex-col gap-2 ${
                       note.isRevealed
                         ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
                         : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    {/* Card Header */}
-                    <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5">
-                      <div className="flex items-center gap-1.5 min-w-0">
+                    {/* Card Header Row */}
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        {/* Collapse/Expand Toggle button (▼ / ▶) */}
+                        <button
+                          type="button"
+                          onClick={(e) => toggleNoteCollapsed(note.id, e)}
+                          className="w-5 h-5 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-300 flex items-center justify-center shrink-0 transition cursor-pointer"
+                          title={isCollapsed ? 'Expand note (▶)' : 'Collapse note (▼)'}
+                          aria-label={isCollapsed ? 'Expand note' : 'Collapse note'}
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
                         <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        <h4 className="text-xs font-bold text-slate-100 font-display truncate">
+
+                        {/* Note Title fully legible in header row */}
+                        <h4
+                          className="text-xs font-bold text-slate-100 font-display truncate flex-1 min-w-0 cursor-pointer hover:text-amber-300 transition"
+                          title={note.title}
+                          onClick={(e) => toggleNoteCollapsed(note.id, e)}
+                        >
                           {note.title}
                         </h4>
                       </div>
 
+                      {/* Header Actions: Broadcast Button & Delete Button always accessible */}
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-[10px] font-mono text-slate-500">{timeStr}</span>
+                        {/* Broadcast: "👁️ Reveal to Table" button */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleReveal(note)}
+                          className={`px-2 py-0.5 text-[11px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0 ${
+                            note.isRevealed
+                              ? 'bg-amber-400 text-slate-950 hover:bg-amber-300 ring-1 ring-amber-300'
+                              : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 hover:border-amber-400/60'
+                          }`}
+                          title={
+                            note.isRevealed
+                              ? 'Click to hide this note from player screens'
+                              : 'Click to broadcast this note in a center modal on all player screens'
+                          }
+                        >
+                          {note.isRevealed ? (
+                            <>
+                              <EyeOff className="w-3 h-3" />
+                              <span>Hide</span>
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-3 h-3 text-amber-400" />
+                              <span>👁️ Reveal to Table</span>
+                            </>
+                          )}
+                        </button>
 
                         {/* Edit Button */}
                         <button
                           type="button"
                           onClick={(e) => handleOpenEditDmNote(note, e)}
-                          className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                          className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer shrink-0"
                           title="Edit note"
                         >
                           <Edit2 className="w-3 h-3" />
                         </button>
 
-                        {/* Delete Button */}
+                        {/* Delete Button (🗑️) */}
                         <button
                           type="button"
                           onClick={(e) => handleDeleteDmNote(note.id, e)}
-                          className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                          className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer shrink-0"
                           title="Delete note"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -799,51 +870,32 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm }) => {
                       </div>
                     </div>
 
-                    {/* Note Content Preview */}
-                    <div className="text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto bg-slate-950/70 p-2 rounded-lg border border-slate-800/60">
-                      {note.content}
-                    </div>
+                    {/* Expanded State: Full text area for reading and editing */}
+                    {!isCollapsed && (
+                      <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                        <div
+                          onClick={(e) => handleOpenEditDmNote(note, e)}
+                          title="Click to edit full note"
+                          className="text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/60 shadow-inner cursor-pointer hover:border-slate-700 transition"
+                        >
+                          {note.content}
+                        </div>
 
-                    {/* Card Footer: "Reveal to Table" Toggle Button */}
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="text-[10px] text-slate-500 font-mono">
-                        {note.isRevealed ? (
-                          <span className="text-amber-400 font-bold flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                            <span>Currently visible to players</span>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono px-0.5">
+                          <span>
+                            {timeStr} · {note.content.length} characters
                           </span>
-                        ) : (
-                          <span>Hidden from table</span>
-                        )}
+                          {note.isRevealed ? (
+                            <span className="text-amber-400 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                              <span>Visible to players on table</span>
+                            </span>
+                          ) : (
+                            <span>Hidden from table</span>
+                          )}
+                        </div>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleReveal(note)}
-                        className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-sm ${
-                          note.isRevealed
-                            ? 'bg-amber-400 text-slate-950 hover:bg-amber-300 font-bold ring-1 ring-amber-300'
-                            : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 hover:border-amber-400/60'
-                        }`}
-                        title={
-                          note.isRevealed
-                            ? 'Click to hide this note from player screens'
-                            : 'Click to broadcast this note in a center modal on all player screens'
-                        }
-                      >
-                        {note.isRevealed ? (
-                          <>
-                            <EyeOff className="w-3.5 h-3.5" />
-                            <span>Hide from Table</span>
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="w-3.5 h-3.5 text-amber-400" />
-                            <span>👁️ Reveal to Table</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
+                    )}
                   </div>
                 );
               })

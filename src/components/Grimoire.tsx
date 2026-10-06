@@ -5,6 +5,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Swords,
   Footprints,
   Moon,
@@ -507,21 +508,24 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
             </button>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0 text-[10px]">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={handleExpandAll}
-              className="text-neutral-400 hover:text-amber-300 font-semibold px-1 py-0.5 rounded transition cursor-pointer"
+              className="w-6 h-6 rounded-md bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-amber-300 flex items-center justify-center transition cursor-pointer"
+              title="Expand all rules (▼)"
+              aria-label="Expand all rules"
             >
-              Expand
+              <ChevronDown className="w-3.5 h-3.5" />
             </button>
-            <span className="text-neutral-600">·</span>
             <button
               type="button"
               onClick={handleCollapseAll}
-              className="text-neutral-400 hover:text-amber-300 font-semibold px-1 py-0.5 rounded transition cursor-pointer"
+              className="w-6 h-6 rounded-md bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-amber-300 flex items-center justify-center transition cursor-pointer"
+              title="Collapse all rules (▶)"
+              aria-label="Collapse all rules"
             >
-              Collapse
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -552,19 +556,28 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
               >
                 {/* Header row */}
                 <div
-                  className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-neutral-800/60 transition gap-2 group"
+                  className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-neutral-800/60 transition gap-1.5 group"
                 >
                   <button
                     type="button"
                     onClick={() => toggleRule(rule.id)}
-                    className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                    className="flex-1 min-w-0 flex items-center gap-1.5 text-left cursor-pointer overflow-hidden"
                   >
+                    {/* Compact minimal chevron chip (w-6 h-6) */}
+                    <span className="w-6 h-6 rounded-md bg-neutral-950/80 border border-neutral-800/80 flex items-center justify-center shrink-0 text-neutral-400 group-hover:text-amber-300 group-hover:border-amber-400/50 transition">
+                      {isOpen ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      )}
+                    </span>
+
                     {isCombat && <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
                     {isMovement && <Footprints className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
                     {isRest && <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
                     {isWorld && <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
 
-                    <span className="text-xs font-bold text-neutral-200 truncate group-hover:text-amber-300 transition-colors">
+                    <span className="flex-1 min-w-0 truncate text-left text-xs font-bold text-neutral-200 group-hover:text-amber-300 transition-colors">
                       {rule.title}
                     </span>
 
@@ -583,30 +596,17 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
                     </span>
                   </button>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
                       onClick={(e) => handleCopyRule(rule, e)}
                       title="Copy rule to clipboard"
-                      className="p-1 rounded text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 transition cursor-pointer"
+                      className="w-6 h-6 rounded-md bg-neutral-950/80 hover:bg-neutral-800 border border-neutral-800/80 text-neutral-400 hover:text-amber-300 flex items-center justify-center transition cursor-pointer"
                     >
                       {copiedId === rule.id ? (
                         <Check className="w-3 h-3 text-emerald-400" />
                       ) : (
                         <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleRule(rule.id)}
-                      className="p-1 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer"
-                      title={isOpen ? 'Collapse rule' : 'Expand rule'}
-                      aria-label={isOpen ? 'Collapse rule' : 'Expand rule'}
-                    >
-                      {isOpen ? (
-                        <ChevronUp className="w-3.5 h-3.5 text-neutral-400" />
-                      ) : (
-                        <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
                       )}
                     </button>
                   </div>

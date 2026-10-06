@@ -1,5 +1,5 @@
 import React from 'react';
-import { Combatant, CombatantType, isCombatantFoW } from '../types/ttrpg';
+import { Combatant, CombatantType, isCombatantFoW, getEffectiveAc } from '../types/ttrpg';
 import { ChevronUp, ChevronDown, Eye, EyeOff, Shield, Swords, Sparkles, Flame, User, Skull } from 'lucide-react';
 
 interface QuickGlanceInitiativeProps {
@@ -94,7 +94,7 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
 
                   {/* Name and Role Label */}
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span
                         className={`text-xs font-semibold truncate ${
                           isActive
@@ -106,6 +106,25 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
                       >
                         {combatant.name}
                       </span>
+
+                      {/* Inline AC Shield Badge (Public to everyone) */}
+                      {(() => {
+                        const effectiveAcInfo = getEffectiveAc(combatant);
+                        return (
+                          <span
+                            className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-cyan-300 border border-slate-700/80 flex items-center gap-1 shrink-0 shadow-sm"
+                            title={`Armor Class: ${effectiveAcInfo.effectiveAc}${effectiveAcInfo.bonus > 0 ? ` (Base ${combatant.ac ?? combatant.armorClass ?? 10} + ${effectiveAcInfo.bonus})` : ''}`}
+                          >
+                            <span>🛡️</span>
+                            <span>
+                              {effectiveAcInfo.bonus > 0
+                                ? `${effectiveAcInfo.effectiveAc} (+${effectiveAcInfo.bonus})`
+                                : `${effectiveAcInfo.effectiveAc} AC`}
+                            </span>
+                          </span>
+                        );
+                      })()}
+
                       {isActive && (
                         <span className="text-[10px] text-amber-400 font-bold animate-pulse">
                           ▶

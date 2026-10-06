@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Combatant, CombatantType, Condition, isCombatantFoW } from '../types/ttrpg';
+import { Combatant, CombatantType, Condition, isCombatantFoW, getEffectiveAc } from '../types/ttrpg';
 import { getHealthThreshold } from '../utils/combatHealth';
 import { isConcentrating, calculateConcentrationDC } from '../utils/concentration';
 import {
@@ -31,7 +31,9 @@ interface CombatantCardProps {
   onToggleVisibility?: () => void;
 }
 
-const CONDITIONS_LIST: { name: Condition; color: string }[] = [
+const CONDITIONS_LIST: { name: Condition | string; color: string }[] = [
+  { name: '+2 AC (Half Cover / Shield of Faith)', color: 'text-cyan-300 bg-cyan-950/80 border-cyan-500 font-bold' },
+  { name: '+5 AC (Shield Spell / Three-Quarters Cover)', color: 'text-blue-300 bg-blue-950/80 border-blue-500 font-bold' },
   { name: 'Blinded', color: 'text-amber-400 bg-amber-950/70 border-amber-800' },
   { name: 'Charmed', color: 'text-pink-400 bg-pink-950/70 border-pink-800' },
   { name: 'Concentration', color: 'text-cyan-300 bg-cyan-950/80 border-cyan-600' },
@@ -95,6 +97,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
 
   // Dynamic Health Threshold status
   const healthInfo = getHealthThreshold(combatant.hpCurrent, combatant.hpMax);
+  const effectiveAcInfo = getEffectiveAc(combatant);
 
   // Quick Damage (-1, -5) - subtracts from Temp HP first, then Current HP
   const handleQuickDamage = (amount: number) => {
@@ -111,19 +114,23 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
       }
     }
     const newHp = Math.max(0, combatant.hpCurrent - remainingDamage);
-    onUpdate({ hpCurrent: newHp, hpTemp: newTemp });
+    onUpdate({ hpCurrent: newHp, hpTemp: newTemp, updatedAt: Date.now() });
 
-    // Damage Obfuscation:
-    // DM view: "[Name] took [X] damage."
-    // Player view: "[Name] took damage." (no numerical damage or HP for FoW combatants)
+    const isEnemyOrCustom =
+      combatant.type === 'boss' || combatant.type === 'monster' || combatant.type === 'custom';
+    const isSecret = !!(combatant.isSecret || combatant.hidden);
+
     const dmMessage = `⚔️ ${combatant.name} took ${amount} damage! (${newHp}/${combatant.hpMax} HP${
       newTemp > 0 ? `, +${newTemp} temp` : ''
     })`;
-    const playerMessage = isFoW
-      ? `⚔️ ${combatant.name} took damage.`
-      : `⚔️ ${combatant.name} took ${amount} damage! (${newHp}/${combatant.hpMax} HP${
-          newTemp > 0 ? `, +${newTemp} temp` : ''
-        })`;
+    let playerMessage: string | undefined;
+    if (isSecret) {
+      playerMessage = undefined;
+    } else if (isEnemyOrCustom) {
+      playerMessage = `⚔️ ${combatant.name} took damage.`;
+    } else {
+      playerMessage = dmMessage;
+    }
 
     if (onAddLog) {
       onAddLog(dmMessage, playerMessage);
@@ -133,7 +140,9 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
     if (isConcentrating(combatant)) {
       const dc = calculateConcentrationDC(amount);
       const concDmMessage = `⚡ ${combatant.name} took ${amount} damage while concentrating! DC ${dc} Constitution saving throw required.`;
-      const concPlayerMessage = isFoW
+      const concPlayerMessage = isSecret
+        ? undefined
+        : isEnemyOrCustom
         ? `⚔️ ${combatant.name} took damage.`
         : concDmMessage;
       if (onAddLog) {
@@ -146,11 +155,22 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
   const handleQuickHeal = (amount: number) => {
     if (!canEditCombatant) return;
     const newHp = Math.min(combatant.hpMax, combatant.hpCurrent + amount);
-    onUpdate({ hpCurrent: newHp });
+    onUpdate({ hpCurrent: newHp, updatedAt: Date.now() });
+
+    const isEnemyOrCustom =
+      combatant.type === 'boss' || combatant.type === 'monster' || combatant.type === 'custom';
+    const isSecret = !!(combatant.isSecret || combatant.hidden);
+
     const dmMessage = `💚 ${combatant.name} healed for ${amount} HP! (${newHp}/${combatant.hpMax} HP)`;
-    const playerMessage = isFoW
-      ? `💚 ${combatant.name} healed.`
-      : `💚 ${combatant.name} healed for ${amount} HP! (${newHp}/${combatant.hpMax} HP)`;
+    let playerMessage: string | undefined;
+    if (isSecret) {
+      playerMessage = undefined;
+    } else if (isEnemyOrCustom) {
+      playerMessage = `💚 ${combatant.name} received healing.`;
+    } else {
+      playerMessage = dmMessage;
+    }
+
     if (onAddLog) {
       onAddLog(dmMessage, playerMessage);
     }
@@ -181,7 +201,10 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
       hpCurrent: Math.max(0, hpCurrDraft),
       hpMax: Math.max(1, hpMaxDraft),
       hpTemp: Math.max(0, hpTempDraft),
+      tempHp: Math.max(0, hpTempDraft),
       armorClass: Math.max(0, acDraft),
+      ac: Math.max(0, acDraft),
+      updatedAt: Date.now(),
     });
 
     const dmMessage = `⚙️ ${combatant.name} stats updated: Init ${initDraft}, HP ${hpCurrDraft}/${hpMaxDraft} (+${hpTempDraft} temp), AC ${acDraft}`;
@@ -226,7 +249,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
         isSecret: false,
       },
     ];
-    onUpdate({ conditions: updated });
+    onUpdate({ conditions: updated, updatedAt: Date.now() });
     onAddLog && onAddLog(`⚡ ${combatant.name} gained condition: ${name}`);
     setCustomConditionInput('');
     setIsAddingCondition(false);
@@ -236,7 +259,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
   const handleRemoveCondition = (condName: string) => {
     if (!canEditCombatant) return;
     const updated = combatant.conditions.filter((c) => c.name !== condName);
-    onUpdate({ conditions: updated });
+    onUpdate({ conditions: updated, updatedAt: Date.now() });
     onAddLog && onAddLog(`✨ ${combatant.name} recovered from ${condName}`);
   };
 
@@ -314,7 +337,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <h4
                   className={`text-sm font-bold truncate ${
                     isActive ? 'text-amber-300' : 'text-slate-100'
@@ -322,6 +345,20 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                 >
                   {combatant.name}
                 </h4>
+
+                {/* Inline AC Shield Badge (Public to everyone, directly adjacent to name) */}
+                <span
+                  className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-cyan-300 border border-slate-700/80 flex items-center gap-1 shrink-0 shadow-sm"
+                  title={`Armor Class: ${effectiveAcInfo.effectiveAc}${effectiveAcInfo.bonus > 0 ? ` (Base ${effectiveAcInfo.baseAc} + ${effectiveAcInfo.bonus})` : ''}`}
+                >
+                  <span>🛡️</span>
+                  <span>
+                    {effectiveAcInfo.bonus > 0
+                      ? `${effectiveAcInfo.effectiveAc} (+${effectiveAcInfo.bonus})`
+                      : `${effectiveAcInfo.effectiveAc} AC`}
+                  </span>
+                </span>
+
                 {canEditCombatant && (
                   <button
                     type="button"
@@ -348,8 +385,8 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                   : roleStyle.label}
               </span>
 
-              {/* Dynamic Health Threshold Badge: Hidden from player view when combatant is marked with Fog of War */}
-              {(isDm || !isFoW) && (
+              {/* Dynamic Health Threshold Badge: For PC and Ally: display on all clients. For Boss, Monster, and Custom: GM View renders normally, Player View completely hides it */}
+              {((combatant.type === 'player' || combatant.type === 'ally') || isDm) && (
                 <span
                   className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${healthInfo.badgeClass}`}
                   title={`Health Status: ${healthInfo.status}`}
@@ -811,6 +848,8 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                 <div className="flex flex-wrap items-center gap-1 pt-0.5">
                   <span className="text-[10px] text-slate-500 mr-1 font-medium">Quick Suggestions:</span>
                   {[
+                    '+2 AC (Half Cover / Shield of Faith)',
+                    '+5 AC (Shield Spell / Three-Quarters Cover)',
                     'Grappled',
                     'Hexed',
                     'Bane (-1d4)',

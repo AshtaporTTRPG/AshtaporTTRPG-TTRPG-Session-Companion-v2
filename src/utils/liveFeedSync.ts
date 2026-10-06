@@ -21,6 +21,7 @@ export interface UnifiedFeedItem {
   message: string;
   playerMessage?: string; // Obfuscated or generic message for player view (e.g. FoW damage or masked secret roll)
   isSecretRoll?: boolean;
+  isSecret?: boolean;
   secretSender?: string;
   timestamp: number;
   rollDetails?: {
@@ -339,14 +340,20 @@ class LiveFeedSyncManager {
     }
   }
 
-  public recordCombatLog(dmMessage: string, broadcast: boolean = true, playerMessage?: string) {
+  public recordCombatLog(
+    dmMessage: string,
+    broadcast: boolean = true,
+    playerMessage?: string,
+    isSecret?: boolean
+  ) {
     const feedItem: UnifiedFeedItem = {
       id: `combat-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       type: 'combat',
       sender: this.currentRoleIsGm ? 'Game Master' : this.currentName,
       isDm: this.currentRoleIsGm,
       message: dmMessage,
-      playerMessage: playerMessage || dmMessage,
+      playerMessage: isSecret ? undefined : (playerMessage !== undefined ? playerMessage : dmMessage),
+      isSecret: !!isSecret,
       timestamp: Date.now(),
     };
 

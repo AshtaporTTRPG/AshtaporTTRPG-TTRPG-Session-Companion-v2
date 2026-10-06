@@ -9,6 +9,7 @@ export interface CombatState {
   activeTurnIndex: number;
   round: number;
   combatStatus: 'setup' | 'active';
+  lastTurnChangeTime?: number;
   lastUpdated?: number;
 }
 

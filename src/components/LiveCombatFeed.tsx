@@ -516,9 +516,14 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
 
             // Combat action log (Damage, Healing, Conditions)
             if (evt.type === 'combat') {
+              // Completely suppress secret boss events on player screens until revealed
+              if (!isDm && (evt.isSecret || evt.playerMessage === undefined)) {
+                return null;
+              }
+
               const displayMessage = !isDm && evt.playerMessage ? evt.playerMessage : evt.message;
-              const isDamage = displayMessage.includes('took');
-              const isHeal = displayMessage.includes('healed');
+              const isDamage = displayMessage.includes('took') || displayMessage.includes('damage') || displayMessage.includes('hit');
+              const isHeal = displayMessage.includes('healed') || displayMessage.includes('healing');
 
               return (
                 <div

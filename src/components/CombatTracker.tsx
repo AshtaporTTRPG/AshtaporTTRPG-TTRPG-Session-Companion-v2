@@ -6,6 +6,7 @@ import {
   CustomCondition,
   isCombatantFoW,
   sortInitiativeStrictDescending,
+  getEffectiveAc,
 } from '../types/ttrpg';
 import { liveFeedSync, UnifiedFeedItem } from '../utils/liveFeedSync';
 import OBR from '@owlbear-rodeo/sdk';
@@ -47,7 +48,9 @@ interface CombatTrackerProps {
   playerName?: string;
 }
 
-const CONDITIONS_LIST: Condition[] = [
+const CONDITIONS_LIST: (Condition | string)[] = [
+  '+2 AC (Half Cover / Shield of Faith)',
+  '+5 AC (Shield Spell / Three-Quarters Cover)',
   'Concentration',
   'Blinded',
   'Charmed',
@@ -67,6 +70,8 @@ const CONDITIONS_LIST: Condition[] = [
 ];
 
 const getConditionBadgeStyle = (name: string): string => {
+  if (name.includes('+2 AC')) return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300 font-bold';
+  if (name.includes('+5 AC')) return 'bg-blue-950/90 border-blue-500/80 text-blue-300 font-bold';
   switch (name) {
     case 'Concentration':
       return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300';
@@ -218,6 +223,21 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   // Transient deletion tombstone set (ID -> expiration timestamp) to prevent double-delete resurrections
   const deletionTombstones = useRef<Map<string, number>>(new Map());
 
+  // Inflight turn change lock & desync rollback prevention
+  const [isTurnUpdating, setIsTurnUpdating] = useState<boolean>(false);
+  const lastTurnChangeTimeRef = useRef<number>((() => {
+    try {
+      const saved = localStorage.getItem('ttrpg_last_turn_change_time');
+      return saved ? parseInt(saved, 10) : 0;
+    } catch {
+      return 0;
+    }
+  })());
+  const localCombatantsRef = useRef<Combatant[]>(combatants);
+  useEffect(() => {
+    localCombatantsRef.current = combatants;
+  }, [combatants]);
+
   // Custom condition form state in combatant options menu
   const [conditionInput, setConditionInput] = useState<string>('');
   const [conditionIsSecret, setConditionIsSecret] = useState<boolean>(false);
@@ -233,12 +253,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return feed.filter((i) => i.type === 'combat' || i.type === 'turn').slice(-30);
   });
 
-  // Form states for Add Combatant
+  // Form states for Add Combatant (AC defaults to 10)
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<CombatantType>('player');
   const [newCustomLabel, setNewCustomLabel] = useState('');
   const [newInitiative, setNewInitiative] = useState(10);
-  const [newAc, setNewAc] = useState(14);
+  const [newAc, setNewAc] = useState(10);
   const [newHp, setNewHp] = useState(25);
   const [newTempHp, setNewTempHp] = useState(0);
   const [newHidden, setNewHidden] = useState(false);
@@ -249,7 +269,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [editType, setEditType] = useState<CombatantType>('player');
   const [editCustomLabel, setEditCustomLabel] = useState('');
   const [editInit, setEditInit] = useState(10);
-  const [editAc, setEditAc] = useState(14);
+  const [editAc, setEditAc] = useState(10);
   const [editHpMax, setEditHpMax] = useState(25);
   const [editHpCurr, setEditHpCurr] = useState(25);
   const [editTempHp, setEditTempHp] = useState(0);
@@ -324,15 +344,29 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           }
           if (Array.isArray(state.combatants)) {
             const filtered = state.combatants.filter((c) => !deletionTombstones.current.has(c.id));
-            setCombatants(sortInitiativeStrictDescending(filtered));
+            const merged = filtered.map((incoming) => {
+              const local = localCombatantsRef.current.find((l) => l.id === incoming.id);
+              if (local && (local.updatedAt || 0) > (incoming.updatedAt || 0)) {
+                return local;
+              }
+              return incoming;
+            });
+            setCombatants(sortInitiativeStrictDescending(merged));
           }
-          if (state.activeCombatantId !== undefined) {
-            setActiveCombatantId(state.activeCombatantId);
+          if (state.lastTurnChangeTime && state.lastTurnChangeTime < lastTurnChangeTimeRef.current) {
+            // Ignore turn rollback
+          } else {
+            if (state.lastTurnChangeTime) {
+              lastTurnChangeTimeRef.current = state.lastTurnChangeTime;
+            }
+            if (state.activeCombatantId !== undefined) {
+              setActiveCombatantId(state.activeCombatantId);
+            }
+            if (typeof state.activeTurnIndex === 'number') {
+              setActiveTurnIndex(state.activeTurnIndex);
+            }
+            if (typeof state.round === 'number') setRound(state.round);
           }
-          if (typeof state.activeTurnIndex === 'number') {
-            setActiveTurnIndex(state.activeTurnIndex);
-          }
-          if (typeof state.round === 'number') setRound(state.round);
           if (state.combatStatus) setCombatStatus(state.combatStatus);
         }
       })
@@ -351,15 +385,33 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         }
         if (Array.isArray(state.combatants)) {
           const filtered = state.combatants.filter((c) => !deletionTombstones.current.has(c.id));
-          setCombatants(sortInitiativeStrictDescending(filtered));
+          // Reject incoming combatant updates if the local combatant has a newer updatedAt timestamp
+          const merged = filtered.map((incoming) => {
+            const local = localCombatantsRef.current.find((l) => l.id === incoming.id);
+            if (local && (local.updatedAt || 0) > (incoming.updatedAt || 0)) {
+              return local;
+            }
+            return incoming;
+          });
+          setCombatants(sortInitiativeStrictDescending(merged));
         }
-        if (state.activeCombatantId !== undefined) {
-          setActiveCombatantId(state.activeCombatantId);
+
+        // Ignore turn rollbacks if incoming metadata has a lastTurnChangeTime older than the local timestamp
+        if (state.lastTurnChangeTime && state.lastTurnChangeTime < lastTurnChangeTimeRef.current) {
+          // ignore turn rollback
+        } else {
+          if (state.lastTurnChangeTime) {
+            lastTurnChangeTimeRef.current = state.lastTurnChangeTime;
+          }
+          if (state.activeCombatantId !== undefined) {
+            setActiveCombatantId(state.activeCombatantId);
+          }
+          if (typeof state.activeTurnIndex === 'number') {
+            setActiveTurnIndex(state.activeTurnIndex);
+          }
+          if (typeof state.round === 'number') setRound(state.round);
         }
-        if (typeof state.activeTurnIndex === 'number') {
-          setActiveTurnIndex(state.activeTurnIndex);
-        }
-        if (typeof state.round === 'number') setRound(state.round);
+
         if (state.combatStatus) setCombatStatus(state.combatStatus);
       }
     });
@@ -372,7 +424,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     updatedTurn: number,
     updatedRound: number,
     updatedActiveCombatantId?: string | null,
-    updatedCombatStatus?: 'setup' | 'active'
+    updatedCombatStatus?: 'setup' | 'active',
+    turnChangeTime?: number
   ) => {
     const statusToBroadcast = updatedCombatStatus || combatStatus;
     const updatedState: CombatState = {
@@ -382,6 +435,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
       round: updatedRound,
       combatStatus: statusToBroadcast,
+      lastTurnChangeTime: turnChangeTime ?? lastTurnChangeTimeRef.current,
       lastUpdated: Date.now(),
     };
 
@@ -397,11 +451,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   };
 
   // Turn management: NEXT TURN
-  const handleNextTurn = () => {
-    if (combatants.length === 0) return;
-    const sorted = [...combatants].sort(
-      (a, b) => b.initiative - a.initiative || a.id.localeCompare(b.id)
-    );
+  const handleNextTurn = async () => {
+    if (combatants.length === 0 || isTurnUpdating) return;
+    setIsTurnUpdating(true);
+    const now = Date.now();
+    lastTurnChangeTimeRef.current = now;
+    try {
+      localStorage.setItem('ttrpg_last_turn_change_time', now.toString());
+    } catch {}
+
+    const sorted = sortInitiativeStrictDescending(combatants);
 
     const currentIndex = activeCombatantId
       ? sorted.findIndex((c) => c.id === activeCombatantId)
@@ -441,21 +500,31 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         liveFeedSync.recordCombatLog(
           `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
           true,
-          `⚔️ Turn ${nextIndex + 1}/${sorted.length}: An unseen entity takes their turn... (Round ${nextRound})`
+          undefined,
+          true
         );
         setPlayerTurnAlert(null);
       }
     }
 
-    broadcastCombat(sorted, nextIndex, nextRound, nextActiveId, combatStatus);
+    try {
+      await broadcastCombat(sorted, nextIndex, nextRound, nextActiveId, combatStatus, now);
+    } finally {
+      setIsTurnUpdating(false);
+    }
   };
 
   // PREV TURN
-  const handlePrevTurn = () => {
-    if (combatants.length === 0) return;
-    const sorted = [...combatants].sort(
-      (a, b) => b.initiative - a.initiative || a.id.localeCompare(b.id)
-    );
+  const handlePrevTurn = async () => {
+    if (combatants.length === 0 || isTurnUpdating) return;
+    setIsTurnUpdating(true);
+    const now = Date.now();
+    lastTurnChangeTimeRef.current = now;
+    try {
+      localStorage.setItem('ttrpg_last_turn_change_time', now.toString());
+    } catch {}
+
+    const sorted = sortInitiativeStrictDescending(combatants);
 
     const currentIndex = activeCombatantId
       ? sorted.findIndex((c) => c.id === activeCombatantId)
@@ -481,7 +550,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
-    broadcastCombat(sorted, prevIndex, prevRound, prevActiveId, combatStatus);
+
+    try {
+      await broadcastCombat(sorted, prevIndex, prevRound, prevActiveId, combatStatus, now);
+    } finally {
+      setIsTurnUpdating(false);
+    }
   };
 
   // START COMBAT
@@ -586,8 +660,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleHpDelta = (combatantId: string, delta: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isBossOrMonster = target.type === 'boss' || target.type === 'monster';
+    const isEnemyOrCustom = target.type === 'boss' || target.type === 'monster' || target.type === 'custom';
     const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isSecret = target.isSecret || target.hidden;
     // Players can only edit PC & Ally; GM can edit all
     if (!isDm && !isPlayerOrAlly) return;
 
@@ -613,26 +688,41 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (isConcentrating(target)) {
         const dc = calculateConcentrationDC(damage);
         const dmMsg = `⚡ ${target.name} took ${damage} dmg while concentrating! DC ${dc} CON save required.`;
-        const pMsg = isCombatantFoW(target) ? `⚔️ ${target.name} took damage.` : dmMsg;
-        liveFeedSync.recordCombatLog(dmMsg, true, pMsg);
+        const pMsg = isSecret ? undefined : isEnemyOrCustom ? `⚔️ ${target.name} took damage.` : dmMsg;
+        liveFeedSync.recordCombatLog(dmMsg, true, pMsg, isSecret);
       }
 
       const logDm = `⚔️ ${target.name} took ${damage} damage (${currentHp}/${target.hpMax} HP${
         currentTemp > 0 ? `, +${currentTemp} THP` : ''
       })`;
-      const logP = isCombatantFoW(target) ? `⚔️ ${target.name} took damage.` : logDm;
-      liveFeedSync.recordCombatLog(logDm, true, logP);
+      let logP: string | undefined;
+      if (isSecret) {
+        logP = undefined;
+      } else if (isEnemyOrCustom) {
+        logP = `⚔️ ${target.name} took damage.`;
+      } else {
+        logP = logDm;
+      }
+      liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
     } else {
       // Healing: Healing never increases tempHp
       currentHp = Math.min(target.hpMax, currentHp + delta);
       const logDm = `💚 ${target.name} healed +${delta} HP (${currentHp}/${target.hpMax} HP)`;
-      const logP = isCombatantFoW(target) ? `💚 ${target.name} healed.` : logDm;
-      liveFeedSync.recordCombatLog(logDm, true, logP);
+      let logP: string | undefined;
+      if (isSecret) {
+        logP = undefined;
+      } else if (isEnemyOrCustom) {
+        logP = `💚 ${target.name} received healing.`;
+      } else {
+        logP = logDm;
+      }
+      liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
     }
 
+    const now = Date.now();
     const updated = combatants.map((c) =>
       c.id === combatantId
-        ? { ...c, hpCurrent: currentHp, hpTemp: currentTemp, tempHp: currentTemp }
+        ? { ...c, hpCurrent: currentHp, hpTemp: currentTemp, tempHp: currentTemp, updatedAt: now }
         : c
     );
     setCombatants(updated);
@@ -647,8 +737,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     if (!isDm && !isPlayerOrAlly) return;
 
     const val = Math.max(0, inlineThpVal);
+    const now = Date.now();
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, tempHp: val, hpTemp: val } : c
+      c.id === combatantId ? { ...c, tempHp: val, hpTemp: val, updatedAt: now } : c
     );
     setCombatants(updated);
     setInlineThpId(null);
@@ -678,9 +769,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const existingNormalized = target.conditions.map(normalizeCondition);
     const updatedConditions = [...existingNormalized, newCond];
+    const now = Date.now();
 
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, conditions: updatedConditions } : c
+      c.id === combatantId ? { ...c, conditions: updatedConditions, updatedAt: now } : c
     );
     setCombatants(updated);
     setConditionInput('');
@@ -707,9 +799,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const updatedConditions = existingNormalized.filter(
       (cond) => cond.id !== condIdOrName && cond.name !== condIdOrName
     );
+    const now = Date.now();
 
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, conditions: updatedConditions } : c
+      c.id === combatantId ? { ...c, conditions: updatedConditions, updatedAt: now } : c
     );
     setCombatants(updated);
 
@@ -720,6 +813,58 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // MANUAL COMBATANT REORDERING (GM Only)
+  const handleMoveCombatant = (combatantId: string, direction: -1 | 1) => {
+    if (!isDm || combatants.length <= 1) return;
+    const sorted = sortInitiativeStrictDescending(combatants);
+    const currentIndex = sorted.findIndex((c) => c.id === combatantId);
+    if (currentIndex === -1) return;
+    const targetIndex = currentIndex + direction;
+    if (targetIndex < 0 || targetIndex >= sorted.length) return;
+
+    // Ensure every combatant has an initial sortOrder based on index
+    sorted.forEach((c, idx) => {
+      if (c.sortOrder === undefined) c.sortOrder = idx;
+    });
+
+    const curr = sorted[currentIndex];
+    const target = sorted[targetIndex];
+
+    if (curr.initiative === target.initiative) {
+      const tempOrder = curr.sortOrder ?? currentIndex;
+      curr.sortOrder = target.sortOrder ?? targetIndex;
+      target.sortOrder = tempOrder;
+      if (direction === -1 && (curr.sortOrder ?? 0) >= (target.sortOrder ?? 0)) {
+        curr.sortOrder = (target.sortOrder ?? 0) - 1;
+      } else if (direction === 1 && (curr.sortOrder ?? 0) <= (target.sortOrder ?? 0)) {
+        curr.sortOrder = (target.sortOrder ?? 0) + 1;
+      }
+    } else {
+      // Swap initiatives and sortOrder
+      const tempInit = curr.initiative;
+      const tempOrder = curr.sortOrder ?? currentIndex;
+      curr.initiative = target.initiative;
+      curr.sortOrder = target.sortOrder ?? targetIndex;
+      target.initiative = tempInit;
+      target.sortOrder = tempOrder;
+    }
+
+    const now = Date.now();
+    curr.updatedAt = now;
+    target.updatedAt = now;
+
+    const reordered = sortInitiativeStrictDescending(sorted);
+    setCombatants(reordered);
+
+    let targetActiveIdx = activeTurnIndex;
+    if (activeCombatantId) {
+      const foundIdx = reordered.findIndex((c) => c.id === activeCombatantId);
+      if (foundIdx !== -1) targetActiveIdx = foundIdx;
+    }
+    setActiveTurnIndex(targetActiveIdx);
+    broadcastCombat(reordered, targetActiveIdx, round, activeCombatantId, combatStatus);
   };
 
   // TOGGLE VISIBILITY (DM Only)
@@ -789,7 +934,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setEditType(c.type);
     setEditCustomLabel(c.customRoleLabel || '');
     setEditInit(c.initiative);
-    setEditAc(c.armorClass);
+    setEditAc(c.ac ?? c.armorClass ?? 10);
     setEditHpMax(c.hpMax);
     setEditHpCurr(c.hpCurrent);
     setEditTempHp(c.tempHp ?? c.hpTemp ?? 0);
@@ -817,10 +962,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             customRoleLabel: allowedType === 'custom' ? editCustomLabel.trim() : undefined,
             initiative: editInit,
             armorClass: editAc,
+            ac: editAc,
             hpMax: editHpMax,
             hpCurrent: Math.min(editHpCurr, editHpMax),
             hpTemp: Math.max(0, editTempHp),
             tempHp: Math.max(0, editTempHp),
+            updatedAt: Date.now(),
           }
         : c
     );
@@ -861,6 +1008,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         allowedType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined,
       initiative: newInitiative,
       armorClass: newAc,
+      ac: newAc,
       hpCurrent: newHp,
       hpMax: newHp,
       hpTemp: Math.max(0, newTempHp),
@@ -869,6 +1017,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       hidden: isHiddenFromPlayers,
       fogOfWar: isDm && (isBossOrMonsterOrCustom || newHidden || newIsSecret),
       isSecret: isDm && newIsSecret,
+      sortOrder: combatants.length,
+      updatedAt: Date.now(),
     };
 
     const updated = sortInitiativeStrictDescending([...combatants, newCombatant]);
@@ -902,7 +1052,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setNewType('player');
     setNewCustomLabel('');
     setNewInitiative(10);
-    setNewAc(14);
+    setNewAc(10);
     setNewHp(25);
     setNewTempHp(0);
     setNewHidden(false);
@@ -964,7 +1114,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           <button
             type="button"
             onClick={handlePrevTurn}
-            disabled={combatants.length === 0}
+            disabled={combatants.length === 0 || isTurnUpdating}
             className="h-7 w-7 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition disabled:opacity-40 cursor-pointer"
             title="Previous Turn"
           >
@@ -974,7 +1124,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           <button
             type="button"
             onClick={handleNextTurn}
-            disabled={combatants.length === 0}
+            disabled={combatants.length === 0 || isTurnUpdating}
             className="h-7 px-2.5 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 transition shadow cursor-pointer disabled:opacity-40"
             title="Advance to Next Turn"
           >
@@ -1021,12 +1171,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             const isActive = activeCombatantId
               ? c.id === activeCombatantId
               : index === activeTurnIndex;
-            const isBossOrMonster = c.type === 'boss' || c.type === 'monster';
-            const isFoW = isCombatantFoW(c) || isBossOrMonster;
+            const isEnemyOrCustom = c.type === 'boss' || c.type === 'monster' || c.type === 'custom';
             const isPlayerOrAlly = c.type === 'player' || c.type === 'ally';
             // Permission rule: players can only edit PC & Ally; GM can edit all
             const canEdit = isDm || isPlayerOrAlly;
             const health = getHealthThreshold(c.hpCurrent, c.hpMax);
+            const effectiveAcInfo = getEffectiveAc(c);
             const visibleConditions = c.conditions
               .map(normalizeCondition)
               .filter((cond) => isDm || !cond.isSecret);
@@ -1053,7 +1203,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                   {c.initiative}
                 </button>
 
-                {/* COL 2: Name, Type Badge, Inline Condition Badges */}
+                {/* COL 2: Name, AC Badge, Type Badge, Health Badge, Inline Condition Badges */}
                 <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span
@@ -1065,8 +1215,31 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                       {c.name}
                     </span>
 
+                    {/* Inline AC Shield Badge (Public to players & DM, directly adjacent to name) */}
+                    <span
+                      className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-cyan-300 border border-slate-700/80 flex items-center gap-1 shrink-0 shadow-sm"
+                      title={`Armor Class: ${effectiveAcInfo.effectiveAc}${effectiveAcInfo.bonus > 0 ? ` (Base ${c.ac ?? c.armorClass ?? 10} + ${effectiveAcInfo.bonus})` : ''}`}
+                    >
+                      <span>🛡️</span>
+                      <span>
+                        {effectiveAcInfo.bonus > 0
+                          ? `${effectiveAcInfo.effectiveAc} (+${effectiveAcInfo.bonus})`
+                          : `${effectiveAcInfo.effectiveAc} AC`}
+                      </span>
+                    </span>
+
                     {/* Type Badge: PC / Ally / Monster / Boss / Custom */}
                     {getTypeBadge(c.type, c.customRoleLabel)}
+
+                    {/* Dynamic Health Threshold Badge: For PC and Ally: display on all clients. For Boss, Monster, and Custom: GM View renders normally, Player View completely hides it */}
+                    {(isPlayerOrAlly || isDm) && (
+                      <span
+                        className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border ${health.badgeClass}`}
+                        title={`Health Status: ${health.status}`}
+                      >
+                        {health.badgeLabel}
+                      </span>
+                    )}
 
                     {/* FoW / Secret marker for DM */}
                     {isDm && (c.hidden || c.isSecret) && (
@@ -1122,10 +1295,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                   )}
                 </div>
 
-                {/* COL 3: Inline HP Controls with FoW Masking for Boss/Monster */}
+                {/* COL 3: Inline HP Controls with FoW Masking for Boss/Monster/Custom */}
                 <div className="flex items-center gap-1 shrink-0">
-                  {!isDm && isBossOrMonster ? (
-                    /* Boss and Monster in Player view: mask all HP (???/???), Temp HP, and AC */
+                  {!isDm && isEnemyOrCustom ? (
+                    /* Boss, Monster, and Custom in Player view: mask all HP (???/???) */
                     <span
                       className="text-[11px] font-mono font-bold text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 tabular-nums shadow-inner"
                       title="Enemy HP masked by Fog of War"
@@ -1237,8 +1410,32 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                   )}
                 </div>
 
-                {/* COL 4: Options / Conditions Menu Toggle */}
-                <div className="shrink-0">
+                {/* COL 4: GM Manual Reordering (▲ / ▼) & Options Menu Toggle */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* GM Manual Reordering: Up (▲) and Down (▼) */}
+                  {isDm && (
+                    <div className="flex flex-col gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        disabled={index === 0}
+                        onClick={() => handleMoveCombatant(c.id, -1)}
+                        className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
+                        title="Move Up in Priority (▲)"
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={index === visibleCombatants.length - 1}
+                        onClick={() => handleMoveCombatant(c.id, 1)}
+                        className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
+                        title="Move Down in Priority (▼)"
+                      >
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => {
@@ -1284,14 +1481,18 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             </span>
 
             {/* Collapsed 1-line latest log preview */}
-            {!isCombatFeedExpanded && latestCombatEvent && (() => {
-              const isSecret = latestCombatEvent.isSecretRoll || latestCombatEvent.rollDetails?.visibility === 'gm_only';
+            {!isCombatFeedExpanded && (() => {
+              const visibleEvent = [...combatFeedItems].reverse().find(
+                (evt) => isDm || (!evt.isSecret && evt.playerMessage !== undefined)
+              );
+              if (!visibleEvent) return null;
+              const isSecret = visibleEvent.isSecretRoll || visibleEvent.rollDetails?.visibility === 'gm_only';
               const currentUserId = liveFeedSync.getPlayerId();
-              const isRoller = (latestCombatEvent.rollerId && latestCombatEvent.rollerId === currentUserId) || latestCombatEvent.sender === rollerIdentity;
+              const isRoller = (visibleEvent.rollerId && visibleEvent.rollerId === currentUserId) || visibleEvent.sender === rollerIdentity;
               const isAuthorized = isDm || isRoller;
               const previewMsg = (isSecret && !isAuthorized)
-                ? `${latestCombatEvent.rollerName || latestCombatEvent.sender} made a secret roll to the DM 🔒`
-                : (!isDm && latestCombatEvent.playerMessage ? latestCombatEvent.playerMessage : latestCombatEvent.message);
+                ? `${visibleEvent.rollerName || visibleEvent.sender} made a secret roll to the DM 🔒`
+                : (!isDm && visibleEvent.playerMessage ? visibleEvent.playerMessage : visibleEvent.message);
 
               return (
                 <span className="text-[10px] text-slate-400 truncate max-w-[200px] ml-1 opacity-80">
@@ -1330,6 +1531,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
               </div>
             ) : (
               combatFeedItems.map((evt) => {
+                if (!isDm && (evt.isSecret || evt.playerMessage === undefined)) {
+                  return null;
+                }
                 const time = new Date(evt.timestamp).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',
