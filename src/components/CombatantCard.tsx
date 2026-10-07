@@ -18,7 +18,9 @@ import {
   Check,
   Cloud,
   Dices,
+  Crosshair,
 } from 'lucide-react';
+import OBR from '@owlbear-rodeo/sdk';
 
 interface CombatantCardProps {
   combatant: Combatant;
@@ -98,6 +100,24 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
   // Dynamic Health Threshold status
   const healthInfo = getHealthThreshold(combatant.hpCurrent, combatant.hpMax);
   const effectiveAcInfo = getEffectiveAc(combatant);
+
+  const handleFocusToken = async (tokenId?: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!tokenId || !OBR.isReady) return;
+    try {
+      const items = await OBR.scene.items.getItems([tokenId]);
+      if (items && items.length > 0) {
+        const token = items[0];
+        if (token && token.position) {
+          const scale = await OBR.viewport.getScale().catch(() => 1);
+          await OBR.viewport.animateTo({ position: token.position, scale });
+          await OBR.player.select([tokenId]);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not focus token on map:', err);
+    }
+  };
 
   // Quick Damage (-1, -5) - subtracts from Temp HP first, then Current HP
   const handleQuickDamage = (amount: number) => {
@@ -345,6 +365,18 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                 >
                   {combatant.name}
                 </h4>
+
+                {/* Token Focus Crosshair */}
+                {combatant.tokenId && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleFocusToken(combatant.tokenId, e)}
+                    title="Focus Token on Map"
+                    className="p-0.5 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer shrink-0"
+                  >
+                    <Crosshair className="w-3.5 h-3.5" />
+                  </button>
+                )}
 
                 {/* Inline AC Shield Badge (Public to everyone, directly adjacent to name) */}
                 <span

@@ -21,6 +21,13 @@ export interface NoteItem {
   authorName?: string;
 }
 
+export interface NotesExportPayload {
+  version: string;
+  exportedAt: string;
+  source: 'ashtapor-session-companion';
+  notes: NoteItem[];
+}
+
 export interface DmSecretNote {
   id: string;
   title: string;

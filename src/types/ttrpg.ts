@@ -50,6 +50,7 @@ export interface Combatant {
   isSecret?: boolean; // Secret Boss / NPC marker (completely hidden from player initiative until revealed)
   sortOrder?: number; // GM manual sorting priority order
   updatedAt?: number; // State modification timestamp to prevent desync
+  tokenId?: string; // Linked Owlbear Rodeo scene token ID for lightweight token focus
 }
 
 /**

@@ -24,7 +24,7 @@ import {
 import { NoteCardList } from './NoteCardList';
 import { DmNotesVault } from './DmNotesVault';
 
-// Re-export for App.tsx backward compatibility
+// Re-export for App.tsx and external consumers
 export type { BroadcastNotePayload, NotesScope } from '../types/notes';
 export { OBR_BROADCAST_NOTE_KEY, OBR_TABLE_NOTES_KEY } from '../types/notes';
 
@@ -136,7 +136,11 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
 /**
  * Migration helper: converts legacy data (string, old object, or array) into NoteItem[]
  */
-function migrateToNoteCards(raw: any, fallbackDefaults: NoteItem[], defaultAuthor?: { role: 'GM' | 'PLAYER'; name: string }): NoteItem[] {
+function migrateToNoteCards(
+  raw: any,
+  fallbackDefaults: NoteItem[],
+  defaultAuthor?: { role: 'GM' | 'PLAYER'; name: string }
+): NoteItem[] {
   if (!raw) return fallbackDefaults;
 
   // Case 1: Raw string note (from legacy single textarea)
@@ -162,7 +166,6 @@ function migrateToNoteCards(raw: any, fallbackDefaults: NoteItem[], defaultAutho
   if (Array.isArray(raw)) {
     if (raw.length === 0) return fallbackDefaults;
     return raw.map((item, index) => {
-      // Handle raw string items in an array
       if (typeof item === 'string') {
         return {
           id: `legacy-${index + 1}`,
@@ -257,19 +260,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   // 2. "My Notes" State (Strictly Local)
   const [myNotes, setMyNotes] = useState<NoteItem[]>(() => {
     try {
-      // 1. Check primary key: ashtapor_my_notes
       const saved = localStorage.getItem(LOCAL_MY_NOTES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         return migrateToNoteCards(parsed, DEFAULT_MY_NOTES);
       }
 
-      // 2. Fallback check: legacy player notes key
       const legacySaved = localStorage.getItem(LOCAL_LEGACY_PLAYER_NOTES_KEY);
       if (legacySaved) {
         const parsed = JSON.parse(legacySaved);
         const migrated = migrateToNoteCards(parsed, DEFAULT_MY_NOTES);
-        // Save into new key
         try {
           localStorage.setItem(LOCAL_MY_NOTES_KEY, JSON.stringify(migrated));
         } catch {}
@@ -347,6 +347,15 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     saveMyNotes(updated);
   };
 
+  // Safe Merge Import for My Notes: matching IDs update existing notes; new IDs append
+  const handleImportMyNotes = (imported: NoteItem[]) => {
+    const mergedMap = new Map<string, NoteItem>();
+    myNotes.forEach((n) => mergedMap.set(n.id, n));
+    imported.forEach((n) => mergedMap.set(n.id, n));
+    const merged = Array.from(mergedMap.values());
+    saveMyNotes(merged);
+  };
+
   // Sync Table Notes with OBR Room Metadata on Mount & Subscription
   useEffect(() => {
     if (!OBR.isReady) return;
@@ -354,7 +363,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     OBR.room
       .getMetadata()
       .then((meta) => {
-        // Try dedicated namespace first, fallback to legacy
         const remoteData = meta[OBR_TABLE_NOTES_KEY] ?? meta[OBR_LEGACY_TABLE_NOTES_KEY];
         if (remoteData !== undefined && remoteData !== null) {
           const loaded = migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
@@ -402,7 +410,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             [OBR_TABLE_NOTES_KEY]: notesToSync,
           });
         } else {
-          // Preview fallback
           window.dispatchEvent(
             new CustomEvent('ashtapor-table-notes-sync', { detail: notesToSync })
           );
@@ -453,7 +460,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       : [note, ...dmNotes];
     saveDmNotes(updated);
 
-    // If note is revealed, update broadcast payload
     if (note.isRevealed) {
       const payload: BroadcastNotePayload = {
         id: note.id,
@@ -492,7 +498,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       if (n.id === note.id) {
         return { ...n, isRevealed: nextRevealed, updatedAt: Date.now() };
       }
-      // Unreveal any other revealed note
       if (nextRevealed && n.isRevealed) {
         return { ...n, isRevealed: false };
       }
@@ -598,13 +603,15 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         </div>
       </div>
 
-      {/* 2. SCOPE 1: "MY NOTES" (MODULAR CARD & ACCORDION SYSTEM) */}
+      {/* 2. SCOPE 1: "MY NOTES" (LOCAL SCRATCHPAD WITH JSON IMPORT/EXPORT) */}
       {scope === 'my-notes' && (
         <NoteCardList
           notes={myNotes}
           onSaveNote={handleSaveMyNote}
           onDeleteNote={handleDeleteMyNote}
           onTogglePin={handleTogglePinMyNote}
+          onImportNotes={handleImportMyNotes}
+          allowImportExport={true}
           currentRole={currentRole}
           currentAuthorName={authorName}
           emptyMessage="No personal notes yet."
@@ -623,13 +630,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         />
       )}
 
-      {/* 3. SCOPE 2: "TABLE NOTES" (MODULAR COLLABORATIVE CARDS VIA OBR ROOM METADATA) */}
+      {/* 3. SCOPE 2: "TABLE NOTES" (SHARED COLLABORATIVE CARDS VIA OBR ROOM METADATA) */}
       {scope === 'table-notes' && (
         <NoteCardList
           notes={tableNotes}
           onSaveNote={handleSaveTableNote}
           onDeleteNote={handleDeleteTableNote}
           onTogglePin={handleTogglePinTableNote}
+          allowImportExport={false}
           currentRole={currentRole}
           currentAuthorName={authorName}
           emptyMessage="No table notes shared yet."

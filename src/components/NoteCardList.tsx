@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -7,21 +7,24 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
+  ChevronsDownUp,
+  Download,
+  Upload,
   X,
   FileText,
   Copy,
   Check,
-  Tag,
-  Clock,
-  Sparkles,
 } from 'lucide-react';
-import { NoteItem, NoteCategory, NOTE_CATEGORIES } from '../types/notes';
+import { NoteItem, NoteCategory, NOTE_CATEGORIES, NotesExportPayload } from '../types/notes';
 
 interface NoteCardListProps {
   notes: NoteItem[];
   onSaveNote: (note: NoteItem) => void;
   onDeleteNote: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onImportNotes?: (importedNotes: NoteItem[]) => void;
+  allowImportExport?: boolean;
   currentRole: 'GM' | 'PLAYER';
   currentAuthorName: string;
   emptyMessage?: string;
@@ -29,45 +32,39 @@ interface NoteCardListProps {
   headerInfo?: React.ReactNode;
 }
 
-const CATEGORY_COLORS: Record<
+export const CATEGORY_STYLES: Record<
   NoteCategory,
-  { badge: string; border: string; text: string; bg: string }
+  { borderL: string; badge: string; text: string }
 > = {
-  General: {
-    badge: 'bg-slate-800 text-slate-300 border-slate-700',
-    border: 'border-slate-800',
-    text: 'text-slate-300',
-    bg: 'bg-slate-900/60',
-  },
   NPC: {
-    badge: 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60',
-    border: 'border-cyan-800/40',
-    text: 'text-cyan-300',
-    bg: 'bg-cyan-950/20',
+    borderL: 'border-l-amber-500',
+    badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/30',
+    text: 'text-amber-400',
   },
   Quest: {
-    badge: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
-    border: 'border-amber-800/40',
-    text: 'text-amber-300',
-    bg: 'bg-amber-950/20',
-  },
-  Loot: {
-    badge: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-    border: 'border-emerald-800/40',
-    text: 'text-emerald-300',
-    bg: 'bg-emerald-950/20',
+    borderL: 'border-l-sky-500',
+    badge: 'bg-sky-500/10 text-sky-400 border border-sky-500/30',
+    text: 'text-sky-400',
   },
   Combat: {
-    badge: 'bg-rose-950/80 text-rose-300 border-rose-700/60',
-    border: 'border-rose-800/40',
-    text: 'text-rose-300',
-    bg: 'bg-rose-950/20',
+    borderL: 'border-l-rose-500',
+    badge: 'bg-rose-500/10 text-rose-400 border border-rose-500/30',
+    text: 'text-rose-400',
+  },
+  Loot: {
+    borderL: 'border-l-emerald-500',
+    badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
+    text: 'text-emerald-400',
   },
   Location: {
-    badge: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
-    border: 'border-purple-800/40',
-    text: 'text-purple-300',
-    bg: 'bg-purple-950/20',
+    borderL: 'border-l-purple-500',
+    badge: 'bg-purple-500/10 text-purple-400 border border-purple-500/30',
+    text: 'text-purple-400',
+  },
+  General: {
+    borderL: 'border-l-slate-500',
+    badge: 'bg-slate-500/10 text-slate-400 border border-slate-500/30',
+    text: 'text-slate-400',
   },
 };
 
@@ -76,6 +73,8 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   onSaveNote,
   onDeleteNote,
   onTogglePin,
+  onImportNotes,
+  allowImportExport = false,
   currentRole,
   currentAuthorName,
   emptyMessage = 'No notes found.',
@@ -84,7 +83,12 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [collapsedNotes, setCollapsedNotes] = useState<Record<string, boolean>>({});
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    return new Set(notes.map((n) => n.id));
+  });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteItem | null>(null);
 
@@ -95,12 +99,125 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   const [formIsPinned, setFormIsPinned] = useState(false);
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
 
-  const toggleCollapse = (id: string, e?: React.MouseEvent) => {
+  // Toggle single accordion note
+  const toggleExpand = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    setCollapsedNotes((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Expand All notes
+  const handleExpandAll = () => {
+    setExpandedIds(new Set(notes.map((n) => n.id)));
+  };
+
+  // Collapse All notes
+  const handleCollapseAll = () => {
+    setExpandedIds(new Set());
+  };
+
+  // Export Notes to JSON: ashtapor-notes-YYYY-MM-DD.json
+  const handleExportJSON = () => {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const fileName = `ashtapor-notes-${dateStr}.json`;
+    const payload: NotesExportPayload = {
+      version: '2.0.6',
+      exportedAt: now.toISOString(),
+      source: 'ashtapor-session-companion',
+      notes,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Trigger hidden file input for JSON Import
+  const handleTriggerImport = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Handle JSON Import file selection and safe merge validation
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      let rawNotes: any[] = [];
+      if (Array.isArray(parsed)) {
+        rawNotes = parsed;
+      } else if (parsed && Array.isArray(parsed.notes)) {
+        rawNotes = parsed.notes;
+      } else if (parsed && typeof parsed === 'object') {
+        rawNotes = Object.values(parsed);
+      }
+
+      if (!Array.isArray(rawNotes) || rawNotes.length === 0) {
+        alert('No valid notes found in the selected JSON file.');
+        return;
+      }
+
+      const validList: NoteItem[] = [];
+      for (const item of rawNotes) {
+        if (item && (typeof item.title === 'string' || typeof item.content === 'string')) {
+          const categoryVal =
+            item.category && NOTE_CATEGORIES.includes(item.category)
+              ? item.category
+              : 'General';
+          validList.push({
+            id: item.id || `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            title: (item.title || 'Untitled Note').trim(),
+            category: categoryVal,
+            content: typeof item.content === 'string' ? item.content : '',
+            isPinned: !!item.isPinned,
+            updatedAt: item.updatedAt || new Date().toISOString(),
+            createdAt: item.createdAt || new Date().toISOString(),
+            authorRole: item.authorRole,
+            authorName: item.authorName,
+          });
+        }
+      }
+
+      if (validList.length === 0) {
+        alert('The selected JSON file does not contain compatible note data.');
+        return;
+      }
+
+      if (onImportNotes) {
+        onImportNotes(validList);
+        // Expand newly imported notes
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          validList.forEach((n) => next.add(n.id));
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to import JSON file:', err);
+      alert('Unable to parse the selected file. Please verify it is valid JSON.');
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleOpenCreate = () => {
@@ -126,7 +243,11 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     e.preventDefault();
     if (!formTitle.trim() || !formContent.trim()) return;
 
-    const id = editingNote?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    const id =
+      editingNote?.id ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
 
     const updatedNote: NoteItem = {
       id,
@@ -141,6 +262,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     };
 
     onSaveNote(updatedNote);
+    setExpandedIds((prev) => new Set(prev).add(id));
     setIsEditorOpen(false);
     setEditingNote(null);
     setFormTitle('');
@@ -156,7 +278,9 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     setTimeout(() => setCopiedNoteId(null), 1500);
   };
 
-  // Filter and Sort Notes
+  // Filter and Sort Notes:
+  // Group 1: Notes where isPinned === true, sorted alphabetically by title (localeCompare, case-insensitive)
+  // Group 2: All unpinned notes, sorted alphabetically by title (localeCompare, case-insensitive)
   const filteredAndSortedNotes = useMemo(() => {
     return [...notes]
       .filter((note) => {
@@ -173,14 +297,13 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         return inTitle || inContent || inCategory || inAuthor;
       })
       .sort((a, b) => {
-        // Pinned notes sort to the top
-        if (a.isPinned && !b.isPinned) return -1;
-        if (!a.isPinned && b.isPinned) return 1;
+        const aPinned = !!a.isPinned;
+        const bPinned = !!b.isPinned;
 
-        // Secondary: newest updatedAt first
-        const timeA = typeof a.updatedAt === 'number' ? a.updatedAt : new Date(a.updatedAt || 0).getTime();
-        const timeB = typeof b.updatedAt === 'number' ? b.updatedAt : new Date(b.updatedAt || 0).getTime();
-        return timeB - timeA;
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+
+        return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
       });
   }, [notes, selectedCategory, searchQuery]);
 
@@ -188,13 +311,23 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2">
+      {/* Hidden File Input for JSON Import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       {/* Optional Top Header Info (e.g. Sync status or room banner) */}
       {headerInfo && <div className="shrink-0">{headerInfo}</div>}
 
       {/* Top Utility Bar */}
-      <div className="shrink-0 flex flex-col gap-2 p-2 bg-slate-900/90 border border-slate-800 rounded-xl shadow-sm">
-        {/* Row 1: Search Input & + New Note Button */}
+      <div className="shrink-0 flex flex-col gap-1.5 p-2 bg-slate-900/90 border border-slate-800 rounded-xl shadow-sm">
+        {/* Row 1: Search Input & Action Icons (Expand All, Collapse All, Export, Import, + New Note) */}
         <div className="flex items-center gap-1.5">
+          {/* Search Input Container */}
           <div className="relative flex-1 min-w-0">
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
@@ -208,7 +341,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
                 title="Clear search"
               >
                 <X className="w-3.5 h-3.5" />
@@ -216,15 +349,64 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
-            title="Create a new note"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>+ New Note</span>
-          </button>
+          {/* Action Icons Bar: Compact Icon Buttons with Native Title Tooltips */}
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Expand All Notes */}
+            <button
+              type="button"
+              onClick={handleExpandAll}
+              title="Expand All Notes"
+              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+            >
+              <ChevronsUpDown className="w-4 h-4" />
+            </button>
+
+            {/* Collapse All Notes */}
+            <button
+              type="button"
+              onClick={handleCollapseAll}
+              title="Collapse All Notes"
+              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+            >
+              <ChevronsDownUp className="w-4 h-4" />
+            </button>
+
+            {/* JSON Export Button */}
+            {allowImportExport && (
+              <button
+                type="button"
+                onClick={handleExportJSON}
+                title="Export Notes as JSON"
+                className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* JSON Import Button */}
+            {allowImportExport && (
+              <button
+                type="button"
+                onClick={handleTriggerImport}
+                title="Import Notes from JSON"
+                className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* + New Note Button */}
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
+              title="Create a new note"
+            >
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span className="hidden sm:inline">+ New Note</span>
+              <span className="sm:hidden">New</span>
+            </button>
+          </div>
         </div>
 
         {/* Row 2: Category Filter Pills */}
@@ -263,7 +445,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                   setSearchQuery('');
                   setSelectedCategory('All');
                 }}
-                className="mt-2 text-xs text-amber-400 hover:underline"
+                className="mt-2 text-xs text-amber-400 hover:underline cursor-pointer"
               >
                 Reset filters
               </button>
@@ -271,9 +453,9 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
           </div>
         ) : (
           filteredAndSortedNotes.map((note) => {
-            const isCollapsed = !!collapsedNotes[note.id];
+            const isExpanded = expandedIds.has(note.id);
             const cat = note.category || 'General';
-            const catStyle = CATEGORY_COLORS[cat] || CATEGORY_COLORS.General;
+            const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
             let formattedDate = '';
             try {
@@ -292,7 +474,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             return (
               <div
                 key={note.id}
-                className={`rounded-xl border transition-all flex flex-col ${
+                className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition-all flex flex-col ${
                   note.isPinned
                     ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-400/30'
                     : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
@@ -301,21 +483,21 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                 {/* Card Header Row: Accordion toggle, Pin, Title flex-1 min-w-0 truncate, Category Pill, Actions */}
                 <div
                   className="p-2.5 flex items-center justify-between gap-1.5 cursor-pointer select-none"
-                  onClick={() => toggleCollapse(note.id)}
+                  onClick={() => toggleExpand(note.id)}
                 >
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     {/* Accordion Chevron */}
                     <button
                       type="button"
-                      onClick={(e) => toggleCollapse(note.id, e)}
+                      onClick={(e) => toggleExpand(note.id, e)}
                       className="w-5 h-5 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-300 flex items-center justify-center shrink-0 transition"
-                      title={isCollapsed ? 'Expand note' : 'Collapse note'}
-                      aria-label={isCollapsed ? 'Expand note' : 'Collapse note'}
+                      title={isExpanded ? 'Collapse note' : 'Expand note'}
+                      aria-label={isExpanded ? 'Collapse note' : 'Expand note'}
                     >
-                      {isCollapsed ? (
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      ) : (
+                      {isExpanded ? (
                         <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
                       )}
                     </button>
 
@@ -345,7 +527,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                       {note.title}
                     </h4>
 
-                    {/* Category Pill */}
+                    {/* Category Pill with designated badge colors */}
                     <span
                       className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider shrink-0 ${catStyle.badge}`}
                     >
@@ -399,7 +581,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                 </div>
 
                 {/* Expanded Content View */}
-                {!isCollapsed && (
+                {isExpanded && (
                   <div className="px-2.5 pb-2.5 pt-1 space-y-2 border-t border-slate-800/70">
                     <div
                       onClick={(e) => handleOpenEdit(note, e)}
@@ -422,7 +604,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleCopy(note, e)}
-                        className="text-slate-400 hover:text-amber-300 flex items-center gap-1 transition"
+                        className="text-slate-400 hover:text-amber-300 flex items-center gap-1 transition cursor-pointer"
                         title="Copy note content"
                       >
                         {copiedNoteId === note.id ? (
@@ -458,7 +640,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               <button
                 type="button"
                 onClick={() => setIsEditorOpen(false)}
-                className="text-slate-400 hover:text-slate-200"
+                className="text-slate-400 hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -504,7 +686,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                       type="checkbox"
                       checked={formIsPinned}
                       onChange={(e) => setFormIsPinned(e.target.checked)}
-                      className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 bg-slate-950"
+                      className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 bg-slate-950 cursor-pointer"
                     />
                     <span className="text-[11px] font-medium flex items-center gap-1">
                       <Pin className="w-3 h-3 text-amber-400" />
@@ -532,13 +714,13 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsEditorOpen(false)}
-                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 shadow"
+                  className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 shadow cursor-pointer"
                 >
                   {editingNote ? 'Save Changes' : 'Create Note'}
                 </button>
