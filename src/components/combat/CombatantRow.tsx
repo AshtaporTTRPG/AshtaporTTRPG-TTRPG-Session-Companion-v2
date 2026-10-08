@@ -7,11 +7,9 @@ import {
   getEffectiveAc,
 } from '../../types/ttrpg';
 import { getHealthThreshold } from '../../utils/combatHealth';
-import { isConcentrating } from '../../utils/concentration';
-import OBR from '@owlbear-rodeo/sdk';
+import { isConcentrating, calculateConcentrationDC } from '../../utils/concentration';
 import {
   Heart,
-  Crosshair,
   MoreVertical,
   ChevronUp,
   ChevronDown,
@@ -158,7 +156,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   onMoveCombatant,
   onHpDelta,
   onUpdateMaxHp,
-  onUpdateTokenId,
   onSaveThp,
   onRemoveCondition,
   concentrationAlert,
@@ -193,27 +190,26 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     .map(normalizeCondition)
     .filter((cond) => isDm || !cond.isSecret);
 
-  // Crosshair / Token Focus State
-  const [tokenStatusTooltip, setTokenStatusTooltip] = useState<string | null>(null);
-  const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
   // Quick HP Popover State
   const [isHpPopoverOpen, setIsHpPopoverOpen] = useState<boolean>(false);
-  const [quickHpAmount, setQuickHpAmount] = useState<string>('');
-  const [draftMaxHp, setDraftMaxHp] = useState<number>(combatant.hpMax);
+  const [damageAmount, setDamageAmount] = useState<string>('');
+  const [healAmount, setHealAmount] = useState<string>('');
+  const [maxHpInput, setMaxHpInput] = useState<string>(combatant.hpMax.toString());
   const hpPopoverRef = useRef<HTMLDivElement>(null);
+  const hpButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Concentration DC Alert state (auto-dismisses after 6s)
+  const [localConcentrationAlert, setLocalConcentrationAlert] = useState<{
+    dc: number;
+    expiresAt: number;
+  } | null>(null);
+
+  const activeConcentrationAlert = localConcentrationAlert || concentrationAlert;
 
   // Keep draft max HP synced with props
   useEffect(() => {
-    setDraftMaxHp(combatant.hpMax);
+    setMaxHpInput(combatant.hpMax.toString());
   }, [combatant.hpMax]);
-
-  // Clean up tooltip timeout
-  useEffect(() => {
-    return () => {
-      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-    };
-  }, []);
 
   // Quick HP Popover Escape & Click-Outside Handlers
   useEffect(() => {
@@ -226,7 +222,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     };
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (hpPopoverRef.current && !hpPopoverRef.current.contains(e.target as Node)) {
+      if (
+        hpPopoverRef.current &&
+        !hpPopoverRef.current.contains(e.target as Node) &&
+        hpButtonRef.current &&
+        !hpButtonRef.current.contains(e.target as Node)
+      ) {
         setIsHpPopoverOpen(false);
       }
     };
@@ -239,99 +240,59 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     };
   }, [isHpPopoverOpen]);
 
-  // Dedicated Tooltip Display
-  const showTooltip = (msg: string) => {
-    if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-    setTokenStatusTooltip(msg);
-    tooltipTimeoutRef.current = setTimeout(() => {
-      setTokenStatusTooltip(null);
-    }, 2000);
-  };
-
-  // Crosshair / Map Focus Bug Fix:
-  // 1. Look up item by ID: getItems([combatant.tokenId])
-  // 2. Name Fallback: If not found or tokenId is missing, match by name from scene items
-  // 3. Target Found: Persist tokenId, animateTo position, select token
-  // 4. Target Not Found: NEVER call animateTo. Show 2-second tooltip: "Token not found on scene"
-  const handleFocusToken = async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!OBR.isReady) {
-      showTooltip('Owlbear Rodeo not ready');
-      return;
-    }
-
-    try {
-      let targetItem: any = null;
-
-      // 1. Look up item by ID
-      if (combatant.tokenId) {
-        try {
-          const items = await OBR.scene.items.getItems([combatant.tokenId]);
-          if (items && items.length > 0 && items[0]?.position) {
-            targetItem = items[0];
-          }
-        } catch (err) {
-          console.warn('Could not retrieve item by tokenId:', err);
-        }
-      }
-
-      // 2. Name Fallback: If not found or tokenId is missing
-      if (!targetItem) {
-        try {
-          const sceneItems = await OBR.scene.items.getItems();
-          const match = sceneItems.find(
-            (item) => item.name?.trim().toLowerCase() === combatant.name.trim().toLowerCase()
-          );
-          if (match && match.position) {
-            targetItem = match;
-            // Update and persist combatant.tokenId = match.id
-            if (onUpdateTokenId) {
-              onUpdateTokenId(combatant.id, match.id);
-            }
-          }
-        } catch (err) {
-          console.warn('Could not search scene items by name:', err);
-        }
-      }
-
-      // 3. Target Found: Smoothly center & select
-      if (targetItem && targetItem.position) {
-        const scale = await OBR.viewport.getScale().catch(() => 1);
-        await OBR.viewport.animateTo({ position: targetItem.position, scale });
-        await OBR.player.select([targetItem.id]);
-      } else {
-        // 4. Target Not Found: Safety Guardrail! Never call animateTo
-        showTooltip('Token not found on scene');
-      }
-    } catch (err) {
-      console.warn('Error focusing token on map:', err);
-      showTooltip('Token not found on scene');
-    }
-  };
-
-  // Quick HP Popover Handlers
-  const handlePopoverDamage = () => {
+  // Quick HP Popover Action Handlers
+  const handleApplyDamage = () => {
     if (!canEdit) return;
-    const val = parseInt(quickHpAmount, 10);
+    const val = parseInt(damageAmount, 10);
     if (isNaN(val) || val <= 0) return;
-    onHpDelta(combatant.id, -val);
-    setQuickHpAmount('');
+
+    // 1. If combatant has the "Concentration" condition, trigger the concentration DC alert (⚡ CON DC)
+    if (isConcentrating(combatant)) {
+      const dc = calculateConcentrationDC(val);
+      setLocalConcentrationAlert({ dc, expiresAt: Date.now() + 6000 });
+      setTimeout(() => {
+        setLocalConcentrationAlert((prev) =>
+          prev && prev.expiresAt <= Date.now() ? null : prev
+        );
+      }, 6000);
+    }
+
+    // 2. Absorbs active Temp HP first, then subtracts from Current HP
+    const currentThp = combatant.tempHp ?? combatant.hpTemp ?? 0;
+    if (currentThp > 0 && onSaveThp) {
+      const remThp = Math.max(0, currentThp - val);
+      onSaveThp(combatant.id, remThp);
+      const remDmg = Math.max(0, val - currentThp);
+      if (remDmg > 0) {
+        onHpDelta(combatant.id, -remDmg);
+      }
+    } else {
+      onHpDelta(combatant.id, -val);
+    }
+
+    setDamageAmount('');
   };
 
-  const handlePopoverHeal = () => {
+  const handleApplyHeal = () => {
     if (!canEdit) return;
-    const val = parseInt(quickHpAmount, 10);
+    const val = parseInt(healAmount, 10);
     if (isNaN(val) || val <= 0) return;
     onHpDelta(combatant.id, val);
-    setQuickHpAmount('');
+    setHealAmount('');
   };
 
-  const handlePopoverSetMax = () => {
+  const handleApplySetMax = () => {
     if (!canEdit) return;
-    const val = draftMaxHp;
+    const val = parseInt(maxHpInput, 10);
     if (isNaN(val) || val < 1) return;
+
     if (onUpdateMaxHp) {
       onUpdateMaxHp(combatant.id, val);
+    }
+    // Clamps Current HP if it exceeds the new Max
+    if (combatant.hpCurrent > val) {
+      const excess = combatant.hpCurrent - val;
+      onHpDelta(combatant.id, -excess);
     }
   };
 
@@ -422,7 +383,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
         )}
       </div>
 
-      {/* COL 2: Identity, Defense, Status & Condition Chips */}
+      {/* COL 2: Identity, Defense, Status & Condition Chips (Crosshairs removed) */}
       <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Combatant Name */}
@@ -434,23 +395,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
           >
             {combatant.name}
           </span>
-
-          {/* Crosshair / Map Focus Icon with 2-second Tooltip */}
-          <div className="relative inline-flex items-center">
-            <button
-              type="button"
-              onClick={handleFocusToken}
-              title="Focus Token on Map"
-              className="p-0.5 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer shrink-0"
-            >
-              <Crosshair className="w-3.5 h-3.5" />
-            </button>
-            {tokenStatusTooltip && (
-              <div className="absolute left-1/2 -translate-x-1/2 -top-7 px-2 py-0.5 rounded bg-rose-950 border border-rose-700 text-rose-200 text-[10px] font-medium whitespace-nowrap shadow-xl z-50 pointer-events-none animate-fadeIn">
-                {tokenStatusTooltip}
-              </div>
-            )}
-          </div>
 
           {/* Inline AC Shield Badge */}
           <span
@@ -483,12 +427,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
           )}
 
           {/* Concentration Damage DC Alert Badge (⚡ CON DC [val]) */}
-          {concentrationAlert && (
+          {activeConcentrationAlert && (
             <span
               className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/60 flex items-center gap-0.5 animate-pulse shrink-0"
-              title={`Concentration Check DC ${concentrationAlert.dc} Required (took damage)`}
+              title={`Concentration Check DC ${activeConcentrationAlert.dc} Required (took damage)`}
             >
-              <span>⚡ CON DC {concentrationAlert.dc}</span>
+              <span>⚡ CON DC {activeConcentrationAlert.dc}</span>
             </span>
           )}
 
@@ -504,7 +448,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
           )}
 
           {/* Concentration active indicator icon */}
-          {isConcentrating(combatant) && !concentrationAlert && (
+          {isConcentrating(combatant) && !activeConcentrationAlert && (
             <span
               className="text-cyan-400 shrink-0 animate-pulse"
               title="Concentrating"
@@ -546,7 +490,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
         )}
       </div>
 
-      {/* COL 3: Inline HP Controls with Quick HP Popover & Strict FoW Masking */}
+      {/* COL 3: Inline HP Controls with Interactive Quick HP Popover & Strict FoW Masking */}
       <div className="flex items-center gap-1 shrink-0">
         {!isDm && isUnderFoW ? (
           /* Strict Player FoW: Mask exact HP with ???/??? */
@@ -578,9 +522,10 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
               -1
             </button>
 
-            {/* Current / Max HP display: Click opens Inline Quick HP Popover */}
+            {/* Current / Max HP display: Click opens Inline Quick HP Management Popover */}
             <div className="relative">
               <button
+                ref={hpButtonRef}
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -589,32 +534,23 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                   }
                 }}
                 disabled={!canEdit}
-                className={`text-[11px] font-mono font-bold text-slate-200 tabular-nums px-1 py-0.5 rounded transition cursor-pointer min-w-[44px] text-center ${
-                  isHpPopoverOpen
-                    ? 'bg-slate-800 ring-1 ring-amber-400 text-amber-300'
-                    : 'hover:bg-slate-800/80 hover:text-amber-300'
-                } ${!canEdit ? 'cursor-default hover:bg-transparent hover:text-slate-200' : ''}`}
-                title={canEdit ? 'Click to open Quick HP Management' : `HP: ${combatant.hpCurrent}/${combatant.hpMax}`}
+                className={`font-bold text-slate-100 hover:text-amber-400 hover:bg-slate-800/80 px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                  isHpPopoverOpen ? 'text-amber-400 bg-slate-800/80' : ''
+                } disabled:cursor-default disabled:hover:text-slate-100 disabled:hover:bg-transparent`}
+                title={
+                  canEdit
+                    ? 'Click to open Quick HP Management'
+                    : `HP: ${combatant.hpCurrent}/${combatant.hpMax}`
+                }
               >
-                <span
-                  className={
-                    combatant.hpCurrent <= combatant.hpMax * 0.5
-                      ? 'text-amber-400'
-                      : 'text-slate-100'
-                  }
-                >
-                  {combatant.hpCurrent}
-                </span>
-                <span className="text-slate-500 font-normal text-[10px]">
-                  /{combatant.hpMax}
-                </span>
+                {combatant.hpCurrent}/{combatant.hpMax}
               </button>
 
-              {/* INLINE QUICK HP POPOVER (Anchored below row, mirrors THP UX) */}
+              {/* INLINE QUICK HP POPOVER (Anchored directly below the HP button) */}
               {isHpPopoverOpen && canEdit && (
                 <div
                   ref={hpPopoverRef}
-                  className="absolute right-0 top-full mt-2 z-50 w-72 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-2.5 text-xs text-slate-100 space-y-2.5 animate-fadeIn"
+                  className="absolute right-0 top-full mt-1.5 bg-slate-900 border border-slate-700/80 rounded-lg shadow-2xl p-2.5 z-50 flex flex-col gap-2 min-w-[220px] text-xs text-slate-100"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/* Popover Header */}
@@ -640,167 +576,85 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                     </button>
                   </div>
 
-                  {/* HP Bar & Metrics */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className="text-slate-400">
-                        Current: <strong className="text-slate-100">{combatant.hpCurrent}</strong> / {combatant.hpMax}
-                        {(combatant.tempHp ?? combatant.hpTemp ?? 0) > 0 && (
-                          <span className="text-cyan-400 ml-1">
-                            (+{(combatant.tempHp ?? combatant.hpTemp ?? 0)} THP)
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-slate-400">{health.percentage}%</span>
-                    </div>
-                    <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
-                      <div
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            (combatant.hpCurrent / Math.max(1, combatant.hpMax)) * 100
-                          )}%`,
-                        }}
-                        className={`h-full transition-all duration-300 ${
-                          health.status === 'Critical'
-                            ? 'bg-rose-600'
-                            : health.status === 'Bloodied'
-                            ? 'bg-amber-500'
-                            : health.status === 'Hurt'
-                            ? 'bg-yellow-500'
-                            : 'bg-emerald-500'
-                        }`}
-                      />
-                    </div>
+                  {/* Quick Damage Row */}
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Damage"
+                      value={damageAmount}
+                      onChange={(e) => setDamageAmount(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleApplyDamage();
+                        }
+                      }}
+                      className="flex-1 min-w-0 px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-rose-400 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyDamage}
+                      disabled={!damageAmount || parseInt(damageAmount, 10) <= 0}
+                      className="px-2.5 py-1 text-xs font-bold rounded bg-rose-900/90 hover:bg-rose-800 border border-rose-700 text-rose-200 hover:text-white transition cursor-pointer disabled:opacity-40 shadow-sm shrink-0"
+                      title="Deal Damage (absorbs active Temp HP first, triggers Concentration DC)"
+                    >
+                      Damage
+                    </button>
                   </div>
 
-                  {/* Controls: Quick Damage & Heal */}
-                  <div className="space-y-1.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Quick Damage / Heal
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="Amount"
-                        value={quickHpAmount}
-                        onChange={(e) => setQuickHpAmount(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handlePopoverDamage();
-                          }
-                        }}
-                        className="flex-1 min-w-0 px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 text-center"
-                      />
-                      <button
-                        type="button"
-                        onClick={handlePopoverDamage}
-                        disabled={!quickHpAmount || parseInt(quickHpAmount, 10) <= 0}
-                        className="px-2.5 py-1 text-xs font-bold rounded bg-rose-950 hover:bg-rose-900 border border-rose-700/80 text-rose-200 hover:text-white transition cursor-pointer disabled:opacity-40 shadow-sm shrink-0"
-                        title="Deal Damage (absorbs Temp HP first, triggers Concentration DC)"
-                      >
-                        Damage
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handlePopoverHeal}
-                        disabled={!quickHpAmount || parseInt(quickHpAmount, 10) <= 0}
-                        className="px-2.5 py-1 text-xs font-bold rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-200 hover:text-white transition cursor-pointer disabled:opacity-40 shadow-sm shrink-0"
-                        title="Apply Healing (capped at Max HP)"
-                      >
-                        Heal
-                      </button>
-                    </div>
-
-                    {/* Quick tally chips inside popover */}
-                    <div className="flex items-center gap-1 pt-0.5">
-                      <span className="text-[10px] text-slate-500 font-mono">Dmg:</span>
-                      <button
-                        type="button"
-                        onClick={() => onHpDelta(combatant.id, -1)}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-rose-700 text-rose-400 text-[10px] font-mono cursor-pointer"
-                        title="-1 Damage"
-                      >
-                        -1
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onHpDelta(combatant.id, -5)}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-rose-700 text-rose-400 text-[10px] font-mono cursor-pointer"
-                        title="-5 Damage"
-                      >
-                        -5
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onHpDelta(combatant.id, -10)}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-rose-700 text-rose-400 text-[10px] font-mono cursor-pointer"
-                        title="-10 Damage"
-                      >
-                        -10
-                      </button>
-
-                      <div className="w-px h-3 bg-slate-800 mx-0.5" />
-
-                      <span className="text-[10px] text-slate-500 font-mono">Heal:</span>
-                      <button
-                        type="button"
-                        onClick={() => onHpDelta(combatant.id, 1)}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-emerald-700 text-emerald-400 text-[10px] font-mono cursor-pointer"
-                        title="+1 Heal"
-                      >
-                        +1
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onHpDelta(combatant.id, 5)}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-emerald-700 text-emerald-400 text-[10px] font-mono cursor-pointer"
-                        title="+5 Heal"
-                      >
-                        +5
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onHpDelta(combatant.id, 10)}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-emerald-700 text-emerald-400 text-[10px] font-mono cursor-pointer"
-                        title="+10 Heal"
-                      >
-                        +10
-                      </button>
-                    </div>
+                  {/* Quick Heal Row */}
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Heal"
+                      value={healAmount}
+                      onChange={(e) => setHealAmount(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleApplyHeal();
+                        }
+                      }}
+                      className="flex-1 min-w-0 px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-400 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyHeal}
+                      disabled={!healAmount || parseInt(healAmount, 10) <= 0}
+                      className="px-2.5 py-1 text-xs font-bold rounded bg-emerald-900/90 hover:bg-emerald-800 border border-emerald-700 text-emerald-200 hover:text-white transition cursor-pointer disabled:opacity-40 shadow-sm shrink-0"
+                      title="Apply Healing (capped at Max HP)"
+                    >
+                      Heal
+                    </button>
                   </div>
 
-                  {/* Section 2: Edit Max HP Direct */}
-                  <div className="pt-2 border-t border-slate-800 space-y-1">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Edit Max HP
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        value={draftMaxHp}
-                        onChange={(e) => setDraftMaxHp(parseInt(e.target.value, 10) || 1)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handlePopoverSetMax();
-                          }
-                        }}
-                        className="flex-1 min-w-0 px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 text-center"
-                      />
-                      <button
-                        type="button"
-                        onClick={handlePopoverSetMax}
-                        className="px-2.5 py-1 text-xs font-semibold rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-300 hover:text-amber-200 transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
-                        title="Set new Max HP"
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>Set Max</span>
-                      </button>
-                    </div>
+                  {/* Edit Max HP Row */}
+                  <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-800">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Max HP"
+                      value={maxHpInput}
+                      onChange={(e) => setMaxHpInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleApplySetMax();
+                        }
+                      }}
+                      className="flex-1 min-w-0 px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-400 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplySetMax}
+                      className="px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 hover:bg-blue-500 border border-blue-400/80 text-white transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
+                      title="Set Max HP (clamps Current HP if exceeding new Max)"
+                    >
+                      <Check className="w-3 h-3" />
+                      <span>Set Max</span>
+                    </button>
                   </div>
                 </div>
               )}

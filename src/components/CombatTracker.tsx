@@ -43,6 +43,7 @@ import {
   Crosshair,
   Link,
 } from 'lucide-react';
+import { CombatantRow } from './combat/CombatantRow';
 
 interface CombatTrackerProps {
   isDm: boolean;
@@ -779,6 +780,32 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
+  // UPDATE MAX HP (Clamping current HP if it exceeds new max)
+  const handleUpdateMaxHp = (combatantId: string, newMaxHp: number) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    if (!isDm && !isPlayerOrAlly) return;
+
+    const clampedHpCurrent = Math.min(target.hpCurrent, newMaxHp);
+    const now = Date.now();
+    const updated = combatants.map((c) =>
+      c.id === combatantId
+        ? { ...c, hpMax: newMaxHp, hpCurrent: clampedHpCurrent, updatedAt: now }
+        : c
+    );
+    setCombatants(updated);
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // UPDATE TOKEN ID
+  const handleUpdateTokenId = (combatantId: string, tokenId: string) => {
+    const updated = combatants.map((c) =>
+      c.id === combatantId ? { ...c, tokenId, updatedAt: Date.now() } : c
+    );
+    setCombatants(updated);
+  };
+
   // INLINE TEMP HP SAVE
   const handleSaveInlineThp = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
@@ -1242,318 +1269,41 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             const isActive = activeCombatantId
               ? c.id === activeCombatantId
               : index === activeTurnIndex;
-            const isPlayerOrAlly = c.type === 'player' || c.type === 'ally';
-            const canEdit = isDm || isPlayerOrAlly;
-            const health = getHealthThreshold(c.hpCurrent, c.hpMax);
-            const effectiveAcInfo = getEffectiveAc(c);
-            const visibleConditions = c.conditions
-              .map(normalizeCondition)
-              .filter((cond) => isDm || !cond.isSecret);
-            const isUnderFoW = isCombatantFoW(c);
 
             return (
-              <div
+              <CombatantRow
                 key={c.id}
-                className={`min-h-[56px] py-1.5 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 text-xs select-none relative ${
-                  actionMenuCombatantId === c.id ? 'ring-1 ring-amber-400/50' : ''
-                } ${
-                  isActive
-                    ? 'bg-amber-950/30 border-amber-500/80 shadow-md border-l-4 border-l-amber-400 ring-1 ring-amber-400/20'
-                    : 'bg-slate-900/85 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                {/* COL 1: Initiative Badge (1-click roll if allowed) */}
-                <button
-                  type="button"
-                  onClick={() => canEdit && handleRollInitiative(c.id)}
-                  disabled={!canEdit}
-                  title={canEdit ? 'Click to roll 1d20 Initiative' : `Initiative ${c.initiative}`}
-                  className="w-8 h-8 font-bold text-xs rounded-lg bg-neutral-800 text-amber-400 flex items-center justify-center shrink-0 tabular-nums border border-neutral-700 hover:border-amber-400 transition cursor-pointer shadow-inner disabled:cursor-default"
-                >
-                  {c.initiative}
-                </button>
-
-                {/* COL 2: Name, Token Focus Crosshair, AC Badge, Type Badge, Automated Health Status Pill, Concentration DC Alert */}
-                <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {/* Name truncated to prevent covering controls */}
-                    <span
-                      className={`font-bold truncate max-w-[110px] ${
-                        isActive ? 'text-amber-300' : 'text-slate-200'
-                      }`}
-                      title={c.name}
-                    >
-                      {c.name}
-                    </span>
-
-                    {/* Lightweight Token Focus Button (Crosshair) */}
-                    {c.tokenId && (
-                      <button
-                        type="button"
-                        onClick={(e) => handleFocusToken(c.tokenId, e)}
-                        title="Focus Token on Map"
-                        className="p-0.5 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer shrink-0"
-                      >
-                        <Crosshair className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-
-                    {/* Inline AC Shield Badge */}
-                    <span
-                      className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-cyan-300 border border-slate-700/80 flex items-center gap-1 shrink-0 shadow-sm"
-                      title={`Armor Class: ${effectiveAcInfo.effectiveAc}${effectiveAcInfo.bonus > 0 ? ` (Base ${c.ac ?? c.armorClass ?? 10} + ${effectiveAcInfo.bonus})` : ''}`}
-                    >
-                      <span>🛡️</span>
-                      <span>
-                        {effectiveAcInfo.bonus > 0
-                          ? `${effectiveAcInfo.effectiveAc} (+${effectiveAcInfo.bonus})`
-                          : `${effectiveAcInfo.effectiveAc} AC`}
-                      </span>
-                    </span>
-
-                    {/* Type Badge: PC / Ally / Monster / Boss / Custom */}
-                    {getTypeBadge(c.type, c.customRoleLabel)}
-
-                    {/* AUTOMATED HP STATUS PILL & STRICT FOG OF WAR GUARDRAILS:
-                        GM View: Always show status pill for all entities.
-                        Player View: Strictly preserve Fog of War! If entity is under FoW, do not display status pill to players. */}
-                    {(isDm || !isUnderFoW) && (
-                      <span
-                        className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border shrink-0 ${health.badgeClass}`}
-                        title={`Automated HP Status: ${health.badgeLabel} (${health.percentage}%)`}
-                      >
-                        {health.badgeLabel}
-                      </span>
-                    )}
-
-                    {/* Concentration Damage DC Alert Badge (⚡ CON DC ${conDC}) */}
-                    {concentrationAlerts[c.id] && (
-                      <span
-                        className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/60 flex items-center gap-0.5 animate-pulse shrink-0"
-                        title={`Concentration Check DC ${concentrationAlerts[c.id].dc} Required (took damage)`}
-                      >
-                        <span>⚡ CON DC {concentrationAlerts[c.id].dc}</span>
-                      </span>
-                    )}
-
-                    {/* FoW / Secret marker for DM */}
-                    {isDm && (c.hidden || c.isSecret) && (
-                      <span
-                        className="px-1 py-0.2 rounded text-[9px] font-mono bg-rose-950/80 border border-rose-800/80 text-rose-300 shrink-0 flex items-center gap-0.5"
-                        title="Hidden/Secret FoW"
-                      >
-                        <EyeOff className="w-2.5 h-2.5" />
-                        <span>FoW</span>
-                      </span>
-                    )}
-
-                    {/* Concentration active indicator icon */}
-                    {isConcentrating(c) && !concentrationAlerts[c.id] && (
-                      <span
-                        className="text-cyan-400 shrink-0 animate-pulse"
-                        title="Concentrating"
-                      >
-                        <Zap className="w-3 h-3 fill-current" />
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Inline Condition Badges row */}
-                  {visibleConditions.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      {visibleConditions.map((cond) => (
-                        <span
-                          key={cond.id || cond.name}
-                          onClick={(e) => {
-                            if (canEdit) {
-                              e.stopPropagation();
-                              handleRemoveCondition(c.id, cond.id || cond.name);
-                            }
-                          }}
-                          className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0 transition ${getConditionBadgeStyle(
-                            cond.name
-                          )} ${
-                            cond.isSecret
-                              ? 'border-dashed border-rose-500/90 bg-rose-950/80 text-rose-300'
-                              : ''
-                          } ${canEdit ? 'cursor-pointer hover:opacity-80' : ''}`}
-                          title={`${cond.name}${cond.isSecret ? ' (Secret GM condition)' : ''}${
-                            canEdit ? ' (click to remove)' : ''
-                          }`}
-                        >
-                          {cond.isSecret && <EyeOff className="w-2.5 h-2.5 text-rose-400" />}
-                          <span>{cond.name}</span>
-                          {canEdit && <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* COL 3: Inline HP Controls with Strict FoW Masking */}
-                <div className="flex items-center gap-1 shrink-0">
-                  {!isDm && isUnderFoW ? (
-                    /* Strict Player FoW: Mask exact HP with ???/??? */
-                    <span
-                      className="text-[11px] font-mono font-bold text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 tabular-nums shadow-inner"
-                      title="Entity HP masked by Fog of War"
-                    >
-                      ???/???
-                    </span>
-                  ) : (
-                    <>
-                      {/* Micro damage buttons (-5, -1) */}
-                      <button
-                        type="button"
-                        onClick={() => handleHpDelta(c.id, -5)}
-                        disabled={!canEdit}
-                        className="h-6 w-5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-                        title="-5 HP"
-                      >
-                        -5
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleHpDelta(c.id, -1)}
-                        disabled={!canEdit}
-                        className="h-6 w-5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-                        title="-1 HP"
-                      >
-                        -1
-                      </button>
-
-                      {/* Current / Max HP display */}
-                      <span className="text-[11px] font-mono font-bold text-slate-200 tabular-nums px-0.5 min-w-[44px] text-center">
-                        <span className={c.hpCurrent <= c.hpMax * 0.5 ? 'text-amber-400' : 'text-slate-100'}>
-                          {c.hpCurrent}
-                        </span>
-                        <span className="text-slate-500 font-normal text-[10px]">/{c.hpMax}</span>
-                      </span>
-
-                      {/* Inline Click on Temp HP block (+X THP) */}
-                      {inlineThpId === c.id ? (
-                        <div className="flex items-center gap-0.5">
-                          <input
-                            type="number"
-                            value={inlineThpVal}
-                            onChange={(e) => setInlineThpVal(parseInt(e.target.value, 10) || 0)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveInlineThp(c.id);
-                              if (e.key === 'Escape') setInlineThpId(null);
-                            }}
-                            autoFocus
-                            className="w-10 px-1 py-0.5 text-[10px] font-mono rounded bg-slate-950 border border-cyan-500 text-cyan-300 text-center"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSaveInlineThp(c.id)}
-                            className="p-0.5 text-emerald-400 hover:text-emerald-300 cursor-pointer"
-                            title="Save THP"
-                          >
-                            <Check className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setInlineThpId(null)}
-                            className="p-0.5 text-slate-400 hover:text-slate-300 cursor-pointer"
-                            title="Cancel"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (canEdit) {
-                              setInlineThpId(c.id);
-                              setInlineThpVal(c.tempHp ?? c.hpTemp ?? 0);
-                            }
-                          }}
-                          disabled={!canEdit}
-                          className={`text-[9px] font-mono px-1 py-0.5 rounded border transition cursor-pointer ${
-                            (c.tempHp ?? c.hpTemp ?? 0) > 0
-                              ? 'text-cyan-300 bg-cyan-950/80 border-cyan-600/70 hover:bg-cyan-900/80'
-                              : 'text-slate-500 bg-slate-900 border-slate-800 hover:text-slate-300'
-                          }`}
-                          title={canEdit ? 'Click to edit Temp HP (+THP)' : `Temp HP: ${c.tempHp ?? c.hpTemp ?? 0}`}
-                        >
-                          +{(c.tempHp ?? c.hpTemp ?? 0)} THP
-                        </button>
-                      )}
-
-                      {/* Micro heal buttons (+1, +5) */}
-                      <button
-                        type="button"
-                        onClick={() => handleHpDelta(c.id, 1)}
-                        disabled={!canEdit}
-                        className="h-6 w-5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-                        title="+1 HP"
-                      >
-                        +1
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleHpDelta(c.id, 5)}
-                        disabled={!canEdit}
-                        className="h-6 w-5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-                        title="+5 HP"
-                      >
-                        +5
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* COL 4: GM Manual Reordering (▲ / ▼) & Options Menu Toggle */}
-                <div className="flex items-center gap-1 shrink-0">
-                  {isDm && (
-                    <div className="flex flex-col gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        disabled={index === 0}
-                        onClick={() => handleMoveCombatant(c.id, -1)}
-                        className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
-                        title="Move Up in Priority (▲)"
-                      >
-                        <ChevronUp className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={index === visibleCombatants.length - 1}
-                        onClick={() => handleMoveCombatant(c.id, 1)}
-                        className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
-                        title="Move Down in Priority (▼)"
-                      >
-                        <ChevronDown className="w-3 h-3" />
-                      </button>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (actionMenuCombatantId === c.id) {
-                        setActionMenuCombatantId(null);
-                        setEditingCombatantId(null);
-                      } else {
-                        setActionMenuCombatantId(c.id);
-                        setEditingCombatantId(null);
-                        setConditionInput('');
-                        setConditionIsSecret(false);
-                      }
-                    }}
-                    className={`h-7 w-7 rounded-lg flex items-center justify-center border transition cursor-pointer ${
-                      c.conditions.length > 0 || actionMenuCombatantId === c.id
-                        ? 'bg-amber-950/70 border-amber-600/70 text-amber-300'
-                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="Edit Stats & Conditions"
-                  >
-                    <MoreVertical className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+                combatant={c}
+                index={index}
+                totalVisible={visibleCombatants.length}
+                isActive={isActive}
+                isDm={isDm}
+                playerName={playerName}
+                isActionMenuOpen={actionMenuCombatantId === c.id}
+                onToggleActionMenu={(combatantId) => {
+                  if (actionMenuCombatantId === combatantId) {
+                    setActionMenuCombatantId(null);
+                    setEditingCombatantId(null);
+                  } else {
+                    setActionMenuCombatantId(combatantId);
+                    setEditingCombatantId(null);
+                    setConditionInput('');
+                    setConditionIsSecret(false);
+                  }
+                }}
+                onRollInitiative={handleRollInitiative}
+                onMoveCombatant={handleMoveCombatant}
+                onHpDelta={handleHpDelta}
+                onUpdateMaxHp={handleUpdateMaxHp}
+                onUpdateTokenId={handleUpdateTokenId}
+                onRemoveCondition={handleRemoveCondition}
+                concentrationAlert={concentrationAlerts[c.id]}
+                inlineThpId={inlineThpId}
+                setInlineThpId={setInlineThpId}
+                inlineThpVal={inlineThpVal}
+                setInlineThpVal={setInlineThpVal}
+                onSaveInlineThp={handleSaveInlineThp}
+              />
             );
           })
         )}
