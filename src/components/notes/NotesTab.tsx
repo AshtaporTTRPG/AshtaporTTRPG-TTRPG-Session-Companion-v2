@@ -27,6 +27,8 @@ import { DmNotesVault } from '../DmNotesVault';
 export type { BroadcastNotePayload, NotesScope } from '../../types/notes';
 export { OBR_BROADCAST_NOTE_KEY, OBR_TABLE_NOTES_KEY } from '../../types/notes';
 
+export const LOCAL_EXPANDED_NOTES_KEY = 'ashtapor_notes_expanded_ids';
+
 const DEFAULT_MY_NOTES: NoteItem[] = [
   {
     id: 'my-note-1',
@@ -131,6 +133,35 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
     updatedAt: Date.now() - 7200000,
   },
 ];
+
+/**
+ * Helper to read stored expanded IDs from localStorage
+ */
+function loadExpandedIdsFromStorage(): Set<string> | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_EXPANDED_NOTES_KEY);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set<string>(parsed);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not read stored expanded notes from localStorage:', e);
+  }
+  return null;
+}
+
+/**
+ * Helper to save expanded IDs to localStorage
+ */
+function persistExpandedIdsToStorage(ids: Set<string>): void {
+  try {
+    localStorage.setItem(LOCAL_EXPANDED_NOTES_KEY, JSON.stringify(Array.from(ids)));
+  } catch (e) {
+    console.warn('Could not save expanded notes to localStorage:', e);
+  }
+}
 
 /**
  * Migration helper: converts legacy data (string, old object, or array) into NoteItem[]
@@ -311,13 +342,18 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return DEFAULT_DM_NOTES;
   });
 
-  // 5. Independent Expansion States (Keep-Alive State Retention)
-  const [myNotesExpandedIds, setMyNotesExpandedIds] = useState<Set<string>>(() => {
-    return new Set(myNotes.map((n) => n.id));
-  });
-
-  const [tableNotesExpandedIds, setTableNotesExpandedIds] = useState<Set<string>>(() => {
-    return new Set(tableNotes.map((n) => n.id));
+  // 5. Persistent Expansion State: Loaded from ashtapor_notes_expanded_ids in localStorage
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(() => {
+    const stored = loadExpandedIdsFromStorage();
+    if (stored !== null) {
+      return stored;
+    }
+    // First run / initial load default: expand all notes by default
+    const initial = new Set<string>();
+    myNotes.forEach((n) => initial.add(n.id));
+    tableNotes.forEach((n) => initial.add(n.id));
+    persistExpandedIdsToStorage(initial);
+    return initial;
   });
 
   // Safety: non-GMs must never access DM Notes
@@ -337,18 +373,80 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     }
   }, []);
 
+  // Individual Card Expansion Toggle
+  const handleToggleExpandNote = useCallback((id: string) => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, []);
+
+  // Expand / Collapse All for My Notes
+  const handleExpandAllMyNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      myNotes.forEach((n) => next.add(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [myNotes]);
+
+  const handleCollapseAllMyNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      myNotes.forEach((n) => next.delete(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [myNotes]);
+
+  // Expand / Collapse All for Table Notes
+  const handleExpandAllTableNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      tableNotes.forEach((n) => next.add(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [tableNotes]);
+
+  const handleCollapseAllTableNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      tableNotes.forEach((n) => next.delete(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [tableNotes]);
+
   const handleSaveMyNote = (note: NoteItem) => {
     const exists = myNotes.some((n) => n.id === note.id);
     const updated = exists
       ? myNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...myNotes];
     saveMyNotes(updated);
-    setMyNotesExpandedIds((prev) => new Set(prev).add(note.id));
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev).add(note.id);
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
   };
 
   const handleDeleteMyNote = (id: string) => {
     const updated = myNotes.filter((n) => n.id !== id);
     saveMyNotes(updated);
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
   };
 
   const handleTogglePinMyNote = (id: string) => {
@@ -365,29 +463,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     imported.forEach((n) => mergedMap.set(n.id, n));
     const merged = Array.from(mergedMap.values());
     saveMyNotes(merged);
-    setMyNotesExpandedIds((prev) => {
+    setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       imported.forEach((n) => next.add(n.id));
+      persistExpandedIdsToStorage(next);
       return next;
     });
-  };
-
-  // My Notes Expand / Collapse Handlers
-  const handleToggleExpandMyNote = (id: string) => {
-    setMyNotesExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleExpandAllMyNotes = () => {
-    setMyNotesExpandedIds(new Set(myNotes.map((n) => n.id)));
-  };
-
-  const handleCollapseAllMyNotes = () => {
-    setMyNotesExpandedIds(new Set());
   };
 
   // Sync Table Notes with OBR Room Metadata on Mount & Subscription
@@ -404,11 +485,17 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             name: authorName,
           });
           setTableNotes(loaded);
-          setTableNotesExpandedIds((prev) => {
-            const next = new Set(prev);
-            loaded.forEach((n) => next.add(n.id));
-            return next;
-          });
+
+          // If first-run with no saved expansion preference, expand newly loaded table notes
+          if (loadExpandedIdsFromStorage() === null) {
+            setExpandedNoteIds((prev) => {
+              const next = new Set(prev);
+              loaded.forEach((n) => next.add(n.id));
+              persistExpandedIdsToStorage(next);
+              return next;
+            });
+          }
+
           try {
             localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
           } catch {}
@@ -467,13 +554,23 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       ? tableNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...tableNotes];
     setTableNotes(updated);
-    setTableNotesExpandedIds((prev) => new Set(prev).add(note.id));
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev).add(note.id);
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
     triggerDebouncedTableSync(updated);
   };
 
   const handleDeleteTableNote = (id: string) => {
     const updated = tableNotes.filter((n) => n.id !== id);
     setTableNotes(updated);
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
     triggerDebouncedTableSync(updated);
   };
 
@@ -483,24 +580,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     );
     setTableNotes(updated);
     triggerDebouncedTableSync(updated);
-  };
-
-  // Table Notes Expand / Collapse Handlers (Utility bar parity)
-  const handleToggleExpandTableNote = (id: string) => {
-    setTableNotesExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleExpandAllTableNotes = () => {
-    setTableNotesExpandedIds(new Set(tableNotes.map((n) => n.id)));
-  };
-
-  const handleCollapseAllTableNotes = () => {
-    setTableNotesExpandedIds(new Set());
   };
 
   // DM Notes State Operations
@@ -692,8 +771,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       <div className={activeSubTab === 'myNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
         <NoteCardList
           notes={myNotes}
-          expandedIds={myNotesExpandedIds}
-          onToggleExpand={handleToggleExpandMyNote}
+          expandedIds={expandedNoteIds}
+          onToggleExpand={handleToggleExpandNote}
           onExpandAll={handleExpandAllMyNotes}
           onCollapseAll={handleCollapseAllMyNotes}
           onSaveNote={handleSaveMyNote}
@@ -723,8 +802,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       <div className={activeSubTab === 'tableNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
         <NoteCardList
           notes={tableNotes}
-          expandedIds={tableNotesExpandedIds}
-          onToggleExpand={handleToggleExpandTableNote}
+          expandedIds={expandedNoteIds}
+          onToggleExpand={handleToggleExpandNote}
           onExpandAll={handleExpandAllTableNotes}
           onCollapseAll={handleCollapseAllTableNotes}
           onSaveNote={handleSaveTableNote}

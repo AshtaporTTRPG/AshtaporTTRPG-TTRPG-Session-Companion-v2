@@ -31,12 +31,15 @@ export interface Combatant {
   id: string;
   name: string;
   type: CombatantType;
+  role?: string;
   customRoleLabel?: string; // DM free-text label for custom initiatives (e.g. Lair Action, Mass Combat)
   initiative: number;
   armorClass: number;
   ac?: number; // Armor Class field (default 10)
   hpCurrent: number;
+  hp?: number;
   hpMax: number;
+  maxHp?: number;
   hpTemp: number;
   tempHp?: number;
   conditions: CustomCondition[];

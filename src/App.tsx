@@ -7,11 +7,11 @@ import React, { useState, useEffect } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
 import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from './utils/audio';
-import { CombatTracker } from './components/CombatTracker';
+import { CombatTracker } from './components/combat/CombatTracker';
 import { DiceChamber } from './components/DiceChamber';
 import { GeometryCalculator } from './components/GeometryCalculator';
 import { Grimoire } from './components/Grimoire';
-import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/NotesTab';
+import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
 import { liveFeedSync } from './utils/liveFeedSync';
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
@@ -384,23 +384,23 @@ export default function App() {
         </nav>
       </header>
 
-      {/* 2. MAIN CONTENT AREA: flex-1 min-h-0 overflow-y-auto p-2 */}
+      {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
-        {activeTab === 'combat' && (
+        <div className={activeTab === 'combat' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
           <CombatTracker isDm={isGM} playerName={playerName} />
-        )}
-        {activeTab === 'dice' && (
+        </div>
+        <div className={activeTab === 'dice' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
           <DiceChamber isDm={isGM} playerName={playerName} />
-        )}
-        {(activeTab === 'range' || (activeTab as string) === 'geometry') && (
+        </div>
+        <div className={activeTab === 'range' || (activeTab as string) === 'geometry' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
           <GeometryCalculator />
-        )}
-        {activeTab === 'grimoire' && (
+        </div>
+        <div className={activeTab === 'grimoire' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
           <Grimoire isDm={isGM} />
-        )}
-        {activeTab === 'notes' && (
+        </div>
+        <div className={activeTab === 'notes' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
           <NotesTab isDm={isGM} playerName={playerName} />
-        )}
+        </div>
       </main>
 
       {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY (ALL CONNECTED CLIENTS) */}

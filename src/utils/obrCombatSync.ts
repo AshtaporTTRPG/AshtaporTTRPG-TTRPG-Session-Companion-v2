@@ -2,6 +2,7 @@ import OBR from '@owlbear-rodeo/sdk';
 import { Combatant } from '../types/ttrpg';
 
 export const COMBAT_STATE_KEY = 'com.ashtapor.companion/combat-state';
+export const ROOM_METADATA_KEY = COMBAT_STATE_KEY;
 
 export interface CombatState {
   combatants: Combatant[];
