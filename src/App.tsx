@@ -386,19 +386,19 @@ export default function App() {
 
       {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
-        <div className={activeTab === 'combat' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
+        <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
           <CombatTracker isDm={isGM} playerName={playerName} />
         </div>
-        <div className={activeTab === 'dice' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
+        <div className={activeTab === 'dice' ? 'flex flex-col h-full' : 'hidden'}>
           <DiceChamber isDm={isGM} playerName={playerName} />
         </div>
-        <div className={activeTab === 'range' || (activeTab as string) === 'geometry' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
+        <div className={activeTab === 'range' || (activeTab as string) === 'geometry' ? 'flex flex-col h-full' : 'hidden'}>
           <GeometryCalculator />
         </div>
-        <div className={activeTab === 'grimoire' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
+        <div className={activeTab === 'grimoire' ? 'flex flex-col h-full' : 'hidden'}>
           <Grimoire isDm={isGM} />
         </div>
-        <div className={activeTab === 'notes' ? 'flex flex-col flex-1 min-h-0 h-full' : 'hidden'}>
+        <div className={activeTab === 'notes' ? 'flex flex-col h-full' : 'hidden'}>
           <NotesTab isDm={isGM} playerName={playerName} />
         </div>
       </main>

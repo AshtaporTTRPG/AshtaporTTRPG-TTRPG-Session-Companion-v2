@@ -356,6 +356,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return initial;
   });
 
+  // Ensure expandedNoteIds is continually locked in localStorage under ashtapor_notes_expanded_ids
+  useEffect(() => {
+    persistExpandedIdsToStorage(expandedNoteIds);
+  }, [expandedNoteIds]);
+
   // Safety: non-GMs must never access DM Notes
   useEffect(() => {
     if (!isDm && activeSubTab === 'dmNotes') {

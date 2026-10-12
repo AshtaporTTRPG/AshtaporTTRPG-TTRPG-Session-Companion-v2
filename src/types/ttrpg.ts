@@ -25,6 +25,7 @@ export interface CustomCondition {
   name: string;
   isSecret: boolean;
   turnsLeft?: number;
+  timing?: 'start' | 'end' | 'none';
 }
 
 export interface Combatant {
@@ -50,7 +51,9 @@ export interface Combatant {
   notes?: string;
   hidden?: boolean; // Per-combatant DM visibility toggle (completely hidden from initiative)
   fogOfWar?: boolean; // Fog of War toggle (conceals active conditions, status badges, exact HP, and damage numbers)
+  maskStats?: boolean; // Mask Stats: HP, AC and exact damage numbers hidden from players
   isSecret?: boolean; // Secret Boss / NPC marker (completely hidden from player initiative until revealed)
+  isReserve?: boolean; // Reserve / Stage: Reinforcements hidden from player roster until deployed
   sortOrder?: number; // GM manual sorting priority order
   updatedAt?: number; // State modification timestamp to prevent desync
   tokenId?: string; // Linked Owlbear Rodeo scene token ID for lightweight token focus
@@ -84,15 +87,33 @@ export function getEffectiveAc(combatant: Combatant): { effectiveAc: number; bon
 }
 
 /**
- * Returns true if a combatant is considered under Fog of War.
+ * Returns true if a combatant is considered under Fog of War / Masked Stats.
+ * - If maskStats is explicitly set, it respects that boolean.
  * - If fogOfWar is explicitly set, it respects that boolean.
- * - If hidden or isSecret is true, it is under Fog of War.
+ * - If hidden, isSecret, or isReserve is true, it is masked.
  * - Otherwise, monsters, bosses, and custom environmental entities default to Fog of War.
  */
 export function isCombatantFoW(combatant: Combatant): boolean {
+  if (combatant.maskStats !== undefined) return combatant.maskStats;
   if (combatant.fogOfWar !== undefined) return combatant.fogOfWar;
-  if (combatant.hidden || combatant.isSecret) return true;
+  if (combatant.hidden || combatant.isSecret || combatant.isReserve) return true;
   return combatant.type === 'monster' || combatant.type === 'boss' || combatant.type === 'custom';
+}
+
+/**
+ * Generates an incremented clone name for minion duplication.
+ * If name ends in a number (e.g. "Goblin 1"), increments it ("Goblin 2");
+ * otherwise, appends " 2" (e.g. "Cultist 2").
+ */
+export function getClonedCombatantName(name: string): string {
+  const trimmed = (name || 'Combatant').trim();
+  const match = trimmed.match(/^(.*?)(\d+)$/);
+  if (match) {
+    const base = match[1].trimEnd();
+    const num = parseInt(match[2], 10);
+    return `${base} ${num + 1}`;
+  }
+  return `${trimmed} 2`;
 }
 
 /**

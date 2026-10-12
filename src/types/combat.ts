@@ -10,6 +10,7 @@ export {
   getEffectiveAc,
   isCombatantFoW,
   sortInitiativeStrictDescending,
+  getClonedCombatantName,
 } from './ttrpg';
 
 export interface ConcentrationAlertState {

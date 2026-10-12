@@ -7,6 +7,7 @@ import {
   isCombatantFoW,
   sortInitiativeStrictDescending,
   getEffectiveAc,
+  getClonedCombatantName,
 } from '../../types/ttrpg';
 import { liveFeedSync, UnifiedFeedItem } from '../../utils/liveFeedSync';
 import OBR from '@owlbear-rodeo/sdk';
@@ -40,10 +41,14 @@ import {
   Users,
   Crown,
   Layers,
-  Crosshair,
-  Link,
+  Copy,
+  Clock,
+  Volume2,
+  VolumeX,
+  Shield,
 } from 'lucide-react';
 import { CombatantRow } from './CombatantRow';
+import { AddCombatantModal, NewCombatantData } from './AddCombatantModal';
 
 export { ROOM_METADATA_KEY, COMBAT_STATE_KEY } from '../../utils/obrCombatSync';
 
@@ -112,6 +117,7 @@ export const normalizeCondition = (c: any): CustomCondition => {
       id: `cond-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: c,
       isSecret: false,
+      timing: 'none',
     };
   }
   return {
@@ -119,6 +125,7 @@ export const normalizeCondition = (c: any): CustomCondition => {
     name: c.name || '',
     isSecret: !!c.isSecret,
     turnsLeft: c.turnsLeft,
+    timing: c.timing || 'none',
   };
 };
 
@@ -126,35 +133,35 @@ const getTypeBadge = (type: CombatantType, customLabel?: string) => {
   switch (type) {
     case 'player':
       return (
-        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-cyan-950/80 border border-cyan-600/80 text-cyan-300 flex items-center gap-0.5 shrink-0">
+        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-500/15 border border-sky-800/50 text-sky-400 flex items-center gap-0.5 shrink-0">
           <User className="w-2.5 h-2.5" />
           <span>PC</span>
         </span>
       );
     case 'ally':
       return (
-        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-950/80 border border-emerald-600/80 text-emerald-300 flex items-center gap-0.5 shrink-0">
+        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/15 border border-emerald-800/50 text-emerald-400 flex items-center gap-0.5 shrink-0">
           <Users className="w-2.5 h-2.5" />
           <span>Ally</span>
         </span>
       );
     case 'monster':
       return (
-        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-950/80 border border-rose-800/80 text-rose-300 flex items-center gap-0.5 shrink-0">
+        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-500/15 border border-rose-800/50 text-rose-400 flex items-center gap-0.5 shrink-0">
           <Skull className="w-2.5 h-2.5 text-rose-400" />
           <span>Monster</span>
         </span>
       );
     case 'boss':
       return (
-        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-950/80 border border-rose-600/80 text-rose-300 flex items-center gap-0.5 shrink-0">
-          <Crown className="w-2.5 h-2.5 text-rose-400" />
+        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-500/15 border border-purple-700/50 text-purple-300 flex items-center gap-0.5 shrink-0">
+          <Crown className="w-2.5 h-2.5 text-purple-400" />
           <span>Boss</span>
         </span>
       );
     case 'custom':
       return (
-        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-950/80 border border-amber-600/80 text-amber-300 flex items-center gap-0.5 shrink-0">
+        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/15 border border-amber-800/50 text-amber-400 flex items-center gap-0.5 shrink-0">
           <Layers className="w-2.5 h-2.5 text-amber-400" />
           <span>{customLabel || 'Custom'}</span>
         </span>
@@ -167,6 +174,46 @@ const getTypeBadge = (type: CombatantType, customLabel?: string) => {
       );
   }
 };
+
+/**
+ * Clean Web Audio API turn chime synthesizer (zero external network requests or audio files)
+ * Generates a gentle sine-wave oscillator at 587.33 Hz (D5) tapering to 880 Hz (A5) over 250ms
+ */
+function playWebAudioTurnChime(enabled: boolean = true) {
+  if (!enabled) return;
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    const now = ctx.currentTime;
+    // D5 (587.33 Hz) tapering to A5 (880 Hz) over 250ms
+    osc.frequency.setValueAtTime(587.33, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.25);
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.25);
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 350);
+  } catch (err) {
+    console.warn('Could not play Web Audio turn chime:', err);
+  }
+}
 
 export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }) => {
   const rollerIdentity = playerName || liveFeedSync.getPlayerName();
@@ -218,6 +265,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   });
 
+  // Audio Turn Chime Toggle (enabled by default)
+  const [isTurnChimeEnabled, setIsTurnChimeEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ashtapor_turn_chime') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
   // Concentration Damage DC alerts map: combatantId -> { dc, expiresAt }
   const [concentrationAlerts, setConcentrationAlerts] = useState<
     Record<string, { dc: number; expiresAt: number }>
@@ -243,26 +299,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }, 6000);
   };
 
-  // Lightweight Token Focus helper using OBR SDK (decoupled from roster presence)
-  const handleFocusToken = async (tokenId?: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!tokenId || !OBR.isReady) return;
-    try {
-      const items = await OBR.scene.items.getItems([tokenId]);
-      if (items && items.length > 0) {
-        const token = items[0];
-        if (token && token.position) {
-          const scale = await OBR.viewport.getScale().catch(() => 1);
-          await OBR.viewport.animateTo({ position: token.position, scale });
-          await OBR.player.select([tokenId]);
-        }
-      }
-    } catch (err) {
-      console.warn('Could not focus token on map:', err);
-    }
-  };
-
-  // Modal / Flyout states
+  // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [actionMenuCombatantId, setActionMenuCombatantId] = useState<string | null>(null);
@@ -272,7 +309,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const deletionTombstones = useRef<Map<string, number>>(new Map());
 
   // Recently added combatants tracking (ID -> expiration timestamp)
-  // Guarantees newly added combatants are not wiped by out-of-order metadata change events
   const recentlyAddedIdsRef = useRef<Map<string, number>>(new Map());
 
   // Timestamp of last local reset/clear encounter
@@ -296,6 +332,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
   // Custom condition form state in combatant options menu
   const [conditionInput, setConditionInput] = useState<string>('');
+  const [conditionTiming, setConditionTiming] = useState<'none' | 'start' | 'end'>('none');
   const [conditionIsSecret, setConditionIsSecret] = useState<boolean>(false);
 
   // Inline Temp HP click-edit state
@@ -309,18 +346,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return feed.filter((i) => i.type === 'combat' || i.type === 'turn').slice(-30);
   });
 
-  // Form states for Add Combatant
-  const [newName, setNewName] = useState('');
-  const [newType, setNewType] = useState<CombatantType>('player');
-  const [newCustomLabel, setNewCustomLabel] = useState('');
-  const [newInitiative, setNewInitiative] = useState(10);
-  const [newAc, setNewAc] = useState(10);
-  const [newHp, setNewHp] = useState(25);
-  const [newTempHp, setNewTempHp] = useState(0);
-  const [newTokenId, setNewTokenId] = useState('');
-  const [newHidden, setNewHidden] = useState(false);
-  const [newIsSecret, setNewIsSecret] = useState(false);
-
   // Edit draft states
   const [editName, setEditName] = useState('');
   const [editType, setEditType] = useState<CombatantType>('player');
@@ -330,7 +355,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [editHpMax, setEditHpMax] = useState(25);
   const [editHpCurr, setEditHpCurr] = useState(25);
   const [editTempHp, setEditTempHp] = useState(0);
-  const [editTokenId, setEditTokenId] = useState('');
 
   // Turn alert toast
   const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
@@ -402,18 +426,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const now = Date.now();
 
-    // Prune expired deletion tombstones
     for (const [id, expiry] of deletionTombstones.current.entries()) {
       if (now > expiry) deletionTombstones.current.delete(id);
     }
 
-    // Prune expired recently added IDs
     for (const [id, expiry] of recentlyAddedIdsRef.current.entries()) {
       if (now > expiry) recentlyAddedIdsRef.current.delete(id);
     }
 
-    // Protection against empty array overwrite:
-    // If incoming is empty, do NOT wipe local roster unless an explicit reset was recorded
     const fullState = state as CombatState;
     const isExplicitReset =
       fullState.combatStatus === 'setup' &&
@@ -425,10 +445,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       return;
     }
 
-    // Filter out tombstoned deleted items
     const validIncoming = incomingList.filter((c) => !deletionTombstones.current.has(c.id));
 
-    // Merged map starting with incoming combatants
     const mergedMap = new Map<string, Combatant>();
     for (const inc of validIncoming) {
       const local = localCombatantsRef.current.find((l) => l.id === inc.id);
@@ -439,7 +457,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
     }
 
-    // CRITICAL: Retain newly added or recent local combatants not yet included in the incoming payload
     for (const local of localCombatantsRef.current) {
       if (!mergedMap.has(local.id) && !deletionTombstones.current.has(local.id)) {
         const isRecentlyAdded = recentlyAddedIdsRef.current.has(local.id);
@@ -454,7 +471,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setCombatants(merged);
     localCombatantsRef.current = merged;
 
-    // Turn index and active combatant sync
     if (fullState.lastTurnChangeTime && fullState.lastTurnChangeTime < lastTurnChangeTimeRef.current) {
       // Ignore stale rollback
     } else {
@@ -530,7 +546,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // Turn management: NEXT TURN
+  // Turn management: NEXT TURN with Auto-Round Increment & Web Audio Turn Bell
   const handleNextTurn = async () => {
     if (combatants.length === 0 || isTurnUpdating) return;
     setIsTurnUpdating(true);
@@ -551,6 +567,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     let nextActiveId: string;
     let nextRound = round;
 
+    // Auto-Round Increment: If advancing past the last combatant, automatically cycle back to the first and increment round
     if (currentIndex === -1 || currentIndex >= sorted.length - 1) {
       nextActiveId = sorted[0].id;
       nextRound = round + 1;
@@ -560,27 +577,33 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     const nextIndex = sorted.findIndex((c) => c.id === nextActiveId);
-    const activeCombatant = sorted[nextIndex];
+    const nextCombatant = sorted[nextIndex];
 
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextIndex);
     setRound(nextRound);
-    playTurnSound();
 
-    if (activeCombatant) {
-      const isHidden = activeCombatant.hidden || activeCombatant.isSecret;
+    // Audio Turn Chime (Web Audio API synth)
+    if (isTurnChimeEnabled) {
+      playWebAudioTurnChime(true);
+    } else {
+      playTurnSound();
+    }
+
+    if (nextCombatant) {
+      const isHidden = nextCombatant.isReserve || nextCombatant.hidden || nextCombatant.isSecret;
       if (!isHidden) {
-        const announcement = `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`;
+        const announcement = `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${nextCombatant.name}'s turn! (Round ${nextRound})`;
         liveFeedSync.recordTurnAnnouncement(announcement, true);
-        if (activeCombatant.type === 'player') {
-          setPlayerTurnAlert(`⚔️ ${activeCombatant.name.toUpperCase()}'S TURN!`);
+        if (nextCombatant.type === 'player') {
+          setPlayerTurnAlert(`⚔️ ${nextCombatant.name.toUpperCase()}'S TURN!`);
           setTimeout(() => setPlayerTurnAlert(null), 4000);
         } else {
           setPlayerTurnAlert(null);
         }
       } else {
         liveFeedSync.recordCombatLog(
-          `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${activeCombatant.name}'s turn! (Round ${nextRound})`,
+          `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${nextCombatant.name}'s turn! (Round ${nextRound})`,
           true,
           undefined,
           true
@@ -657,7 +680,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setActiveCombatantId(firstId);
     setRound(1);
     setCombatStatus('active');
-    playTurnSound();
+
+    if (isTurnChimeEnabled) {
+      playWebAudioTurnChime(true);
+    } else {
+      playTurnSound();
+    }
 
     if (first) {
       liveFeedSync.recordCombatLog(
@@ -752,13 +780,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleHpDelta = (combatantId: string, delta: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isEnemyOrCustom = target.type === 'boss' || target.type === 'monster' || target.type === 'custom';
     const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
-    const isSecret = target.isSecret || target.hidden;
+    const isSecret = target.isReserve || target.isSecret || target.hidden;
+    const isMasked = target.maskStats || target.fogOfWar || target.type === 'monster' || target.type === 'boss';
+
     if (!isDm && !isPlayerOrAlly) return;
 
     let currentTemp = target.tempHp ?? target.hpTemp ?? 0;
     let currentHp = target.hpCurrent;
+    let updatedDeathSaves = target.deathSaves;
 
     if (delta < 0) {
       const damage = Math.abs(delta);
@@ -779,30 +809,38 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         const dc = calculateConcentrationDC(damage);
         triggerConcentrationAlert(target.id, dc);
         const dmMsg = `⚡ ${target.name} took ${damage} dmg while concentrating! DC ${dc} CON save required.`;
-        const pMsg = isSecret ? undefined : isEnemyOrCustom ? `⚔️ ${target.name} took damage.` : dmMsg;
+        const pMsg = isSecret ? undefined : isMasked ? `⚔️ ${target.name} took damage!` : dmMsg;
         liveFeedSync.recordCombatLog(dmMsg, true, pMsg, isSecret);
       }
 
       const logDm = `⚔️ ${target.name} took ${damage} damage (${currentHp}/${target.hpMax} HP${
         currentTemp > 0 ? `, +${currentTemp} THP` : ''
       })`;
+
+      // Mask Stats: Table combat feed displays "[Combatant] took damage!" instead of exact numbers
       let logP: string | undefined;
       if (isSecret) {
         logP = undefined;
-      } else if (isEnemyOrCustom) {
-        logP = `⚔️ ${target.name} took damage.`;
+      } else if (isMasked) {
+        logP = `⚔️ ${target.name} took damage!`;
       } else {
         logP = logDm;
       }
       liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
     } else {
       currentHp = Math.min(target.hpMax, currentHp + delta);
+
+      // When PC receives healing (hp > 0), reset death saves
+      if (currentHp > 0 && target.type === 'player' && updatedDeathSaves) {
+        updatedDeathSaves = { successes: 0, failures: 0 };
+      }
+
       const logDm = `💚 ${target.name} healed +${delta} HP (${currentHp}/${target.hpMax} HP)`;
       let logP: string | undefined;
       if (isSecret) {
         logP = undefined;
-      } else if (isEnemyOrCustom) {
-        logP = `💚 ${target.name} received healing.`;
+      } else if (isMasked) {
+        logP = `💚 ${target.name} received healing!`;
       } else {
         logP = logDm;
       }
@@ -818,6 +856,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             hp: currentHp,
             hpTemp: currentTemp,
             tempHp: currentTemp,
+            deathSaves: updatedDeathSaves,
             updatedAt: now,
           }
         : c
@@ -853,13 +892,88 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
-  // UPDATE TOKEN ID
-  const handleUpdateTokenId = (combatantId: string, tokenId: string) => {
+  // UPDATE DEATH SAVES
+  const handleUpdateDeathSaves = (
+    combatantId: string,
+    saves: { successes: number; failures: number }
+  ) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+
+    const now = Date.now();
     const updated = combatants.map((c) =>
-      c.id === combatantId ? { ...c, tokenId, updatedAt: Date.now() } : c
+      c.id === combatantId
+        ? {
+            ...c,
+            deathSaves: saves,
+            updatedAt: now,
+          }
+        : c
     );
     setCombatants(updated);
     localCombatantsRef.current = updated;
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // 1-CLICK DUPLICATE MINION
+  const handleDuplicateCombatant = async (combatantId: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+
+    const uniqueId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    const clonedName = getClonedCombatantName(target.name);
+
+    const cloned: Combatant = {
+      ...target,
+      id: uniqueId,
+      name: clonedName,
+      sortOrder: (target.sortOrder ?? 0) + 1,
+      deathSaves: undefined,
+      updatedAt: Date.now(),
+    };
+
+    const updated = sortInitiativeStrictDescending([...combatants, cloned]);
+    setCombatants(updated);
+    localCombatantsRef.current = updated;
+    recentlyAddedIdsRef.current.set(uniqueId, Date.now() + 8000);
+
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
+
+    liveFeedSync.recordCombatLog(`📋 Cloned ${cloned.name} (from ${target.name}).`, true);
+    await broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    setActionMenuCombatantId(null);
+  };
+
+  // 1-CLICK DEPLOY RESERVE COMBATANT (GM Action)
+  const handleDeployCombatant = async (combatantId: string) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+
+    const updated = combatants.map((c) =>
+      c.id === combatantId
+        ? {
+            ...c,
+            isReserve: false,
+            hidden: false,
+            isSecret: false,
+            updatedAt: Date.now(),
+          }
+        : c
+    );
+
+    setCombatants(updated);
+    localCombatantsRef.current = updated;
+    liveFeedSync.recordCombatLog(
+      `👁️ ${target.name} has entered the encounter from reserves!`,
+      true
+    );
+    await broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
   // INLINE TEMP HP SAVE
@@ -885,8 +999,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
-  // ADD CUSTOM CONDITION
-  const handleAddCustomCondition = (combatantId: string, nameToUse?: string) => {
+  // ADD CUSTOM CONDITION WITH TIMING TAG
+  const handleAddCustomCondition = (
+    combatantId: string,
+    nameToUse?: string,
+    timingToUse?: 'none' | 'start' | 'end'
+  ) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
     const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
@@ -895,10 +1013,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const rawName = (nameToUse || conditionInput).trim();
     if (!rawName) return;
 
+    const timing = timingToUse ?? conditionTiming;
+
     const newCond: CustomCondition = {
       id: `cond-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: rawName,
       isSecret: isDm ? conditionIsSecret : false,
+      timing,
     };
 
     const existingNormalized = target.conditions.map(normalizeCondition);
@@ -911,10 +1032,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setCombatants(updated);
     localCombatantsRef.current = updated;
     setConditionInput('');
+    setConditionTiming('none');
     setConditionIsSecret(false);
 
-    const logDm = `✨ Condition [${rawName}]${newCond.isSecret ? ' (Secret)' : ''} applied to ${target.name}.`;
-    const logP = newCond.isSecret ? undefined : `✨ Condition [${rawName}] applied to ${target.name}.`;
+    const timingLabel = timing === 'start' ? ' (⏱ Start)' : timing === 'end' ? ' (⏱ End)' : '';
+    const logDm = `✨ Condition [${rawName}${timingLabel}]${newCond.isSecret ? ' (Secret)' : ''} applied to ${target.name}.`;
+    const logP = newCond.isSecret ? undefined : `✨ Condition [${rawName}${timingLabel}] applied to ${target.name}.`;
     liveFeedSync.recordCombatLog(logDm, true, logP);
 
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
@@ -1002,34 +1125,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(reordered, targetActiveIdx, round, activeCombatantId, combatStatus);
   };
 
-  // TOGGLE VISIBILITY (DM Only)
-  const handleToggleVisibility = (combatantId: string) => {
-    if (!isDm) return;
-    const target = combatants.find((c) => c.id === combatantId);
-    if (!target) return;
-    const isCurrentlyHidden = !!(target.hidden || target.isSecret);
-    const willBeHidden = !isCurrentlyHidden;
-
-    const updated = combatants.map((c) =>
-      c.id === combatantId
-        ? {
-            ...c,
-            hidden: willBeHidden,
-            isSecret: willBeHidden ? (c.isSecret || false) : false,
-            updatedAt: Date.now(),
-          }
-        : c
-    );
-    setCombatants(updated);
-    localCombatantsRef.current = updated;
-
-    if (isCurrentlyHidden && !willBeHidden) {
-      liveFeedSync.recordCombatLog(`👁️ ${target.name} has been revealed to players!`, true);
-    }
-
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
-  };
-
   // DELETE COMBATANT (DM Only with tombstone protection)
   const handleDeleteCombatant = (combatantId: string) => {
     if (!isDm) return;
@@ -1076,7 +1171,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setEditHpMax(c.hpMax);
     setEditHpCurr(c.hpCurrent);
     setEditTempHp(c.tempHp ?? c.hpTemp ?? 0);
-    setEditTokenId(c.tokenId || '');
   };
 
   // SAVE EDITED COMBATANT
@@ -1105,7 +1199,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             ...c,
             name: editName.trim() || c.name,
             type: allowedType,
-            role: allowedType === 'player' ? 'Player' : allowedType === 'ally' ? 'Ally' : allowedType === 'boss' ? 'Boss' : 'Monster',
+            role:
+              allowedType === 'player'
+                ? 'Player'
+                : allowedType === 'ally'
+                ? 'Ally'
+                : allowedType === 'boss'
+                ? 'Boss'
+                : 'Monster',
             customRoleLabel: allowedType === 'custom' ? editCustomLabel.trim() : undefined,
             initiative: editInit,
             armorClass: editAc,
@@ -1116,7 +1217,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             hp: newHpCurrent,
             hpTemp: Math.max(0, editTempHp),
             tempHp: Math.max(0, editTempHp),
-            tokenId: editTokenId.trim() || undefined,
             updatedAt: Date.now(),
           }
         : c
@@ -1136,99 +1236,36 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, targetIdx, round, activeCombatantId, combatStatus);
   };
 
-  // Helper to grab selected token ID from OBR scene
-  const handleLinkSelectedToken = async (targetField: 'new' | 'edit') => {
-    if (!OBR.isReady) return;
-    try {
-      const selected = await OBR.player.getSelection();
-      if (selected && selected.length > 0) {
-        if (targetField === 'new') {
-          setNewTokenId(selected[0]);
-        } else {
-          setEditTokenId(selected[0]);
-        }
-      } else {
-        alert('Please select a token on the Owlbear map first.');
-      }
-    } catch (e) {
-      console.warn('Could not get selected token:', e);
-    }
-  };
-
-  /**
-   * Robust handleAddCombatant implementation according to specifications:
-   * 1. Decoupled completely from canvas/tokens.
-   * 2. Creates a complete combatant with guaranteed unique ID.
-   * 3. Performs optimistic local state update.
-   * 4. Updates OBR room metadata and persists safely.
-   */
-  const handleAddCombatant = async (customValues?: Partial<Combatant>) => {
+  // ADD COMBATANT HANDLER (Triggered from AddCombatantModal)
+  const handleAddCombatantFromModal = async (data: NewCombatantData) => {
     const uniqueId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-    const nameToUse = (customValues?.name ?? newName).trim() || 'New Combatant';
-    const initToUse = Number(customValues?.initiative ?? newInitiative) || 10;
-    const maxHpToUse =
-      Number(customValues?.maxHp ?? customValues?.hpMax ?? customValues?.hp ?? newHp) || 10;
-    const acToUse = Number(customValues?.ac ?? customValues?.armorClass ?? newAc) || 10;
-    const roleToUse =
-      customValues?.role ||
-      (customValues?.type
-        ? customValues.type === 'player'
-          ? 'Player'
-          : customValues.type === 'boss'
-          ? 'Boss'
-          : customValues.type === 'ally'
-          ? 'Ally'
-          : 'Monster'
-        : isDm
-        ? newType === 'player'
-          ? 'Player'
-          : newType === 'ally'
-          ? 'Ally'
-          : newType === 'boss'
-          ? 'Boss'
-          : 'Monster'
-        : 'Player');
-
-    const roleLower = roleToUse.toLowerCase();
-    const normalizedType: CombatantType =
-      roleLower === 'player' || roleLower === 'pc'
-        ? 'player'
-        : roleLower === 'ally'
-        ? 'ally'
-        : roleLower === 'boss'
-        ? 'boss'
-        : roleLower === 'custom'
-        ? 'custom'
-        : 'monster';
-
     const newCombatant: Combatant = {
-      id: customValues?.id || uniqueId,
-      name: nameToUse,
-      initiative: initToUse,
-      hp: maxHpToUse,
-      maxHp: maxHpToUse,
-      hpCurrent: Number(customValues?.hpCurrent ?? maxHpToUse),
-      hpMax: maxHpToUse,
-      tempHp: Number(customValues?.tempHp ?? customValues?.hpTemp ?? newTempHp) || 0,
-      hpTemp: Number(customValues?.tempHp ?? customValues?.hpTemp ?? newTempHp) || 0,
-      ac: acToUse,
-      armorClass: acToUse,
-      role: roleToUse,
-      type: normalizedType,
-      customRoleLabel:
-        customValues?.customRoleLabel ??
-        (normalizedType === 'custom' && newCustomLabel.trim() ? newCustomLabel.trim() : undefined),
-      conditions: customValues?.conditions || [],
-      hidden: customValues?.hidden ?? (isDm && (newHidden || newIsSecret) ? true : false),
-      fogOfWar: customValues?.fogOfWar ?? (isDm && (newHidden || newIsSecret) ? true : false),
-      isSecret: customValues?.isSecret ?? (isDm && newIsSecret ? true : false),
+      id: uniqueId,
+      name: data.name,
+      initiative: data.initiative,
+      hp: data.hpMax,
+      maxHp: data.hpMax,
+      hpCurrent: data.hpMax,
+      hpMax: data.hpMax,
+      tempHp: data.hpTemp,
+      hpTemp: data.hpTemp,
+      ac: data.ac,
+      armorClass: data.ac,
+      role: data.type === 'player' ? 'Player' : data.type === 'ally' ? 'Ally' : data.type === 'boss' ? 'Boss' : 'Monster',
+      type: data.type,
+      customRoleLabel: data.customRoleLabel,
+      conditions: [],
+      maskStats: data.maskStats,
+      fogOfWar: data.maskStats,
+      isReserve: data.isReserve,
+      hidden: data.isReserve,
+      isSecret: data.isReserve,
       sortOrder: combatants.length,
       updatedAt: Date.now(),
-      tokenId: customValues?.tokenId || (newTokenId.trim() ? newTokenId.trim() : undefined),
     };
 
     // 1. Optimistic local state update
@@ -1236,7 +1273,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setCombatants(updatedList);
     localCombatantsRef.current = updatedList;
 
-    // Track recently added ID to protect against stale server metadata echoes
     recentlyAddedIdsRef.current.set(newCombatant.id, Date.now() + 8000);
 
     // 2. Local storage persistence
@@ -1259,41 +1295,24 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       setActiveTurnIndex(targetActiveIndex);
     }
 
-    if (!newCombatant.hidden && !newCombatant.isSecret) {
+    if (!newCombatant.isReserve) {
       liveFeedSync.recordCombatLog(
-        `➕ Added ${newCombatant.name} with Initiative ${newCombatant.initiative}.`,
+        `➕ Added ${newCombatant.name} (Init ${newCombatant.initiative}, ${newCombatant.hpMax} HP, ${newCombatant.ac} AC).`,
         true
       );
     }
 
     // 4. Update OBR room metadata
     await broadcastCombat(updatedList, targetActiveIndex, round, targetActiveId, combatStatus);
-
-    // Reset Form Modal
     setIsAddModalOpen(false);
-    setNewName('');
-    setNewType('player');
-    setNewCustomLabel('');
-    setNewInitiative(10);
-    setNewAc(10);
-    setNewHp(25);
-    setNewTempHp(0);
-    setNewTokenId('');
-    setNewHidden(false);
-    setNewIsSecret(false);
-  };
-
-  // ADD COMBATANT FORM SUBMISSION
-  const handleSaveNewCombatant = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    handleAddCombatant();
   };
 
   // Combatant render pipeline:
   // Decoupled from canvas items & token presence.
-  // GMs see all combatants. Players see all non-hidden/secret combatants.
-  const visibleCombatants = combatants.filter((c) => isDm || (!c.hidden && !c.isSecret));
+  // GMs see all combatants. Players see all non-reserve/non-secret combatants.
+  const visibleCombatants = combatants.filter(
+    (c) => isDm || (!c.isReserve && !c.hidden && !c.isSecret)
+  );
 
   // Active combatant details
   const activeCombatant =
@@ -1310,7 +1329,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         </div>
       )}
 
-      {/* 1. HEADER ROW: Round Counter, Active Turn Name, Nav Buttons */}
+      {/* 1. HEADER ROW: Round Counter, Active Turn Name, Chime Bell, Nav Buttons */}
       <div className="h-11 px-2.5 bg-slate-950/95 border-b border-slate-800 flex items-center justify-between shrink-0 gap-2 rounded-t-lg">
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 rounded bg-amber-950/90 border border-amber-500/60 text-amber-300 font-mono font-bold text-[11px] shrink-0">
@@ -1319,10 +1338,36 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
           <div className="truncate text-xs font-medium text-slate-300 flex items-center gap-1">
             <span className="text-slate-500 text-[10px] uppercase font-bold">Turn:</span>
-            <span className="font-semibold text-amber-300 truncate max-w-[120px]" title={activeTurnName}>
+            <span
+              className="font-semibold text-amber-300 truncate max-w-[110px]"
+              title={activeTurnName}
+            >
               {activeTurnName}
             </span>
           </div>
+
+          {/* Web Audio Turn Chime Speaker Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsTurnChimeEnabled((prev) => {
+                const next = !prev;
+                try {
+                  localStorage.setItem('ashtapor_turn_chime', next ? 'true' : 'false');
+                } catch {}
+                return next;
+              });
+            }}
+            className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+            title={isTurnChimeEnabled ? 'Turn Chime: On (Web Audio bell)' : 'Turn Chime: Off (Muted)'}
+            aria-label="Toggle Turn Chime"
+          >
+            {isTurnChimeEnabled ? (
+              <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <VolumeX className="w-3.5 h-3.5 text-slate-600" />
+            )}
+          </button>
         </div>
 
         {/* Turn Nav Controls */}
@@ -1354,7 +1399,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             onClick={handleNextTurn}
             disabled={combatants.length === 0 || isTurnUpdating}
             className="h-7 px-2.5 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 transition shadow cursor-pointer disabled:opacity-40"
-            title="Advance to Next Turn"
+            title="Advance to Next Turn (Cycles and increments round when last turn ends)"
           >
             <span>Next Turn</span>
             <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -1385,10 +1430,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             </p>
             <button
               type="button"
-              onClick={() => {
-                setNewType(isDm ? 'boss' : 'player');
-                setIsAddModalOpen(true);
-              }}
+              onClick={() => setIsAddModalOpen(true)}
               className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer"
             >
               + Add First Combatant
@@ -1418,6 +1460,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                     setActionMenuCombatantId(combatantId);
                     setEditingCombatantId(null);
                     setConditionInput('');
+                    setConditionTiming('none');
                     setConditionIsSecret(false);
                   }
                 }}
@@ -1425,7 +1468,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 onMoveCombatant={handleMoveCombatant}
                 onHpDelta={handleHpDelta}
                 onUpdateMaxHp={handleUpdateMaxHp}
-                onUpdateTokenId={handleUpdateTokenId}
+                onUpdateDeathSaves={handleUpdateDeathSaves}
+                onDuplicateCombatant={handleDuplicateCombatant}
+                onDeployCombatant={handleDeployCombatant}
+                onDeleteCombatant={handleDeleteCombatant}
                 onRemoveCondition={handleRemoveCondition}
                 concentrationAlert={concentrationAlerts[c.id]}
                 inlineThpId={inlineThpId}
@@ -1548,10 +1594,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => {
-              setNewType(isDm ? 'boss' : 'player');
-              setIsAddModalOpen(true);
-            }}
+            onClick={() => setIsAddModalOpen(true)}
             className="h-7 px-2.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 shadow transition cursor-pointer"
             title="Add Combatant to Encounter"
           >
@@ -1576,255 +1619,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         </div>
       </div>
 
-      {/* MODAL: ADD COMBATANT */}
-      {isAddModalOpen && (
-        <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-xl p-4 shadow-2xl space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-sm font-bold text-slate-100 font-display flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-amber-400" />
-                <span>Add Combatant</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveNewCombatant} className="space-y-2.5">
-              <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                  Name *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Valerius, Goblin Archer, Dragon, Lair Action"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                  Combatant Type
-                </label>
-                <div className={`grid gap-1 ${isDm ? 'grid-cols-5' : 'grid-cols-2'}`}>
-                  <button
-                    type="button"
-                    onClick={() => setNewType('player')}
-                    className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
-                      newType === 'player'
-                        ? 'bg-cyan-500 text-slate-950 font-bold border-cyan-400'
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    PC
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setNewType('ally')}
-                    className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
-                      newType === 'ally'
-                        ? 'bg-emerald-500 text-slate-950 font-bold border-emerald-400'
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    Ally
-                  </button>
-
-                  {isDm && (
-                    <button
-                      type="button"
-                      onClick={() => setNewType('monster')}
-                      className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
-                        newType === 'monster'
-                          ? 'bg-rose-500 text-slate-950 font-bold border-rose-400'
-                          : 'bg-slate-950 text-slate-400 border-slate-800'
-                      }`}
-                    >
-                      Monster
-                    </button>
-                  )}
-
-                  {isDm && (
-                    <button
-                      type="button"
-                      onClick={() => setNewType('boss')}
-                      className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
-                        newType === 'boss'
-                          ? 'bg-purple-600 text-amber-200 font-bold border-amber-400'
-                          : 'bg-slate-950 text-slate-400 border-slate-800'
-                      }`}
-                    >
-                      Boss
-                    </button>
-                  )}
-
-                  {isDm && (
-                    <button
-                      type="button"
-                      onClick={() => setNewType('custom')}
-                      className={`py-1 text-[11px] font-semibold rounded border transition cursor-pointer ${
-                        newType === 'custom'
-                          ? 'bg-amber-500 text-slate-950 font-bold border-amber-400'
-                          : 'bg-slate-950 text-slate-400 border-slate-800'
-                      }`}
-                    >
-                      Custom
-                    </button>
-                  )}
-                </div>
-
-                {!isDm && (
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Players can create &amp; edit PC and Ally combatants. Monsters &amp; Bosses are GM exclusive.
-                  </p>
-                )}
-              </div>
-
-              {isDm && newType === 'custom' && (
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                    Custom Role Label (optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Lair Action, Environmental, Mass Combat"
-                    value={newCustomLabel}
-                    onChange={(e) => setNewCustomLabel(e.target.value)}
-                    className="w-full px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-amber-300"
-                  />
-                </div>
-              )}
-
-              {/* Numerical Stats: Initiative, AC, Max HP, Temp HP */}
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                    Initiative
-                  </label>
-                  <input
-                    type="number"
-                    value={newInitiative}
-                    onChange={(e) => setNewInitiative(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-amber-300"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                    AC
-                  </label>
-                  <input
-                    type="number"
-                    value={newAc}
-                    onChange={(e) => setNewAc(parseInt(e.target.value, 10) || 10)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-200"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                    Max HP
-                  </label>
-                  <input
-                    type="number"
-                    value={newHp}
-                    onChange={(e) => setNewHp(parseInt(e.target.value, 10) || 1)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-slate-200"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                    Temp HP
-                  </label>
-                  <input
-                    type="number"
-                    value={newTempHp}
-                    onChange={(e) => setNewTempHp(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-cyan-300"
-                  />
-                </div>
-              </div>
-
-              {/* Linked Token ID for Map Focus */}
-              <div>
-                <div className="flex items-center justify-between mb-0.5">
-                  <label className="text-[10px] font-semibold text-slate-400">
-                    Linked Map Token ID (optional)
-                  </label>
-                  {OBR.isReady && (
-                    <button
-                      type="button"
-                      onClick={() => handleLinkSelectedToken('new')}
-                      className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <Link className="w-2.5 h-2.5" />
-                      <span>Use selected token</span>
-                    </button>
-                  )}
-                </div>
-                <input
-                  type="text"
-                  placeholder="Paste Owlbear token ID or click 'Use selected token'"
-                  value={newTokenId}
-                  onChange={(e) => setNewTokenId(e.target.value)}
-                  className="w-full px-2 py-1 text-xs font-mono rounded bg-slate-950 border border-slate-700 text-slate-200 placeholder-slate-600"
-                />
-              </div>
-
-              {/* FoW Toggles for GM */}
-              {isDm && (
-                <div className="flex items-center gap-3 pt-1 text-[11px] text-slate-300">
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newHidden}
-                      onChange={(e) => setNewHidden(e.target.checked)}
-                      className="rounded bg-slate-950 border-slate-700 text-amber-400 cursor-pointer"
-                    />
-                    <span>Hidden (FoW)</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer" title="Secret Boss: Completely hidden from Player view and room logs until revealed">
-                    <input
-                      type="checkbox"
-                      checked={newIsSecret}
-                      onChange={(e) => setNewIsSecret(e.target.checked)}
-                      className="rounded bg-slate-950 border-slate-700 text-rose-500 cursor-pointer"
-                    />
-                    <span className="text-rose-400 font-semibold">Secret Boss</span>
-                  </label>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shadow"
-                >
-                  Add to Order
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* MODAL: ADD COMBATANT (Decoupled, zero token inputs, mask/reserve checkboxes) */}
+      <AddCombatantModal
+        isOpen={isAddModalOpen}
+        isDm={isDm}
+        onClose={() => setIsAddModalOpen(false)}
+        onAdd={handleAddCombatantFromModal}
+      />
 
       {/* CONFIRMATION MODAL: RESET ENCOUNTER */}
       {isClearModalOpen && (
-        <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xs bg-slate-900 border border-rose-800/80 rounded-xl p-4 shadow-2xl space-y-3 text-center">
             <RotateCcw className="w-8 h-8 text-rose-400 mx-auto" />
             <h4 className="text-sm font-bold text-slate-100 font-display">
@@ -1871,21 +1676,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
               }}
             />
 
-            <div className="fixed inset-x-4 top-16 z-50 bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl p-3 max-h-[70vh] overflow-y-auto space-y-2.5 text-xs animate-fadeIn">
+            <div className="fixed inset-x-4 top-16 z-50 bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl p-3 max-h-[75vh] overflow-y-auto space-y-2.5 text-xs animate-fadeIn">
               <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
                 <div className="flex items-center gap-1.5 truncate">
                   <span className="font-bold text-slate-100 text-sm truncate">{menuCombatant.name}</span>
                   {getTypeBadge(menuCombatant.type, menuCombatant.customRoleLabel)}
-                  {menuCombatant.tokenId && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleFocusToken(menuCombatant.tokenId, e)}
-                      title="Focus Token on Map"
-                      className="p-1 rounded text-amber-400 hover:bg-neutral-800 cursor-pointer"
-                    >
-                      <Crosshair className="w-3.5 h-3.5" />
-                    </button>
-                  )}
                 </div>
                 <button
                   type="button"
@@ -1900,11 +1695,39 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 </button>
               </div>
 
-              {/* Custom Condition Open Input with Secret Checkbox */}
+              {/* Duplicate Minion Button in Action Menu (Section 3.C) */}
+              <div className="flex items-center gap-2 pb-1 border-b border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => handleDuplicateCombatant(menuCombatant.id)}
+                  className="flex-1 py-1 px-2 text-xs font-semibold rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-amber-400 text-amber-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm"
+                  title="Create an exact duplicate minion with auto-incremented name"
+                >
+                  <Copy className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Duplicate Combatant</span>
+                </button>
+
+                {isDm && (menuCombatant.isReserve || menuCombatant.hidden) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDeployCombatant(menuCombatant.id);
+                      setActionMenuCombatantId(null);
+                    }}
+                    className="py-1 px-2.5 text-xs font-bold rounded bg-purple-900 hover:bg-purple-800 border border-purple-600 text-purple-200 flex items-center gap-1 transition cursor-pointer"
+                    title="Deploy reserve combatant to player view"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Deploy</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Custom Condition Open Input with Timing Badges (Section 3.F) */}
               {canEdit && (
                 <div className="space-y-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Add Condition
+                    Add Condition &amp; Timing Reminder
                   </span>
                   <div className="flex items-center gap-1.5">
                     <input
@@ -1920,6 +1743,47 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                       placeholder="Type custom condition..."
                       className="flex-1 px-2 py-1 text-xs rounded-lg bg-neutral-950 border border-neutral-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
                     />
+
+                    {/* Timing Selector: None | Start | End */}
+                    <div className="flex items-center rounded border border-neutral-700 bg-neutral-950 p-0.5 text-[9px] font-bold shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setConditionTiming('none')}
+                        className={`px-1.5 py-0.5 rounded transition ${
+                          conditionTiming === 'none'
+                            ? 'bg-neutral-800 text-slate-200'
+                            : 'text-neutral-500 hover:text-neutral-300'
+                        }`}
+                        title="No timing reminder"
+                      >
+                        None
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConditionTiming('start')}
+                        className={`px-1.5 py-0.5 rounded transition ${
+                          conditionTiming === 'start'
+                            ? 'bg-amber-400 text-neutral-950 font-bold'
+                            : 'text-neutral-500 hover:text-neutral-300'
+                        }`}
+                        title="Alert GM at Turn Start"
+                      >
+                        ⏱ Start
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConditionTiming('end')}
+                        className={`px-1.5 py-0.5 rounded transition ${
+                          conditionTiming === 'end'
+                            ? 'bg-sky-400 text-neutral-950 font-bold'
+                            : 'text-neutral-500 hover:text-neutral-300'
+                        }`}
+                        title="Alert GM at Turn End"
+                      >
+                        ⏱ End
+                      </button>
+                    </div>
+
                     {isDm && (
                       <label
                         className="flex items-center gap-1 text-[11px] text-slate-300 shrink-0 cursor-pointer select-none"
@@ -1934,6 +1798,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                         <span className="text-[10px] font-bold text-rose-400">Secret</span>
                       </label>
                     )}
+
                     <button
                       type="button"
                       onClick={() => handleAddCustomCondition(menuCombatant.id)}
@@ -1994,6 +1859,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                                 <EyeOff className="w-2.5 h-2.5 text-rose-400" />
                               )}
                               <span>{cond.name}</span>
+                              {cond.timing && cond.timing !== 'none' && (
+                                <span className="font-mono text-[8px] opacity-90 px-1 py-0.1 rounded bg-black/40 border border-white/10 ml-0.5">
+                                  ⏱ {cond.timing === 'start' ? 'Start' : 'End'}
+                                </span>
+                              )}
                               <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />
                             </button>
                           );
@@ -2051,7 +1921,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                         type="number"
                         value={editInit}
                         onChange={(e) => setEditInit(parseInt(e.target.value, 10) || 0)}
-                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-amber-300"
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-amber-300 text-center"
                       />
                     </div>
                     <div>
@@ -2060,7 +1930,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                         type="number"
                         value={editAc}
                         onChange={(e) => setEditAc(parseInt(e.target.value, 10) || 10)}
-                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200"
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200 text-center"
                       />
                     </div>
                     <div>
@@ -2069,7 +1939,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                         type="number"
                         value={editHpMax}
                         onChange={(e) => setEditHpMax(parseInt(e.target.value, 10) || 1)}
-                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200"
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200 text-center"
                       />
                     </div>
                     <div>
@@ -2078,33 +1948,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                         type="number"
                         value={editTempHp}
                         onChange={(e) => setEditTempHp(parseInt(e.target.value, 10) || 0)}
-                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-cyan-300"
+                        className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-cyan-300 text-center"
                       />
                     </div>
-                  </div>
-
-                  {/* Linked Token ID input in edit modal */}
-                  <div>
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-[10px] text-slate-400">Map Token ID</span>
-                      {OBR.isReady && (
-                        <button
-                          type="button"
-                          onClick={() => handleLinkSelectedToken('edit')}
-                          className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <Link className="w-2.5 h-2.5" />
-                          <span>Use selected token</span>
-                        </button>
-                      )}
-                    </div>
-                    <input
-                      type="text"
-                      value={editTokenId}
-                      onChange={(e) => setEditTokenId(e.target.value)}
-                      placeholder="Owlbear token ID"
-                      className="w-full px-2 py-0.5 text-xs font-mono rounded bg-neutral-950 border border-neutral-700 text-slate-200"
-                    />
                   </div>
 
                   <div className="flex items-center gap-1.5 pt-1">
@@ -2135,27 +1981,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                       <Edit2 className="w-3 h-3" />
                       <span>Edit Stats</span>
                     </button>
-
-                    {/* GM Only: Toggle FoW/Secret visibility */}
-                    {isDm && (
-                      <button
-                        type="button"
-                        onClick={() => handleToggleVisibility(menuCombatant.id)}
-                        className={`py-1 px-2 text-[11px] font-semibold rounded flex items-center gap-1 border transition cursor-pointer ${
-                          menuCombatant.hidden || menuCombatant.isSecret
-                            ? 'bg-rose-950/80 border-rose-800 text-rose-300'
-                            : 'bg-neutral-800 border-neutral-700 text-slate-300 hover:text-slate-100'
-                        }`}
-                        title="Toggle visibility to players"
-                      >
-                        {menuCombatant.hidden || menuCombatant.isSecret ? (
-                          <EyeOff className="w-3 h-3" />
-                        ) : (
-                          <Eye className="w-3 h-3" />
-                        )}
-                        <span>{menuCombatant.hidden || menuCombatant.isSecret ? 'Hidden' : 'Visible'}</span>
-                      </button>
-                    )}
 
                     {/* GM Only: Remove combatant */}
                     {isDm && (
