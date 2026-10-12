@@ -46,7 +46,7 @@ export interface BroadcastNotePayload {
   broadcastAt: number;
 }
 
-export type NotesScope = 'my-notes' | 'table-notes' | 'dm-notes';
+export type NotesScope = 'my-notes' | 'table-notes' | 'dm-notes' | 'myNotes' | 'tableNotes' | 'dmNotes';
 
 export const OBR_TABLE_NOTES_KEY = 'com.ashtapor.session-companion/table-notes';
 export const OBR_LEGACY_TABLE_NOTES_KEY = 'com.ashtapor.companion/table-notes';
