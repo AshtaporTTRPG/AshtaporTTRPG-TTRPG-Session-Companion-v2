@@ -49,6 +49,9 @@ import {
 } from 'lucide-react';
 import { CombatantRow } from './CombatantRow';
 import { AddCombatantModal, NewCombatantData } from './AddCombatantModal';
+import { MyRosterDrawer } from './MyRosterDrawer';
+import { ResetCombatModal } from './ResetCombatModal';
+import { RosterMember } from '../../types/combat';
 
 export { ROOM_METADATA_KEY, COMBAT_STATE_KEY } from '../../utils/obrCombatSync';
 
@@ -756,8 +759,52 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(sorted, targetIdx, round, activeCombatantId, combatStatus);
   };
 
-  // RESET ENCOUNTER / CLEAR ALL
-  const handleClearCombat = () => {
+  // SMART RESET: OPTION 1 - CLEAR HOSTILES ONLY (Standard Wave Reset)
+  const handleClearHostilesOnly = async () => {
+    const remainingParty = combatants.filter(
+      (c) =>
+        c.role !== 'Monster' &&
+        c.role !== 'Boss' &&
+        c.role !== 'Custom' &&
+        c.type !== 'monster' &&
+        c.type !== 'boss' &&
+        c.type !== 'custom'
+    );
+
+    const sortedParty = sortInitiativeStrictDescending(remainingParty);
+    const firstPartyId = sortedParty[0]?.id || null;
+
+    setCombatants(sortedParty);
+    localCombatantsRef.current = sortedParty;
+    setActiveCombatantId(firstPartyId);
+    setActiveTurnIndex(0);
+    setRound(1);
+    setCombatStatus(sortedParty.length > 0 ? 'active' : 'setup');
+    setIsClearModalOpen(false);
+    setConcentrationAlerts({});
+
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(sortedParty));
+      if (firstPartyId) {
+        localStorage.setItem('ttrpg_active_combatant_id', firstPartyId);
+      } else {
+        localStorage.removeItem('ttrpg_active_combatant_id');
+      }
+      localStorage.setItem('ttrpg_active_turn_index', '0');
+      localStorage.setItem('ttrpg_combat_round', '1');
+      localStorage.setItem('ttrpg_combat_status', sortedParty.length > 0 ? 'active' : 'setup');
+    } catch {}
+
+    liveFeedSync.recordCombatLog(
+      `⚔️ Hostiles cleared! Party preserved (${sortedParty.length} heroes remaining, Round 1).`,
+      true
+    );
+
+    await broadcastCombat(sortedParty, 0, 1, firstPartyId, sortedParty.length > 0 ? 'active' : 'setup');
+  };
+
+  // SMART RESET: OPTION 2 - FULL CLEAR / END ENCOUNTER
+  const handleFullClearCombat = async () => {
     const now = Date.now();
     lastLocalClearTimeRef.current = now;
     recentlyAddedIdsRef.current.clear();
@@ -780,8 +827,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       localStorage.setItem('ttrpg_combat_status', 'setup');
     } catch {}
 
-    liveFeedSync.recordCombatLog('⚔️ Encounter reset to a blank slate.', true);
-    broadcastCombat([], 0, 1, null, 'setup');
+    liveFeedSync.clearFeed();
+    setCombatFeedItems([]);
+    liveFeedSync.recordCombatLog('⚔️ Encounter ended and reset to a blank slate.', true);
+
+    await broadcastCombat([], 0, 1, null, 'setup');
   };
 
   // HP DELTA MICRO-BUTTONS (-1, -5, +5, +1)
@@ -1350,15 +1400,81 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastCombat(updated, targetIdx, round, activeCombatantId, combatStatus);
   };
 
-  // ADD COMBATANT HANDLER (Triggered from AddCombatantModal)
-  const handleAddCombatantFromModal = async (data: NewCombatantData) => {
+  // ATOMIC COMBATANT METADATA WRITE LOCK
+  const handleAddCombatant = async (newEntry: Omit<Combatant, 'id'>) => {
     const uniqueId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
     const newCombatant: Combatant = {
+      ...newEntry,
       id: uniqueId,
+      hp: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
+      maxHp: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
+      hpCurrent: Number(newEntry.hpCurrent ?? newEntry.maxHp ?? newEntry.hpMax) || 10,
+      hpMax: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
+      tempHp: Number(newEntry.tempHp ?? newEntry.hpTemp) || 0,
+      hpTemp: Number(newEntry.tempHp ?? newEntry.hpTemp) || 0,
+      initiative: Number(newEntry.initiative) || 10,
+      ac: Number(newEntry.ac ?? newEntry.armorClass) || 10,
+      armorClass: Number(newEntry.ac ?? newEntry.armorClass) || 10,
+      conditions: newEntry.conditions || [],
+      hidden: Boolean(newEntry.hidden),
+      sortOrder: combatants.length,
+      updatedAt: Date.now(),
+    };
+
+    // Fetch fresh room metadata to prevent race-condition overwrites
+    let existingCombatants = combatants;
+    try {
+      if (OBR.isReady) {
+        const currentMeta = await OBR.room.getMetadata();
+        const metaState = (currentMeta[ROOM_METADATA_KEY] || currentMeta[COMBAT_STATE_KEY]) as any;
+        if (metaState && Array.isArray(metaState.combatants)) {
+          existingCombatants = metaState.combatants;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch fresh room metadata before adding combatant:', err);
+    }
+
+    const updatedList = sortInitiativeStrictDescending([...existingCombatants, newCombatant]);
+    setCombatants(updatedList);
+    localCombatantsRef.current = updatedList;
+    recentlyAddedIdsRef.current.set(newCombatant.id, Date.now() + 8000);
+
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updatedList));
+    } catch {}
+
+    let targetActiveId = activeCombatantId;
+    let targetActiveIndex = activeTurnIndex;
+
+    if (existingCombatants.length === 0) {
+      targetActiveId = newCombatant.id;
+      targetActiveIndex = 0;
+      setActiveCombatantId(newCombatant.id);
+      setActiveTurnIndex(0);
+    } else if (activeCombatantId) {
+      const found = updatedList.findIndex((c) => c.id === activeCombatantId);
+      if (found !== -1) targetActiveIndex = found;
+      setActiveTurnIndex(targetActiveIndex);
+    }
+
+    if (!newCombatant.isReserve && !newCombatant.hidden) {
+      liveFeedSync.recordCombatLog(
+        `➕ Added ${newCombatant.name} (Init ${newCombatant.initiative}, ${newCombatant.hpMax} HP, ${newCombatant.ac} AC).`,
+        true
+      );
+    }
+
+    await broadcastCombat(updatedList, targetActiveIndex, round, targetActiveId, combatStatus);
+  };
+
+  // ADD COMBATANT HANDLER (Triggered from AddCombatantModal)
+  const handleAddCombatantFromModal = async (data: NewCombatantData) => {
+    await handleAddCombatant({
       name: data.name,
       initiative: data.initiative,
       hp: data.hpMax,
@@ -1378,47 +1494,42 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       isReserve: data.isReserve,
       hidden: data.isReserve,
       isSecret: data.isReserve,
-      sortOrder: combatants.length,
-      updatedAt: Date.now(),
-    };
-
-    // 1. Optimistic local state update
-    const updatedList = sortInitiativeStrictDescending([...combatants, newCombatant]);
-    setCombatants(updatedList);
-    localCombatantsRef.current = updatedList;
-
-    recentlyAddedIdsRef.current.set(newCombatant.id, Date.now() + 8000);
-
-    // 2. Local storage persistence
-    try {
-      localStorage.setItem('ttrpg_combatants', JSON.stringify(updatedList));
-    } catch {}
-
-    // 3. Pointer calculation
-    let targetActiveId = activeCombatantId;
-    let targetActiveIndex = activeTurnIndex;
-
-    if (combatants.length === 0) {
-      targetActiveId = newCombatant.id;
-      targetActiveIndex = 0;
-      setActiveCombatantId(newCombatant.id);
-      setActiveTurnIndex(0);
-    } else if (activeCombatantId) {
-      const found = updatedList.findIndex((c) => c.id === activeCombatantId);
-      if (found !== -1) targetActiveIndex = found;
-      setActiveTurnIndex(targetActiveIndex);
-    }
-
-    if (!newCombatant.isReserve) {
-      liveFeedSync.recordCombatLog(
-        `➕ Added ${newCombatant.name} (Init ${newCombatant.initiative}, ${newCombatant.hpMax} HP, ${newCombatant.ac} AC).`,
-        true
-      );
-    }
-
-    // 4. Update OBR room metadata
-    await broadcastCombat(updatedList, targetActiveIndex, round, targetActiveId, combatStatus);
+    });
     setIsAddModalOpen(false);
+  };
+
+  // JOIN COMBAT FROM PERSISTENT MY ROSTER
+  const handleJoinCombatFromRoster = async (member: RosterMember) => {
+    const rollResult = executeDiceRoll({
+      diceType: 'd20',
+      count: 1,
+      modifier: member.initiativeMod,
+      sender: rollerIdentity,
+      isDm,
+      rollType: 'Straight roll',
+      label: `Initiative (${member.name})`,
+    });
+
+    liveFeedSync.recordDiceRoll(rollResult, true);
+
+    await handleAddCombatant({
+      name: member.name,
+      role: member.role === 'PC' ? 'Player' : 'Ally',
+      type: member.role === 'PC' ? 'player' : 'ally',
+      ac: member.ac,
+      armorClass: member.ac,
+      hp: member.maxHp,
+      maxHp: member.maxHp,
+      hpCurrent: member.maxHp,
+      hpMax: member.maxHp,
+      tempHp: 0,
+      hpTemp: 0,
+      initiative: rollResult.total,
+      conditions: [],
+      hidden: false,
+      maskStats: false,
+      isReserve: false,
+    });
   };
 
   // Combatant render pipeline:
@@ -1530,6 +1641,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             </button>
           )}
         </div>
+      </div>
+
+      {/* PERSISTENT MY ROSTER DRAWER (Local & Survives Encounter Reset) */}
+      <div className="px-2 pt-2 shrink-0">
+        <MyRosterDrawer
+          activeCombatantNames={combatants.map((c) => c.name)}
+          onJoinCombat={handleJoinCombatFromRoster}
+          isDm={isDm}
+          playerName={playerName}
+        />
       </div>
 
       {/* 2. COMBATANT LIST CONTAINER (Decoupled from canvas items) */}
@@ -1742,36 +1863,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         onAdd={handleAddCombatantFromModal}
       />
 
-      {/* CONFIRMATION MODAL: RESET ENCOUNTER */}
-      {isClearModalOpen && (
-        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xs bg-slate-900 border border-rose-800/80 rounded-xl p-4 shadow-2xl space-y-3 text-center">
-            <RotateCcw className="w-8 h-8 text-rose-400 mx-auto" />
-            <h4 className="text-sm font-bold text-slate-100 font-display">
-              Reset Encounter?
-            </h4>
-            <p className="text-xs text-slate-400">
-              This will clear all combatants and reset the round counter to Round 1.
-            </p>
-            <div className="flex items-center justify-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setIsClearModalOpen(false)}
-                className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleClearCombat}
-                className="px-3 py-1 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow"
-              >
-                Confirm Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* SMART COMBAT RESET MODAL (Clear Hostiles Only vs Full Clear) */}
+      <ResetCombatModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        onClearHostilesOnly={handleClearHostilesOnly}
+        onFullClear={handleFullClearCombat}
+        combatants={combatants}
+      />
 
       {/* MODAL: COMBATANT ACTION / CONDITION POPUP */}
       {actionMenuCombatantId && (() => {

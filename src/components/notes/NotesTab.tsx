@@ -20,6 +20,7 @@ import {
   LOCAL_TABLE_NOTES_KEY,
   LOCAL_DM_NOTES_KEY,
 } from '../../types/notes';
+import { ROOM_METADATA_KEY } from '../../utils/obrCombatSync';
 import { NoteCardList } from './NoteCardList';
 import { DmNotesVault } from '../DmNotesVault';
 
@@ -117,7 +118,6 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
     title: 'Ambush at the Sunken Bridge',
     content:
       'Trigger: When the party advances past the broken gargoyle, 4 Shadow Archers fire from murder holes (AC 13, HP 14, +5 to hit, 1d8+3 piercing + 1d6 necrotic).\n\nTrap DC 15 Perception: Hidden pressure plate at bridge center trips a falling portcullis (DC 14 Dex save or 2d10 bludgeoning and pinned).',
-    isRevealed: false,
     category: 'Combat',
     createdAt: Date.now() - 3600000,
     updatedAt: Date.now() - 3600000,
@@ -127,7 +127,6 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
     title: 'The Inquisitor’s True Identity',
     content:
       'Inquisitor Vane is secretly a doppelganger working under the orders of the Crimson Veil. If inspected with True Seeing or Divine Sense, detects as Monstrosity (Shapechanger).\n\nIf captured alive, carries a silver ring bearing the serpent crest of House Ashtapor.',
-    isRevealed: false,
     category: 'NPC',
     createdAt: Date.now() - 7200000,
     updatedAt: Date.now() - 7200000,
@@ -313,7 +312,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return DEFAULT_MY_NOTES;
   });
 
-  // 3. "Table Notes" State (Collaborative Room Metadata)
+  // 3. "Table Notes" State (Offline Cache Hydration First for Resilience)
   const [tableNotes, setTableNotes] = useState<NoteItem[]>(() => {
     try {
       const cached = localStorage.getItem(LOCAL_TABLE_NOTES_KEY);
@@ -330,7 +329,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   const [tableSaveStatus, setTableSaveStatus] = useState<'synced' | 'saving'>('synced');
   const tableDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 4. "DM Notes" State (Secret Vault + Table Broadcast)
+  // 4. "DM Notes" State (Secret Vault)
   const [dmNotes, setDmNotes] = useState<DmSecretNote[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_DM_NOTES_KEY);
@@ -342,7 +341,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return DEFAULT_DM_NOTES;
   });
 
-  // 5. Persistent Expansion State: Loaded from ashtapor_notes_expanded_ids in localStorage
+  // 5. Single Source of Truth for Broadcast State: derived in memory
+  const [activeBroadcast, setActiveBroadcast] = useState<BroadcastNotePayload | null>(() => {
+    try {
+      const cached = localStorage.getItem('ashtapor_broadcast_note');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return null;
+  });
+
+  // 6. Persistent Expansion State: Loaded from ashtapor_notes_expanded_ids in localStorage
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(() => {
     const stored = loadExpandedIdsFromStorage();
     if (stored !== null) {
@@ -476,7 +484,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     });
   };
 
-  // Sync Table Notes with OBR Room Metadata on Mount & Subscription
+  // Sync Table Notes with OBR Room Metadata on Mount & Subscription + Mirror to Local Cache
   useEffect(() => {
     if (!OBR.isReady) return;
 
@@ -501,6 +509,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             });
           }
 
+          // Offline caching resilience
           try {
             localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
           } catch {}
@@ -559,6 +568,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       ? tableNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...tableNotes];
     setTableNotes(updated);
+    try {
+      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updated));
+    } catch {}
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
@@ -570,6 +582,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   const handleDeleteTableNote = (id: string) => {
     const updated = tableNotes.filter((n) => n.id !== id);
     setTableNotes(updated);
+    try {
+      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updated));
+    } catch {}
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -584,10 +599,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: new Date().toISOString() } : n
     );
     setTableNotes(updated);
+    try {
+      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updated));
+    } catch {}
     triggerDebouncedTableSync(updated);
   };
 
-  // DM Notes State Operations
+  // DM Notes State Operations (No independent note.isRevealed flag stored)
   const saveDmNotes = (updated: DmSecretNote[]) => {
     setDmNotes(updated);
     try {
@@ -601,149 +619,96 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       ? dmNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...dmNotes];
     saveDmNotes(updated);
+  };
 
-    if (note.isRevealed) {
+  const handleDeleteDmNote = async (id: string) => {
+    if (activeBroadcast && activeBroadcast.id === id) {
+      await handleStopBroadcast();
+    }
+    const updated = dmNotes.filter((n) => n.id !== id);
+    saveDmNotes(updated);
+  };
+
+  // Atomic 1-Click Broadcast Teardown
+  const handleStopBroadcast = async () => {
+    setActiveBroadcast(null);
+    try {
+      if (OBR.isReady) {
+        await OBR.room.setMetadata({
+          [OBR_BROADCAST_NOTE_KEY]: undefined,
+          [ROOM_METADATA_KEY]: { activeBroadcast: null } as any,
+        });
+      }
+    } catch (err) {
+      console.error('Error stopping broadcast:', err);
+    }
+    try {
+      localStorage.removeItem('ashtapor_broadcast_note');
+    } catch {}
+    window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
+  };
+
+  // Toggle reveal for DM note (derived from activeBroadcast single source of truth)
+  const handleToggleRevealDmNote = async (note: DmSecretNote) => {
+    const isCurrentlyRevealed = activeBroadcast !== null && activeBroadcast.id === note.id;
+
+    if (isCurrentlyRevealed) {
+      await handleStopBroadcast();
+    } else {
       const payload: BroadcastNotePayload = {
         id: note.id,
         title: note.title,
         content: note.content,
         broadcastAt: Date.now(),
       };
-      if (OBR.isReady) {
-        OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: payload }).catch(() => {});
-      }
-      localStorage.setItem('ashtapor_broadcast_note', JSON.stringify(payload));
-      window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: payload }));
-    }
-  };
 
-  const handleDeleteDmNote = async (id: string) => {
-    const target = dmNotes.find((n) => n.id === id);
-    if (!target) return;
+      setActiveBroadcast(payload);
 
-    if (target.isRevealed) {
-      if (OBR.isReady) {
-        await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: undefined }).catch(() => {});
-      }
-      localStorage.removeItem('ashtapor_broadcast_note');
-      window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
-    }
-
-    const updated = dmNotes.filter((n) => n.id !== id);
-    saveDmNotes(updated);
-  };
-
-  // Toggle reveal for DM note (broadcast or stop broadcasting)
-  const handleToggleRevealDmNote = async (note: DmSecretNote) => {
-    const nextRevealed = !note.isRevealed;
-
-    const updated = dmNotes.map((n) => {
-      if (n.id === note.id) {
-        return { ...n, isRevealed: nextRevealed, updatedAt: Date.now() };
-      }
-      if (nextRevealed && n.isRevealed) {
-        return { ...n, isRevealed: false };
-      }
-      return n;
-    });
-
-    saveDmNotes(updated);
-
-    try {
-      if (nextRevealed) {
-        const payload: BroadcastNotePayload = {
-          id: note.id,
-          title: note.title,
-          content: note.content,
-          broadcastAt: Date.now(),
-        };
-
+      try {
         if (OBR.isReady) {
           await OBR.room.setMetadata({
             [OBR_BROADCAST_NOTE_KEY]: payload,
+            [ROOM_METADATA_KEY]: { activeBroadcast: payload } as any,
           });
         }
+      } catch (err) {
+        console.error('Failed to broadcast note to room:', err);
+      }
+
+      try {
         localStorage.setItem('ashtapor_broadcast_note', JSON.stringify(payload));
-        window.dispatchEvent(
-          new CustomEvent('ashtapor-broadcast-note', { detail: payload })
-        );
-      } else {
-        if (OBR.isReady) {
-          await OBR.room.setMetadata({
-            [OBR_BROADCAST_NOTE_KEY]: undefined,
-          });
-        }
-        localStorage.removeItem('ashtapor_broadcast_note');
-        window.dispatchEvent(
-          new CustomEvent('ashtapor-broadcast-note', { detail: null })
-        );
-      }
-    } catch (err) {
-      console.error('Failed to broadcast note to room:', err);
+      } catch {}
+      window.dispatchEvent(
+        new CustomEvent('ashtapor-broadcast-note', { detail: payload })
+      );
     }
   };
 
-  // 1-Click Broadcast Teardown: Stop revealing note, toggle eye icon, and clear broadcast
-  const handleStopRevealingDmNote = async (noteId?: string) => {
-    const updated = dmNotes.map((n) =>
-      !noteId || n.id === noteId ? { ...n, isRevealed: false, updatedAt: Date.now() } : n
-    );
-    saveDmNotes(updated);
-
-    try {
-      if (OBR.isReady) {
-        await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: undefined,
-        });
-      }
-      localStorage.removeItem('ashtapor_broadcast_note');
-      window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
-    } catch (err) {
-      console.error('Failed to stop broadcasting note:', err);
-    }
-  };
-
-  // Listen for broadcast stop events so note card eye icon toggles to EyeOff immediately
+  // Listen for broadcast events from App.tsx or other clients to immediately sync activeBroadcast
   useEffect(() => {
     const handleBroadcastEvent = (e: any) => {
-      const detail = e.detail;
-      if (!detail) {
-        setDmNotes((prev) => {
-          const hasRevealed = prev.some((n) => n.isRevealed);
-          if (!hasRevealed) return prev;
-          const updated = prev.map((n) => ({ ...n, isRevealed: false }));
-          try {
-            localStorage.setItem(LOCAL_DM_NOTES_KEY, JSON.stringify(updated));
-          } catch {}
-          return updated;
-        });
-      }
+      const detail = e.detail as BroadcastNotePayload | null;
+      setActiveBroadcast(detail || null);
     };
 
     window.addEventListener('ashtapor-broadcast-note', handleBroadcastEvent);
     return () => window.removeEventListener('ashtapor-broadcast-note', handleBroadcastEvent);
   }, []);
 
-  // Listen for remote OBR broadcast note metadata clearance
+  // Listen for remote OBR broadcast note metadata changes
   useEffect(() => {
     if (!OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
-      if (meta[OBR_BROADCAST_NOTE_KEY] === undefined) {
-        setDmNotes((prev) => {
-          const hasRevealed = prev.some((n) => n.isRevealed);
-          if (!hasRevealed) return prev;
-          const updated = prev.map((n) => ({ ...n, isRevealed: false }));
-          try {
-            localStorage.setItem(LOCAL_DM_NOTES_KEY, JSON.stringify(updated));
-          } catch {}
-          return updated;
-        });
+      const remoteBroadcast = (meta[OBR_BROADCAST_NOTE_KEY] ||
+        (meta[ROOM_METADATA_KEY] as any)?.activeBroadcast) as BroadcastNotePayload | undefined;
+      if (remoteBroadcast && remoteBroadcast.title) {
+        setActiveBroadcast(remoteBroadcast);
+      } else {
+        setActiveBroadcast(null);
       }
     });
     return () => unsub();
   }, []);
-
-  const activeRevealedNote = dmNotes.find((n) => n.isRevealed);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-2 gap-2 relative">
@@ -825,7 +790,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               >
                 {dmNotes.length}
               </span>
-              {activeRevealedNote && (
+              {activeBroadcast && (
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse ml-0.5" />
               )}
             </button>
@@ -910,6 +875,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         <div className={activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
           <DmNotesVault
             dmNotes={dmNotes}
+            activeBroadcast={activeBroadcast}
             onSaveDmNote={handleSaveDmNote}
             onDeleteDmNote={handleDeleteDmNote}
             onToggleReveal={handleToggleRevealDmNote}

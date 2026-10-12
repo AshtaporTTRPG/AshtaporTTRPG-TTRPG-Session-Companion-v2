@@ -33,7 +33,7 @@ export interface DmSecretNote {
   title: string;
   content: string;
   category?: NoteCategory;
-  isRevealed: boolean;
+  isRevealed?: boolean;
   isPinned?: boolean;
   createdAt: number;
   updatedAt: number;

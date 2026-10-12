@@ -13,6 +13,7 @@ import { GeometryCalculator } from './components/GeometryCalculator';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
 import { liveFeedSync } from './utils/liveFeedSync';
+import { ROOM_METADATA_KEY } from './utils/obrCombatSync';
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
 
@@ -180,28 +181,17 @@ export default function App() {
   // Stop broadcasting note (GM Action) - 1-Click Broadcast Teardown
   const handleStopRevealing = async () => {
     try {
-      // 1. Set note.isRevealed = false on the note card in localStorage
-      try {
-        const saved = localStorage.getItem('ashtapor_dm_notes_v1');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            const updated = parsed.map((n: any) => ({ ...n, isRevealed: false }));
-            localStorage.setItem('ashtapor_dm_notes_v1', JSON.stringify(updated));
-          }
-        }
-      } catch {}
-
-      // 2 & 3. Clear active broadcast metadata
       if (OBR.isReady) {
         await OBR.room.setMetadata({
           [OBR_BROADCAST_NOTE_KEY]: undefined,
+          [ROOM_METADATA_KEY]: { activeBroadcast: null } as any,
         });
       }
-      localStorage.removeItem('ashtapor_broadcast_note');
+      try {
+        localStorage.removeItem('ashtapor_broadcast_note');
+      } catch {}
       window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
 
-      // 4. Close the broadcast modal overlay immediately
       setBroadcastNote(null);
       setDismissedBroadcastId(null);
     } catch (err) {

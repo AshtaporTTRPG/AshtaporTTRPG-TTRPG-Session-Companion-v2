@@ -18,6 +18,7 @@ import { DmSecretNote, BroadcastNotePayload } from '../types/notes';
 
 interface DmNotesVaultProps {
   dmNotes: DmSecretNote[];
+  activeBroadcast?: BroadcastNotePayload | null;
   onSaveDmNote: (note: DmSecretNote) => void;
   onDeleteDmNote: (id: string) => void;
   onToggleReveal: (note: DmSecretNote) => void;
@@ -25,6 +26,7 @@ interface DmNotesVaultProps {
 
 export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
   dmNotes,
+  activeBroadcast,
   onSaveDmNote,
   onDeleteDmNote,
   onToggleReveal,
@@ -55,7 +57,11 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
     });
   };
 
-  const activeRevealedNote = dmNotes.find((n) => n.isRevealed);
+  // Derive active revealed note directly from activeBroadcast as single source of truth
+  const activeRevealedNote = useMemo(() => {
+    if (!activeBroadcast) return null;
+    return dmNotes.find((n) => n.id === activeBroadcast.id) || null;
+  }, [dmNotes, activeBroadcast]);
 
   const handleOpenCreate = () => {
     setEditingNote(null);
@@ -89,7 +95,6 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
         id: `dm-note-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         title: formTitle.trim(),
         content: formContent.trim(),
-        isRevealed: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -130,7 +135,6 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                 (GM Only · {dmNotes.length} {dmNotes.length === 1 ? 'note' : 'notes'})
               </span>
             </h4>
-            {/* Updated Header Copy per Requirement A.3 */}
             <p className="text-[10px] text-slate-400 truncate">
               Manage secret cards. Click 👁 to broadcast a note to player screens.
             </p>
@@ -207,23 +211,27 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
         ) : (
           filteredNotes.map((note) => {
             const isCollapsed = !!collapsedNotes[note.id];
+            // Visual broadcast state is derived dynamically from activeBroadcast single source of truth
+            const isRevealed = Boolean(activeBroadcast && activeBroadcast.id === note.id);
             const timeStr = new Date(note.updatedAt || note.createdAt).toLocaleDateString([], {
               month: 'short',
               day: 'numeric',
             });
+            const wordCount = note.content && note.content.trim()
+              ? note.content.trim().split(/\s+/).length
+              : 0;
 
             return (
               <div
                 key={note.id}
                 className={`p-2.5 rounded-xl border transition flex flex-col gap-2 ${
-                  note.isRevealed
+                  isRevealed
                     ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
                     : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
                 }`}
               >
-                {/* Card Header Row: Accordion toggle, Lock icon, Title (flex-1 min-w-0 truncate), Actions */}
+                {/* Card Header Row */}
                 <div className="flex items-center justify-between gap-2 min-w-0">
-                  {/* Title Container flex-1 min-w-0 with truncate per Requirement A.4 */}
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     {/* Collapse/Expand Toggle button */}
                     <button
@@ -252,25 +260,24 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                     </h4>
                   </div>
 
-                  {/* Header Actions: Compact Icon Reveal Toggle adjacent to Edit (pencil) & Delete (trash) per Requirement A.1 & A.2 */}
+                  {/* Header Actions: Compact Icon Reveal Toggle, Edit, Delete */}
                   <div className="flex items-center gap-1 shrink-0">
-                    {/* Compact Icon Toggle: NO text pill! */}
                     <button
                       type="button"
                       onClick={() => onToggleReveal(note)}
-                      aria-label={note.isRevealed ? 'Hide from Table' : 'Reveal to Table'}
+                      aria-label={isRevealed ? 'Hide from Table' : 'Reveal to Table'}
                       title={
-                        note.isRevealed
+                        isRevealed
                           ? 'Hide from Table (currently broadcasting to all player screens)'
                           : 'Reveal to Table (broadcast this note to all player screens)'
                       }
                       className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
-                        note.isRevealed
+                        isRevealed
                           ? 'text-amber-400 bg-amber-950/70 border border-amber-500/80 ring-1 ring-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
                           : 'text-slate-500 hover:text-amber-400 hover:bg-slate-800 border border-slate-800 hover:border-amber-400/40 ring-0 hover:ring-1 hover:ring-amber-400/30'
                       }`}
                     >
-                      {note.isRevealed ? (
+                      {isRevealed ? (
                         <Eye className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                       ) : (
                         <EyeOff className="w-3.5 h-3.5 opacity-60 hover:opacity-100" />
@@ -319,11 +326,11 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono px-0.5">
                       <span>
-                        {timeStr} · {note.content.length} chars
+                        {timeStr} · {wordCount} {wordCount === 1 ? 'word' : 'words'}
                       </span>
 
                       <div className="flex items-center gap-2">
-                        {note.isRevealed ? (
+                        {isRevealed ? (
                           <span className="text-amber-400 font-bold flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                             <span>Broadcast Active</span>
@@ -335,7 +342,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                         <button
                           type="button"
                           onClick={(e) => handleCopy(note, e)}
-                          className="text-slate-400 hover:text-amber-300 flex items-center gap-1 transition"
+                          className="text-slate-400 hover:text-amber-300 flex items-center gap-1 transition cursor-pointer"
                           title="Copy note text"
                         >
                           {copiedId === note.id ? (
@@ -417,13 +424,13 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsEditorOpen(false)}
-                    className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 shadow"
+                    className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 shadow cursor-pointer"
                   >
                     {editingNote ? 'Save Changes' : 'Save Note'}
                   </button>
@@ -436,3 +443,5 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
     </div>
   );
 };
+
+export default DmNotesVault;

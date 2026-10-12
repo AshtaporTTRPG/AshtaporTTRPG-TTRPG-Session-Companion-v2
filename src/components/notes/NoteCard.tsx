@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Copy,
   Check,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { NoteItem, NoteCategory } from '../../types/notes';
 
@@ -49,19 +51,23 @@ export const CATEGORY_STYLES: Record<
 export interface NoteCardProps {
   note: NoteItem;
   isExpanded: boolean;
+  isRevealed?: boolean;
   onToggleExpand: (e?: React.MouseEvent) => void;
   onTogglePin: () => void;
   onDelete: () => void;
   onEdit: (e: React.MouseEvent) => void;
+  onToggleReveal?: () => void;
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
   note,
   isExpanded,
+  isRevealed = false,
   onToggleExpand,
   onTogglePin,
   onDelete,
   onEdit,
+  onToggleReveal,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -92,10 +98,16 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     formattedDate = 'Recently';
   }
 
+  const wordCount = note.content && note.content.trim()
+    ? note.content.trim().split(/\s+/).length
+    : 0;
+
   return (
     <div
       className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition-all flex flex-col ${
-        note.isPinned
+        isRevealed
+          ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
+          : note.isPinned
           ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-400/30'
           : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
       }`}
@@ -153,6 +165,34 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
         {/* Top-Right Header Action Strip */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
+          {/* Optional Broadcast Eye Icon Toggle */}
+          {onToggleReveal && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleReveal();
+              }}
+              aria-label={isRevealed ? 'Hide from Table' : 'Reveal to Table'}
+              title={
+                isRevealed
+                  ? 'Hide from Table (currently broadcasting)'
+                  : 'Reveal to Table (broadcast this note)'
+              }
+              className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                isRevealed
+                  ? 'text-amber-400 bg-amber-950/70 border border-amber-500/80 ring-1 ring-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                  : 'text-slate-500 hover:text-amber-400 hover:bg-slate-800 border border-slate-800 hover:border-amber-400/40 ring-0 hover:ring-1 hover:ring-amber-400/30'
+              }`}
+            >
+              {isRevealed ? (
+                <Eye className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              ) : (
+                <EyeOff className="w-3.5 h-3.5 opacity-60 hover:opacity-100" />
+              )}
+            </button>
+          )}
+
           {/* 1-Click Copy to Clipboard Icon Button */}
           <button
             type="button"
@@ -229,7 +269,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono px-0.5">
             <div className="flex items-center gap-2">
               <span>
-                {formattedDate} · {note.content.length} chars
+                {formattedDate} · {wordCount} {wordCount === 1 ? 'word' : 'words'}
               </span>
               {note.authorName && (
                 <span className="text-slate-400">by {note.authorName}</span>
