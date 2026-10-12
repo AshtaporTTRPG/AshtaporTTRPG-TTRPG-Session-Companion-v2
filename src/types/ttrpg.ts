@@ -143,6 +143,25 @@ export interface DieGroupRoll {
   rawRolls?: number[]; // raw rolls including discarded
 }
 
+export interface RollRiderDie {
+  diceType: DieType;
+  count: number;
+  rolls: number[];
+  sum: number;
+}
+
+export interface RollInstance {
+  index: number; // 1-based (Roll 1, Roll 2, ...)
+  d20Chosen: number;
+  d20Discarded?: number;
+  isCrit: boolean;
+  isFumble: boolean;
+  riders: RollRiderDie[];
+  modifier: number;
+  total: number;
+  rawText?: string;
+}
+
 export interface DiceRollResult {
   id: string;
   timestamp: number;
@@ -170,6 +189,7 @@ export interface DiceRollResult {
   formula?: string;
   individualSummary?: string;
   individualLineItems?: string[];
+  instances?: RollInstance[];
 }
 
 export type PinCategory = 'general' | 'npc' | 'quest' | 'loot' | 'secret' | 'landmark' | 'tavern' | 'settlement';

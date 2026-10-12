@@ -6,6 +6,8 @@ import {
   RollDisplayMode,
   DieGroupRoll,
   PairedD20Roll,
+  RollInstance,
+  RollRiderDie,
 } from '../types/ttrpg';
 import { playCritSound, playDiceRollSound, playFumbleSound } from './audio';
 
@@ -71,6 +73,7 @@ export function executeDiceRoll({
       : isDm
       ? 'Dungeon Master'
       : 'Adventurer';
+
   // Normalize pool: either use provided pool or single die configuration
   const poolEntries: DicePoolEntry[] = [];
   if (pool && pool.length > 0) {
@@ -85,189 +88,287 @@ export function executeDiceRoll({
     poolEntries.push({ diceType: 'd20', count: 1 });
   }
 
-  // Fallback if empty pool was given
   if (poolEntries.length === 0) {
     poolEntries.push({ diceType: 'd20', count: 1 });
   }
 
-  const poolBreakdown: DieGroupRoll[] = [];
+  // D20 PRESENCE CHECK:
+  // Inspect whether the pool contains any d20
+  const d20Entry = poolEntries.find((p) => p.diceType === 'd20');
+  const d20Count = d20Entry ? d20Entry.count : 0;
+  const isD20Present = d20Count > 0;
+
   const allResolvedRolls: number[] = [];
   const allRawRolls: number[] = [];
   const allPairedRolls: PairedD20Roll[] = [];
   const allIndividualLineItems: string[] = [];
-  let sumTotal = 0;
+  const poolBreakdown: DieGroupRoll[] = [];
+  let instances: RollInstance[] | undefined = undefined;
+
   let hasCrit = false;
   let hasFumble = false;
+  let total = 0;
 
-  const primaryDieType = poolEntries[0]?.diceType || 'd20';
-  let totalDiceCount = 0;
-  const isMixedPool = poolEntries.length > 1;
+  if (!isD20Present) {
+    // -------------------------------------------------------------
+    // CASE 1: Pure Damage / Tables / Spells (No d20 present)
+    // -------------------------------------------------------------
+    // Evaluate as a single flat pool: roll all dice, add flat modifier, display direct sum.
+    let sumOfAllDice = 0;
+    let totalDiceCount = 0;
 
-  poolEntries.forEach((entry) => {
-    const sides = DIE_SIDES[entry.diceType] || 20;
-    const groupRolls: number[] = [];
-    const groupRawRolls: number[] = [];
-    const groupPairedRolls: PairedD20Roll[] = [];
-    totalDiceCount += entry.count;
+    poolEntries.forEach((entry) => {
+      const sides = DIE_SIDES[entry.diceType] || 6;
+      const groupRolls: number[] = [];
+      totalDiceCount += entry.count;
 
-    if (displayMode === 'individual') {
-      // INDIVIDUAL MODE:
-      // Each die/roll is its own standalone evaluated result with its own line item.
-      // Grand totals / sums are NOT aggregated or computed.
-      if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
-        for (let k = 0; k < entry.count; k++) {
-          const rollNumber = allIndividualLineItems.length + 1;
-          const valA = rollSingleDie(20);
-          const valB = rollSingleDie(20);
-          const selected = advantageMode === 'advantage' ? Math.max(valA, valB) : Math.min(valA, valB);
-          const discarded = advantageMode === 'advantage' ? Math.min(valA, valB) : Math.max(valA, valB);
-          const evaluatedTotal = selected + modifier;
-
-          const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-          const lineItem = `Roll ${rollNumber}: [${selected}, ~~${discarded}~~]${modStr} = ${evaluatedTotal}`;
-
-          const pair: PairedD20Roll = {
-            pairIndex: rollNumber,
-            die1: valA,
-            die2: valB,
-            selected,
-            discarded,
-            modifier,
-            totalWithModifier: evaluatedTotal,
-            lineItem,
-          };
-
-          groupPairedRolls.push(pair);
-          allPairedRolls.push(pair);
-          groupRolls.push(selected);
-          groupRawRolls.push(valA, valB);
-          allIndividualLineItems.push(lineItem);
-
-          if (selected === 20) hasCrit = true;
-          if (selected === 1) hasFumble = true;
-        }
-      } else {
-        for (let i = 0; i < entry.count; i++) {
-          const rollNumber = allIndividualLineItems.length + 1;
-          const val = rollSingleDie(sides);
-          const evaluatedTotal = val + modifier;
-          const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-          const lineItem = `Roll ${rollNumber}: [${val}]${modStr} = ${evaluatedTotal}`;
-
-          groupRolls.push(val);
-          groupRawRolls.push(val);
-          allIndividualLineItems.push(lineItem);
-
-          if (entry.diceType === 'd20') {
-            if (val === 20) hasCrit = true;
-            if (val === 1 && !hasCrit) hasFumble = true;
-          }
-        }
-      }
-    } else if (entry.diceType === 'd20' && (advantageMode === 'advantage' || advantageMode === 'disadvantage')) {
-      // MULTI-PAIR GENERATION IN SUM MODE (Advantage / Disadvantage):
-      const numPairs = entry.count;
-      for (let k = 0; k < numPairs; k++) {
-        const valA = rollSingleDie(20);
-        const valB = rollSingleDie(20);
-        const selected = advantageMode === 'advantage' ? Math.max(valA, valB) : Math.min(valA, valB);
-        const discarded = advantageMode === 'advantage' ? Math.min(valA, valB) : Math.max(valA, valB);
-        const evaluatedTotal = selected + modifier;
-
-        const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-        const lineItem = `Roll ${k + 1}: [${selected}, ~~${discarded}~~]${modStr} = ${evaluatedTotal}`;
-
-        const pair: PairedD20Roll = {
-          pairIndex: k + 1,
-          die1: valA,
-          die2: valB,
-          selected,
-          discarded,
-          modifier,
-          totalWithModifier: evaluatedTotal,
-          lineItem,
-        };
-
-        groupPairedRolls.push(pair);
-        allPairedRolls.push(pair);
-        groupRolls.push(selected);
-        groupRawRolls.push(valA, valB);
-        allIndividualLineItems.push(lineItem);
-
-        if (selected === 20) hasCrit = true;
-        if (selected === 1) hasFumble = true;
-      }
-
-      const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
-      sumTotal += groupSum;
-    } else {
-      // Sum mode (standard roll or mixed pool):
-      // Roll independent dice for this entry.
-      // Modifier is added once to final sumTotal, not per individual die.
       for (let i = 0; i < entry.count; i++) {
         const val = rollSingleDie(sides);
         groupRolls.push(val);
-        groupRawRolls.push(val);
-
-        if (entry.diceType === 'd20') {
-          if (val === 20) hasCrit = true;
-          if (val === 1 && !hasCrit) hasFumble = true;
-        }
+        allRawRolls.push(val);
+        allResolvedRolls.push(val);
       }
+
       const groupSum = groupRolls.reduce((acc, curr) => acc + curr, 0);
-      sumTotal += groupSum;
+      sumOfAllDice += groupSum;
 
-      // Format as exact die rolled, e.g. "1d8: [5]" or "2d6: [4, 2]"
-      const dieLabel = `${entry.count}${entry.diceType}`;
-      allIndividualLineItems.push(`${dieLabel}: [${groupRolls.join(', ')}]`);
-    }
+      allIndividualLineItems.push(`${entry.count}${entry.diceType}: [${groupRolls.join(', ')}]`);
 
-    poolBreakdown.push({
-      dieType: entry.diceType,
-      rolls: groupRolls,
-      pairedRolls: groupPairedRolls.length > 0 ? groupPairedRolls : undefined,
-      rawRolls: groupRawRolls,
+      poolBreakdown.push({
+        dieType: entry.diceType,
+        rolls: groupRolls,
+        rawRolls: groupRolls,
+      });
     });
-    allResolvedRolls.push(...groupRolls);
-    allRawRolls.push(...groupRawRolls);
-  });
 
-  // Grand totals / sums are only computed and displayed when "sum" mode is explicitly selected
-  const total = displayMode === 'individual' ? 0 : (sumTotal + modifier);
+    const grandTotal = sumOfAllDice + modifier;
 
-  // Append Modifier and Total once ONLY for Sum mode
-  if (displayMode === 'sum' && (isMixedPool || (poolEntries.length >= 1 && advantageMode === 'normal'))) {
-    if (modifier !== 0) {
-      allIndividualLineItems.push(`Modifier: ${modifier > 0 ? `+${modifier}` : modifier}`);
+    if (displayMode === 'sum') {
+      total = grandTotal;
+      if (modifier !== 0) {
+        allIndividualLineItems.push(`Modifier: ${modifier > 0 ? `+${modifier}` : modifier}`);
+      }
+      allIndividualLineItems.push(`Total: ${grandTotal}`);
+    } else {
+      // Indiv mode
+      total = 0;
     }
-    allIndividualLineItems.push(`Total: ${total}`);
+
+    // Pure damage: play standard dice roll sound
+    playDiceRollSound();
+
+    // Construct formula
+    const formulaParts = poolEntries.map((e) => `${e.count}${e.diceType}`);
+    let formula = formulaParts.join(' + ');
+    if (modifier !== 0) {
+      formula += modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`;
+    }
+
+    const isActuallySecret = visibility === 'dm' || visibility === 'gm_only' || isSecret;
+
+    return {
+      id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: Date.now(),
+      sender: resolvedSender,
+      rollerName: resolvedSender,
+      rollerId,
+      isDm,
+      isSecret: isActuallySecret,
+      visibility,
+      rollType,
+      diceType: poolEntries[0]?.diceType || 'd6',
+      count: totalDiceCount,
+      modifier,
+      rolls: allResolvedRolls,
+      breakdown: allIndividualLineItems,
+      rawRolls: allRawRolls,
+      total,
+      advantageMode,
+      label: label.trim() || undefined,
+      isCrit: false,
+      isFumble: false,
+      displayMode,
+      poolBreakdown,
+      formula,
+      individualSummary: allIndividualLineItems.join(' | '),
+      individualLineItems: allIndividualLineItems,
+    };
   }
 
-  // Build formula string, e.g. "5d20 (advantage) + 4"
-  const formulaParts = poolEntries.map((e) => {
-    if (e.diceType === 'd20' && advantageMode !== 'normal') {
-      return `${e.count}d20 (${advantageMode})`;
+  // -------------------------------------------------------------
+  // CASE 2: Attack / Action Batches (When N x d20 is present)
+  // -------------------------------------------------------------
+  // The count of d20s (N) defines the number of Independent Instances.
+  // All other dice (d4, d6, d8, d10, d12, d100) and flat modifier constitute the Payload.
+  const payloadDice = poolEntries.filter((p) => p.diceType !== 'd20');
+  const instanceList: RollInstance[] = [];
+
+  for (let i = 1; i <= d20Count; i++) {
+    let chosenD20: number;
+    let discardedD20: number | undefined = undefined;
+
+    if (advantageMode === 'normal') {
+      const val = rollSingleDie(20);
+      chosenD20 = val;
+      allRawRolls.push(val);
+      allResolvedRolls.push(val);
+    } else if (advantageMode === 'advantage') {
+      const valA = rollSingleDie(20);
+      const valB = rollSingleDie(20);
+      chosenD20 = Math.max(valA, valB);
+      discardedD20 = Math.min(valA, valB);
+      allRawRolls.push(valA, valB);
+      allResolvedRolls.push(chosenD20);
+
+      allPairedRolls.push({
+        pairIndex: i,
+        die1: valA,
+        die2: valB,
+        selected: chosenD20,
+        discarded: discardedD20,
+        modifier,
+        totalWithModifier: chosenD20 + modifier,
+        lineItem: `Roll ${i}: [${chosenD20}, ~~${discardedD20}~~]`,
+      });
+    } else {
+      // Disadvantage
+      const valA = rollSingleDie(20);
+      const valB = rollSingleDie(20);
+      chosenD20 = Math.min(valA, valB);
+      discardedD20 = Math.max(valA, valB);
+      allRawRolls.push(valA, valB);
+      allResolvedRolls.push(chosenD20);
+
+      allPairedRolls.push({
+        pairIndex: i,
+        die1: valA,
+        die2: valB,
+        selected: chosenD20,
+        discarded: discardedD20,
+        modifier,
+        totalWithModifier: chosenD20 + modifier,
+        lineItem: `Roll ${i}: [${chosenD20}, ~~${discardedD20}~~]`,
+      });
     }
-    return `${e.count}${e.diceType}`;
+
+    // Crit / Fumble Detection
+    const instCrit = chosenD20 === 20;
+    const instFumble = chosenD20 === 1;
+    if (instCrit) hasCrit = true;
+    if (instFumble) hasFumble = true;
+
+    // Independent Rider Rolling per instance
+    const instRiders: RollRiderDie[] = [];
+    let riderSum = 0;
+
+    payloadDice.forEach((p) => {
+      const sides = DIE_SIDES[p.diceType] || 6;
+      const groupRolls: number[] = [];
+      for (let k = 0; k < p.count; k++) {
+        const val = rollSingleDie(sides);
+        groupRolls.push(val);
+        allRawRolls.push(val);
+        allResolvedRolls.push(val);
+      }
+      const sum = groupRolls.reduce((a, b) => a + b, 0);
+      riderSum += sum;
+      instRiders.push({
+        diceType: p.diceType,
+        count: p.count,
+        rolls: groupRolls,
+        sum,
+      });
+    });
+
+    // Instance Total: InstanceTotal = chosenD20 + sum(instanceRiders) + modifier
+    const instanceTotal = chosenD20 + riderSum + modifier;
+
+    // Text representation for instance
+    const d20BadgeText =
+      discardedD20 !== undefined
+        ? `[${chosenD20}, ~~${discardedD20}~~]`
+        : `[${chosenD20}]`;
+    const riderText = instRiders
+      .map((r) => `+ ${r.count}${r.diceType}[${r.rolls.join(', ')}]`)
+      .join(' ');
+    const modText =
+      modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+    const rawLine = `Roll ${i}: ${d20BadgeText}${riderText ? ` ${riderText}` : ''}${modText} = ${instanceTotal}`;
+
+    allIndividualLineItems.push(rawLine);
+
+    instanceList.push({
+      index: i,
+      d20Chosen: chosenD20,
+      d20Discarded: discardedD20,
+      isCrit: instCrit,
+      isFumble: instFumble,
+      riders: instRiders,
+      modifier,
+      total: instanceTotal,
+      rawText: rawLine,
+    });
+  }
+
+  instances = instanceList;
+
+  // Add d20 group to pool breakdown
+  poolBreakdown.push({
+    dieType: 'd20',
+    rolls: instanceList.map((inst) => inst.d20Chosen),
+    pairedRolls: allPairedRolls.length > 0 ? allPairedRolls : undefined,
+    rawRolls: allRawRolls,
   });
-  let formula = formulaParts.join(' + ');
+
+  // Add payload dice to pool breakdown
+  payloadDice.forEach((p) => {
+    const allRiderRollsForDieType: number[] = [];
+    instanceList.forEach((inst) => {
+      const match = inst.riders.find((r) => r.diceType === p.diceType);
+      if (match) allRiderRollsForDieType.push(...match.rolls);
+    });
+    poolBreakdown.push({
+      dieType: p.diceType,
+      rolls: allRiderRollsForDieType,
+      rawRolls: allRiderRollsForDieType,
+    });
+  });
+
+  // GRAND TOTAL CALCULATION:
+  // Grand Total equals the exact sum of all instance totals
+  const grandTotal = instanceList.reduce((acc, curr) => acc + curr.total, 0);
+
+  if (displayMode === 'sum') {
+    total = grandTotal;
+    allIndividualLineItems.push(`Combined Total: ${grandTotal}`);
+  } else {
+    // Indiv Mode: grand totals are NOT aggregated or shown in header
+    total = 0;
+  }
+
+  // Construct readable formula string (e.g. "2d20 (Advantage) + 1d8 + 1d6 + 5")
+  const d20Formula = `${d20Count}d20${
+    advantageMode !== 'normal'
+      ? ` (${advantageMode === 'advantage' ? 'Advantage' : 'Disadvantage'})`
+      : ''
+  }`;
+  const payloadFormula = payloadDice.map((p) => `${p.count}${p.diceType}`).join(' + ');
+  let formula = [d20Formula, payloadFormula].filter(Boolean).join(' + ');
   if (modifier !== 0) {
     formula += modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`;
   }
 
-  // Build individual summary string with paired breakdown when Advantage/Disadvantage is active
-  const individualSummary = allIndividualLineItems.join(' | ');
-
   // Audio feedback
   if (hasCrit) {
     playCritSound();
-  } else if (hasFumble) {
+  } else if (hasFumble && !hasCrit) {
     playFumbleSound();
   } else {
     playDiceRollSound();
   }
 
-  const isActuallySecret = visibility === 'dm' || isSecret;
+  const isActuallySecret = visibility === 'dm' || visibility === 'gm_only' || isSecret;
+  const individualSummary = instanceList.map((inst) => inst.total).join(', ');
 
   return {
     id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -279,14 +380,11 @@ export function executeDiceRoll({
     isSecret: isActuallySecret,
     visibility,
     rollType,
-    diceType: primaryDieType,
-    count: totalDiceCount,
+    diceType: 'd20',
+    count: d20Count + payloadDice.reduce((acc, curr) => acc + curr.count, 0),
     modifier,
     rolls: allResolvedRolls,
-    breakdown:
-      allIndividualLineItems.length > 0
-        ? allIndividualLineItems
-        : allResolvedRolls.map((r) => String(r)),
+    breakdown: allIndividualLineItems,
     rawRolls: allRawRolls,
     pairedRolls: allPairedRolls.length > 0 ? allPairedRolls : undefined,
     total,
@@ -299,6 +397,7 @@ export function executeDiceRoll({
     formula,
     individualSummary,
     individualLineItems: allIndividualLineItems,
+    instances,
   };
 }
 
@@ -339,9 +438,7 @@ export function parseDiceFormula(formula: string): {
     totalCount += count;
   }
 
-  if (pool.length === 0) return null;
-
-  // Extract trailing modifier if present (e.g. +4 or -2)
+  // Extract trailing modifiers if present (e.g. +4 or -2)
   const remainder = cleaned.replace(/(\d*)d(4|6|8|10|12|20|100)/g, '');
   let modifier = 0;
   if (remainder) {
@@ -351,11 +448,13 @@ export function parseDiceFormula(formula: string): {
     }
   }
 
+  if (pool.length === 0 && modifier === 0) return null;
+
   return {
     count: totalCount,
     diceType: primaryDie,
     modifier,
-    pool,
+    pool: pool.length > 0 ? pool : [{ diceType: 'd20', count: 1 }],
   };
 }
 

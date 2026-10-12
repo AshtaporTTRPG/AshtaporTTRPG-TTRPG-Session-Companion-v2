@@ -7,6 +7,7 @@ import {
   RollDisplayMode,
   DieGroupRoll,
   PairedD20Roll,
+  RollInstance,
 } from '../types/ttrpg';
 
 export type FeedEventType = 'dice' | 'turn' | 'combat' | 'chat';
@@ -49,6 +50,7 @@ export interface UnifiedFeedItem {
     poolBreakdown?: DieGroupRoll[];
     individualSummary?: string;
     individualLineItems?: string[];
+    instances?: RollInstance[];
   };
 }
 
@@ -326,6 +328,7 @@ class LiveFeedSyncManager {
         poolBreakdown: roll.poolBreakdown,
         individualSummary: roll.individualSummary,
         individualLineItems: roll.individualLineItems,
+        instances: roll.instances,
       },
     };
 
