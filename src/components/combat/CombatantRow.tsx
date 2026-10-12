@@ -43,6 +43,7 @@ export interface CombatantRowProps {
   onHpDelta: (combatantId: string, delta: number) => void;
   onUpdateMaxHp?: (combatantId: string, newMaxHp: number) => void;
   onUpdateDeathSaves?: (combatantId: string, saves: { successes: number; failures: number }) => void;
+  onUpdateCombatant?: (combatantId: string, updates: Partial<Combatant>) => void;
   onDuplicateCombatant?: (combatantId: string) => void;
   onDeployCombatant?: (combatantId: string) => void;
   onDeleteCombatant?: (combatantId: string) => void;
@@ -158,6 +159,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   onHpDelta,
   onUpdateMaxHp,
   onUpdateDeathSaves,
+  onUpdateCombatant,
   onDuplicateCombatant,
   onDeployCombatant,
   onDeleteCombatant,
@@ -172,20 +174,18 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
 }) => {
   // Fog of War / Mask Stats check
   const isUnderFoW = isCombatantFoW(combatant);
-  const isPlayerOrAlly = combatant.type === 'player' || combatant.type === 'ally';
   const isReserve = !!(combatant.isReserve || combatant.hidden || combatant.isSecret);
 
-  // Role permissions:
-  // GM can edit everything. Players can edit PC/Ally combatants that are not FoW-masked.
-  const isAssignedPlayer =
-    !isDm &&
-    playerName &&
-    playerName.trim().length > 0 &&
-    combatant.name.trim().toLowerCase() === playerName.trim().toLowerCase();
+  // Role permissions (v2.0.11):
+  // GM can edit everything. Players have full edit and stat-control permissions over PC and Ally combatants.
+  const isPlayerOrAlly =
+    combatant.role === 'PC' ||
+    combatant.role === 'Player' ||
+    combatant.role === 'Ally' ||
+    combatant.type === 'player' ||
+    combatant.type === 'ally';
 
-  const canEdit =
-    isDm ||
-    (isPlayerOrAlly && !isUnderFoW && (!playerName || isAssignedPlayer || combatant.type === 'player'));
+  const canEdit = isDm || isPlayerOrAlly;
 
   const health = getHealthThreshold(combatant.hpCurrent, combatant.hpMax);
   const effectiveAcInfo = getEffectiveAc(combatant);
@@ -342,22 +342,24 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     }
   };
 
-  // Death Save Pip Handler for PC at 0 HP
+  // Death Save Pip Handler for PC and Ally at 0 HP
   const handleToggleDeathSave = (type: 'successes' | 'failures', pipIndex: number) => {
-    if (!canEdit || !onUpdateDeathSaves) return;
+    if (!canEdit) return;
     const current = combatant.deathSaves || { successes: 0, failures: 0 };
     const currentVal = current[type];
     // If clicking the current count, toggle down by 1 (e.g. click 2nd filled pip sets count to 1)
     const nextVal = currentVal === pipIndex ? pipIndex - 1 : pipIndex;
-    onUpdateDeathSaves(combatant.id, {
+    const updatedSaves = {
       ...current,
       [type]: Math.max(0, Math.min(3, nextVal)),
-    });
+    };
+    onUpdateDeathSaves?.(combatant.id, updatedSaves);
+    onUpdateCombatant?.(combatant.id, { deathSaves: updatedSaves });
   };
 
   // Role visual attributes
   const roleCfg = ROLE_CONFIG[combatant.type] || ROLE_CONFIG.player;
-  const isPcAtZeroHp = (combatant.type === 'player' || combatant.role?.toLowerCase() === 'pc') && combatant.hpCurrent === 0;
+  const isPcOrAllyAtZeroHp = isPlayerOrAlly && combatant.hpCurrent === 0;
 
   return (
     <div
@@ -592,11 +594,11 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
           </span>
         ) : (
           <>
-            {/* If PC at 0 HP: Replace -5 and -1 with 3 Success and 3 Failure Death Save Pips */}
-            {isPcAtZeroHp ? (
+            {/* If PC or Ally at 0 HP: Replace -5 and -1 with 3 Success and 3 Failure Death Save Pips */}
+            {isPcOrAllyAtZeroHp ? (
               <div
                 className="flex items-center gap-1 bg-slate-950/90 px-1.5 py-0.5 rounded-lg border border-slate-800 shadow-sm"
-                title="PC Death Saves: Click pips to toggle"
+                title="Death Saves: Click pips to toggle"
               >
                 {/* 3 Success Pips */}
                 <div className="flex items-center gap-0.5">

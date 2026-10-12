@@ -718,7 +718,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleRollInitiative = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    if (!isDm && target.type !== 'player' && target.type !== 'ally') return;
+    if (
+      !isDm &&
+      target.type !== 'player' &&
+      target.type !== 'ally' &&
+      target.role !== 'PC' &&
+      target.role !== 'Player' &&
+      target.role !== 'Ally'
+    )
+      return;
 
     const rollResult = executeDiceRoll({
       diceType: 'd20',
@@ -780,7 +788,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleHpDelta = (combatantId: string, delta: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
     const isSecret = target.isReserve || target.isSecret || target.hidden;
     const isMasked = target.maskStats || target.fogOfWar || target.type === 'monster' || target.type === 'boss';
 
@@ -830,21 +843,33 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     } else {
       currentHp = Math.min(target.hpMax, currentHp + delta);
 
-      // When PC receives healing (hp > 0), reset death saves
-      if (currentHp > 0 && target.type === 'player' && updatedDeathSaves) {
+      // When PC or Ally receives healing (hp > 0), reset death saves
+      if (currentHp > 0 && isPlayerOrAlly) {
         updatedDeathSaves = { successes: 0, failures: 0 };
       }
 
-      const logDm = `💚 ${target.name} healed +${delta} HP (${currentHp}/${target.hpMax} HP)`;
-      let logP: string | undefined;
-      if (isSecret) {
-        logP = undefined;
-      } else if (isMasked) {
-        logP = `💚 ${target.name} received healing!`;
-      } else {
-        logP = logDm;
+      // Suppress Hostile Healing in Combat Feed:
+      // When a combatant with role Monster, Boss, or Custom receives healing, do NOT log any message to the combat feed.
+      const isHostileOrCustom =
+        target.role === 'Monster' ||
+        target.role === 'Boss' ||
+        target.role === 'Custom' ||
+        target.type === 'monster' ||
+        target.type === 'boss' ||
+        target.type === 'custom';
+
+      if (!isHostileOrCustom) {
+        const logDm = `💚 ${target.name} healed +${delta} HP (${currentHp}/${target.hpMax} HP)`;
+        let logP: string | undefined;
+        if (isSecret) {
+          logP = undefined;
+        } else if (isMasked) {
+          logP = `💚 ${target.name} received healing!`;
+        } else {
+          logP = logDm;
+        }
+        liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
       }
-      liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
     }
 
     const now = Date.now();
@@ -863,6 +888,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     );
     setCombatants(updated);
     localCombatantsRef.current = updated;
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
@@ -870,7 +898,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleUpdateMaxHp = (combatantId: string, newMaxHp: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
     if (!isDm && !isPlayerOrAlly) return;
 
     const clampedHpCurrent = Math.min(target.hpCurrent, newMaxHp);
@@ -889,6 +922,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     );
     setCombatants(updated);
     localCombatantsRef.current = updated;
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
@@ -899,6 +935,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   ) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
+    if (!isDm && !isPlayerOrAlly) return;
 
     const now = Date.now();
     const updated = combatants.map((c) =>
@@ -912,7 +955,47 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     );
     setCombatants(updated);
     localCombatantsRef.current = updated;
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // TABLE-WIDE COMBATANT UPDATE (Players can update their own PC and Ally combatants)
+  const handleUpdateCombatant = async (id: string, updates: Partial<Combatant>) => {
+    const target = combatants.find((c) => c.id === id);
+    if (!target) return;
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
+    if (!isDm && !isPlayerOrAlly) return;
+
+    const now = Date.now();
+    const next = combatants.map((c) => {
+      if (c.id !== id) return c;
+      const updated = { ...c, ...updates, updatedAt: now };
+      // If HP rises above 0, wipe death saves
+      const nextHp = updates.hpCurrent !== undefined ? updates.hpCurrent : updates.hp;
+      if (nextHp !== undefined && nextHp > 0) {
+        updated.deathSaves = { successes: 0, failures: 0 };
+      }
+      return updated;
+    });
+
+    setCombatants(next);
+    localCombatantsRef.current = next;
+
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(next));
+    } catch {}
+
+    // Sync to OBR room metadata for the whole table
+    await broadcastCombat(next, activeTurnIndex, round, activeCombatantId, combatStatus);
+
+    return next;
   };
 
   // 1-CLICK DUPLICATE MINION
@@ -980,7 +1063,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleSaveInlineThp = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
     if (!isDm && !isPlayerOrAlly) return;
 
     const val = Math.max(0, inlineThpVal);
@@ -996,6 +1084,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const logP = isCombatantFoW(target) ? undefined : logDm;
     liveFeedSync.recordCombatLog(logDm, true, logP);
 
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
@@ -1007,7 +1098,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   ) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
     if (!isDm && !isPlayerOrAlly) return;
 
     const rawName = (nameToUse || conditionInput).trim();
@@ -1040,6 +1136,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const logP = newCond.isSecret ? undefined : `✨ Condition [${rawName}${timingLabel}] applied to ${target.name}.`;
     liveFeedSync.recordCombatLog(logDm, true, logP);
 
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
   };
 
@@ -1047,7 +1146,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleRemoveCondition = (combatantId: string, condIdOrName: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
     if (!isDm && !isPlayerOrAlly) return;
 
     const existingNormalized = target.conditions.map(normalizeCondition);
@@ -1159,7 +1263,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
   // START EDITING COMBATANT
   const handleStartEditing = (c: Combatant) => {
-    const isPlayerOrAlly = c.type === 'player' || c.type === 'ally';
+    const isPlayerOrAlly =
+      c.type === 'player' ||
+      c.type === 'ally' ||
+      c.role === 'PC' ||
+      c.role === 'Player' ||
+      c.role === 'Ally';
     if (!isDm && !isPlayerOrAlly) return;
 
     setEditingCombatantId(c.id);
@@ -1177,11 +1286,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleSaveEdit = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
-    const isPlayerOrAlly = target.type === 'player' || target.type === 'ally';
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
     if (!isDm && !isPlayerOrAlly) return;
 
     const allowedType: CombatantType = !isDm
-      ? target.type === 'ally'
+      ? target.type === 'ally' || target.role === 'Ally'
         ? 'ally'
         : 'player'
       : editType;
@@ -1469,6 +1583,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 onHpDelta={handleHpDelta}
                 onUpdateMaxHp={handleUpdateMaxHp}
                 onUpdateDeathSaves={handleUpdateDeathSaves}
+                onUpdateCombatant={handleUpdateCombatant}
                 onDuplicateCombatant={handleDuplicateCombatant}
                 onDeployCombatant={handleDeployCombatant}
                 onDeleteCombatant={handleDeleteCombatant}
@@ -1662,7 +1777,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       {actionMenuCombatantId && (() => {
         const menuCombatant = combatants.find((c) => c.id === actionMenuCombatantId);
         if (!menuCombatant) return null;
-        const isPlayerOrAlly = menuCombatant.type === 'player' || menuCombatant.type === 'ally';
+        const isPlayerOrAlly =
+          menuCombatant.type === 'player' ||
+          menuCombatant.type === 'ally' ||
+          menuCombatant.role === 'PC' ||
+          menuCombatant.role === 'Player' ||
+          menuCombatant.role === 'Ally';
         const canEdit = isDm || isPlayerOrAlly;
         const isEditing = editingCombatantId === menuCombatant.id;
 

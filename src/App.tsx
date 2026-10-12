@@ -177,9 +177,22 @@ export default function App() {
     }
   };
 
-  // Stop broadcasting note (GM Action)
-  const handleStopBroadcasting = async () => {
+  // Stop broadcasting note (GM Action) - 1-Click Broadcast Teardown
+  const handleStopRevealing = async () => {
     try {
+      // 1. Set note.isRevealed = false on the note card in localStorage
+      try {
+        const saved = localStorage.getItem('ashtapor_dm_notes_v1');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const updated = parsed.map((n: any) => ({ ...n, isRevealed: false }));
+            localStorage.setItem('ashtapor_dm_notes_v1', JSON.stringify(updated));
+          }
+        }
+      } catch {}
+
+      // 2 & 3. Clear active broadcast metadata
       if (OBR.isReady) {
         await OBR.room.setMetadata({
           [OBR_BROADCAST_NOTE_KEY]: undefined,
@@ -187,9 +200,14 @@ export default function App() {
       }
       localStorage.removeItem('ashtapor_broadcast_note');
       window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
+
+      // 4. Close the broadcast modal overlay immediately
       setBroadcastNote(null);
+      setDismissedBroadcastId(null);
     } catch (err) {
       console.error('Error stopping broadcast:', err);
+      setBroadcastNote(null);
+      setDismissedBroadcastId(null);
     }
   };
 
@@ -425,9 +443,9 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setDismissedBroadcastId(broadcastNote.id)}
+                onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
                 className="text-neutral-400 hover:text-neutral-200 p-1 rounded-md hover:bg-neutral-800 transition cursor-pointer"
-                title="Dismiss"
+                title={isGM ? "Stop Revealing & Close" : "Dismiss"}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -445,25 +463,23 @@ export default function App() {
               </span>
 
               <div className="flex items-center gap-2">
-                {isGM && (
+                {isGM ? (
                   <button
                     type="button"
-                    onClick={handleStopBroadcasting}
-                    className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 transition cursor-pointer flex items-center gap-1"
-                    title="Stop broadcasting this note to all player screens"
+                    onClick={handleStopRevealing}
+                    className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer"
                   >
-                    <EyeOff className="w-3 h-3" />
-                    <span>Stop Revealing</span>
+                    <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDismissedBroadcastId(broadcastNote.id)}
+                    className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
+                  >
+                    Dismiss / Close
                   </button>
                 )}
-
-                <button
-                  type="button"
-                  onClick={() => setDismissedBroadcastId(broadcastNote.id)}
-                  className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
-                >
-                  Dismiss / Close
-                </button>
               </div>
             </div>
           </div>

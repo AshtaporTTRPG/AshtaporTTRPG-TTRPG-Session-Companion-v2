@@ -633,6 +633,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     saveDmNotes(updated);
   };
 
+  // Toggle reveal for DM note (broadcast or stop broadcasting)
   const handleToggleRevealDmNote = async (note: DmSecretNote) => {
     const nextRevealed = !note.isRevealed;
 
@@ -681,6 +682,66 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       console.error('Failed to broadcast note to room:', err);
     }
   };
+
+  // 1-Click Broadcast Teardown: Stop revealing note, toggle eye icon, and clear broadcast
+  const handleStopRevealingDmNote = async (noteId?: string) => {
+    const updated = dmNotes.map((n) =>
+      !noteId || n.id === noteId ? { ...n, isRevealed: false, updatedAt: Date.now() } : n
+    );
+    saveDmNotes(updated);
+
+    try {
+      if (OBR.isReady) {
+        await OBR.room.setMetadata({
+          [OBR_BROADCAST_NOTE_KEY]: undefined,
+        });
+      }
+      localStorage.removeItem('ashtapor_broadcast_note');
+      window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
+    } catch (err) {
+      console.error('Failed to stop broadcasting note:', err);
+    }
+  };
+
+  // Listen for broadcast stop events so note card eye icon toggles to EyeOff immediately
+  useEffect(() => {
+    const handleBroadcastEvent = (e: any) => {
+      const detail = e.detail;
+      if (!detail) {
+        setDmNotes((prev) => {
+          const hasRevealed = prev.some((n) => n.isRevealed);
+          if (!hasRevealed) return prev;
+          const updated = prev.map((n) => ({ ...n, isRevealed: false }));
+          try {
+            localStorage.setItem(LOCAL_DM_NOTES_KEY, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+    };
+
+    window.addEventListener('ashtapor-broadcast-note', handleBroadcastEvent);
+    return () => window.removeEventListener('ashtapor-broadcast-note', handleBroadcastEvent);
+  }, []);
+
+  // Listen for remote OBR broadcast note metadata clearance
+  useEffect(() => {
+    if (!OBR.isReady) return;
+    const unsub = OBR.room.onMetadataChange((meta) => {
+      if (meta[OBR_BROADCAST_NOTE_KEY] === undefined) {
+        setDmNotes((prev) => {
+          const hasRevealed = prev.some((n) => n.isRevealed);
+          if (!hasRevealed) return prev;
+          const updated = prev.map((n) => ({ ...n, isRevealed: false }));
+          try {
+            localStorage.setItem(LOCAL_DM_NOTES_KEY, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const activeRevealedNote = dmNotes.find((n) => n.isRevealed);
 

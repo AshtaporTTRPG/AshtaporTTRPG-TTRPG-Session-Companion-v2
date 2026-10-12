@@ -183,9 +183,11 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
           <button
             type="button"
             onClick={() => onToggleReveal(activeRevealedNote)}
-            className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer shrink-0"
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-700 hover:bg-rose-600 text-white transition cursor-pointer shrink-0 flex items-center gap-1 shadow-sm"
+            title="Stop broadcasting this note to all player screens"
           >
-            Hide
+            <EyeOff className="w-3.5 h-3.5" />
+            <span>Stop Revealing</span>
           </button>
         </div>
       )}
