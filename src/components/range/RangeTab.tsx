@@ -9,20 +9,16 @@ import {
   ChevronUp,
   Activity,
   Flame,
-  Layers,
   RotateCcw,
 } from 'lucide-react';
 import { liveFeedSync } from '../../utils/liveFeedSync';
 
-export type RangeRuleMode = 'raw' | 'chebyshev';
-
 export const RangeTab: React.FC = () => {
-  // 3D Range Finder Numeric States (Ground & Altitude)
-  const [groundDistance, setGroundDistance] = useState<number>(40);
-  const [altitudeDiff, setAltitudeDiff] = useState<number>(60);
-  const [ruleMode, setRuleMode] = useState<RangeRuleMode>('raw');
+  // 3D Range Finder States: Ground Distance & Height
+  const [groundDistance, setGroundDistance] = useState<number>(30);
+  const [height, setHeight] = useState<number>(30);
 
-  // Accordion active sections (Jump Calculator is open by default)
+  // Accordion active sections (Jump Calculator open by default)
   const [isJumpOpen, setIsJumpOpen] = useState<boolean>(true);
   const [isFallOpen, setIsFallOpen] = useState<boolean>(false);
 
@@ -35,43 +31,27 @@ export const RangeTab: React.FC = () => {
   const [fallDistance, setFallDistance] = useState<number>(30);
   const [isIncapacitated, setIsIncapacitated] = useState<boolean>(false);
 
-  // 1. Calculations
-  const euclideanDistance = Math.sqrt(
-    groundDistance * groundDistance + altitudeDiff * altitudeDiff
+  // Standard 5e Pythagorean calculation: round(sqrt(ground^2 + height^2) / 5) * 5
+  const rawHypotenuse = Math.sqrt(
+    groundDistance * groundDistance + height * height
   );
+  const hypotenuse = Math.round(rawHypotenuse / 5) * 5;
+  const squares = Math.round(hypotenuse / 5);
 
-  const tacticalRange =
-    ruleMode === 'chebyshev'
-      ? Math.max(groundDistance, altitudeDiff)
-      : Math.ceil(euclideanDistance / 5) * 5;
-
-  const gridSquares = Math.round(tacticalRange / 5);
-
-  const formattedTrueDistance = Number.isInteger(euclideanDistance)
-    ? euclideanDistance.toString()
-    : euclideanDistance.toFixed(1);
-
-  const pitchAngleDegrees =
-    groundDistance === 0
-      ? altitudeDiff > 0
-        ? 90
-        : 0
-      : Math.round(Math.atan2(altitudeDiff, groundDistance) * (180 / Math.PI));
-
-  // Dynamic SVG Proportional Triangle Coordinates Calculation
+  // Dynamic SVG Right Triangle Coordinates
   const svgData = useMemo(() => {
     const width = 420;
-    const height = 180;
-    const originX = 45;
-    const originY = 150;
-    const maxDrawW = 260;
-    const maxDrawH = 115;
+    const canvasHeight = 175;
+    const originX = 50;
+    const originY = 145;
+    const maxDrawW = 310;
+    const maxDrawH = 110;
 
-    const maxLeg = Math.max(groundDistance, altitudeDiff, 10);
+    const maxLeg = Math.max(groundDistance, height, 10);
     const scale = Math.min(maxDrawW / maxLeg, maxDrawH / maxLeg);
 
-    const legX = groundDistance > 0 ? Math.max(40, groundDistance * scale) : 20;
-    const legY = altitudeDiff > 0 ? Math.max(25, altitudeDiff * scale) : 10;
+    const legX = groundDistance > 0 ? Math.max(45, groundDistance * scale) : 25;
+    const legY = height > 0 ? Math.max(30, height * scale) : 15;
 
     const cornerX = originX + legX;
     const cornerY = originY;
@@ -83,7 +63,7 @@ export const RangeTab: React.FC = () => {
 
     return {
       width,
-      height,
+      canvasHeight,
       originX,
       originY,
       cornerX,
@@ -93,20 +73,15 @@ export const RangeTab: React.FC = () => {
       midHypotenuseX,
       midHypotenuseY,
     };
-  }, [groundDistance, altitudeDiff]);
+  }, [groundDistance, height]);
 
-  // Jump Calculations:
-  // Math.max(STR mod, DEX mod)
-  // Standing: 5 + bestMod
-  // Running: 10 + bestMod
+  // Jump Calculations
   const bestJumpMod = Math.max(strModifier, dexModifier);
   const standingJumpDistance = Math.max(0, 5 + bestJumpMod);
   const runningJumpDistance = Math.max(0, 10 + bestJumpMod);
   const activeJumpDistance = hasRunningStart ? runningJumpDistance : standingJumpDistance;
 
-  // Fall Damage Calculations:
-  // If <= 15 ft -> 0 dmg. If > 15 ft -> distance - 15 HP flat.
-  // Incapacitated -> 1 flat dmg/ft from 0.
+  // Fall Damage Calculations
   const flatFallDamage = isIncapacitated
     ? Math.max(0, fallDistance) * 1
     : fallDistance <= 15
@@ -120,72 +95,58 @@ export const RangeTab: React.FC = () => {
 
   const handleResetInputs = () => {
     setGroundDistance(30);
-    setAltitudeDiff(30);
+    setHeight(30);
   };
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-y-auto bg-[#0b0f17] select-none p-2.5 gap-2.5">
-      {/* 1. UNIFIED INTERACTIVE 3D ELEVATION DIAGRAM */}
-      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 relative flex flex-col gap-3 shadow-md">
-        {/* Header Strip with Title, Quick Reset & Rule Mode Pill */}
+      {/* 1. SINGLE INTERACTIVE 3D ELEVATION CANVAS */}
+      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 relative flex flex-col gap-3 shadow-md">
+        {/* Header Strip with Title & Quick Reset */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <Ruler className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="font-display font-bold text-xs text-slate-100 truncate">
-              3D Elevation Calculator
-            </span>
-            <span className="text-[10px] font-mono text-emerald-400/90 font-semibold">
-              · {pitchAngleDegrees}° Pitch
+              3D Range Calculator
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Rule Mode Pill Toggle: 5e RAW Standard vs Chebyshev Grid */}
-            <button
-              type="button"
-              onClick={() => setRuleMode((prev) => (prev === 'raw' ? 'chebyshev' : 'raw'))}
-              className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded-full border transition cursor-pointer flex items-center gap-1 ${
-                ruleMode === 'raw'
-                  ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-300 ring-1 ring-emerald-500/30'
-                  : 'bg-cyan-950/90 border-cyan-500/70 text-cyan-300 ring-1 ring-cyan-500/30'
-              }`}
-              title="Click to toggle between 5e RAW Standard (Euclidean rounded to 5ft) and Chebyshev (5-5-5 diagonal rule)"
-            >
-              <Layers className="w-2.5 h-2.5" />
-              <span>{ruleMode === 'raw' ? '5e RAW Standard' : 'Chebyshev 5-5-5'}</span>
-            </button>
-
+          <div className="flex items-center gap-2">
+            <div className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/60 font-mono text-[11px] font-extrabold text-emerald-300">
+              {hypotenuse} ft ({squares} sq)
+            </div>
             <button
               type="button"
               onClick={handleResetInputs}
               className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-900 transition cursor-pointer"
-              title="Reset Ground and Altitude to 30ft"
+              title="Reset Ground and Height to 30ft"
+              aria-label="Reset Ground and Height to 30ft"
             >
-              <RotateCcw className="w-3 h-3" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        {/* Interactive Geometric SVG Canvas & Center Badge */}
-        <div className="relative w-full h-44 bg-slate-900/80 border border-slate-800/90 rounded-lg overflow-hidden flex items-center justify-center select-none shadow-inner">
+        {/* Clean Right Triangle SVG Canvas (No floating boxes blocking points or lines) */}
+        <div className="relative w-full h-44 bg-slate-900/85 border border-slate-800/90 rounded-lg overflow-hidden flex items-center justify-center select-none shadow-inner">
           <svg
-            viewBox={`0 0 ${svgData.width} ${svgData.height}`}
+            viewBox={`0 0 ${svgData.width} ${svgData.canvasHeight}`}
             className="w-full h-full block"
           >
             <defs>
-              <pattern id="elevation-grid" width="14" height="14" patternUnits="userSpaceOnUse">
+              <pattern id="elevation-grid-pattern" width="14" height="14" patternUnits="userSpaceOnUse">
                 <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#1e293b" strokeWidth="0.5" />
               </pattern>
-              <linearGradient id="hypotenuseGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+              <linearGradient id="hypotenuseGlowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor="#10b981" />
-                <stop offset="100%" stopColor="#06b6d4" />
+                <stop offset="100%" stopColor="#34d399" />
               </linearGradient>
             </defs>
 
             {/* Grid Pattern Background */}
-            <rect width="100%" height="100%" fill="url(#elevation-grid)" rx="6" />
+            <rect width="100%" height="100%" fill="url(#elevation-grid-pattern)" rx="6" />
 
-            {/* Baseline Reference Dash */}
+            {/* Baseline Dash */}
             <line
               x1="20"
               y1={svgData.originY}
@@ -197,7 +158,7 @@ export const RangeTab: React.FC = () => {
             />
 
             {/* Shaded Triangle Fill */}
-            {(groundDistance > 0 || altitudeDiff > 0) && (
+            {(groundDistance > 0 || height > 0) && (
               <polygon
                 points={`${svgData.originX},${svgData.originY} ${svgData.cornerX},${svgData.cornerY} ${svgData.targetX},${svgData.targetY}`}
                 fill="#10b981"
@@ -205,17 +166,17 @@ export const RangeTab: React.FC = () => {
               />
             )}
 
-            {/* Right Angle Indicator */}
-            {groundDistance > 0 && altitudeDiff > 0 && (
+            {/* Right Angle Square Indicator */}
+            {groundDistance > 0 && height > 0 && (
               <path
                 d={`M ${svgData.cornerX - 8} ${svgData.cornerY} L ${svgData.cornerX - 8} ${svgData.cornerY - 8} L ${svgData.cornerX} ${svgData.cornerY - 8}`}
                 fill="none"
                 stroke="#64748b"
-                strokeWidth="1"
+                strokeWidth="1.2"
               />
             )}
 
-            {/* Horizontal Leg (Ground Distance Line) */}
+            {/* Horizontal Leg (Ground Distance) */}
             <line
               x1={svgData.originX}
               y1={svgData.originY}
@@ -226,7 +187,7 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Vertical Leg (Altitude Line) */}
+            {/* Vertical Leg (Height) */}
             <line
               x1={svgData.cornerX}
               y1={svgData.cornerY}
@@ -237,55 +198,70 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Hypotenuse Vector */}
+            {/* Hypotenuse Diagonal Line */}
             <line
               x1={svgData.originX}
               y1={svgData.originY}
               x2={svgData.targetX}
               y2={svgData.targetY}
-              stroke="url(#hypotenuseGlow)"
+              stroke="url(#hypotenuseGlowGrad)"
               strokeWidth="3"
               strokeLinecap="round"
             />
 
-            {/* Character Origin Marker */}
-            <circle cx={svgData.originX} cy={svgData.originY} r="4" fill="#f59e0b" />
-            <circle cx={svgData.originX} cy={svgData.originY} r="7" fill="none" stroke="#f59e0b" strokeOpacity="0.3" strokeWidth="1.5" />
+            {/* Caster Origin Marker */}
+            <circle cx={svgData.originX} cy={svgData.originY} r="4.5" fill="#f59e0b" />
+            <circle cx={svgData.originX} cy={svgData.originY} r="8" fill="none" stroke="#f59e0b" strokeOpacity="0.3" strokeWidth="1.5" />
 
-            {/* Target Airborne Marker */}
-            <circle cx={svgData.targetX} cy={svgData.targetY} r="4" fill="#38bdf8" />
-            <circle cx={svgData.targetX} cy={svgData.targetY} r="7" fill="none" stroke="#38bdf8" strokeOpacity="0.3" strokeWidth="1.5" />
+            {/* Target Marker */}
+            <circle cx={svgData.targetX} cy={svgData.targetY} r="4.5" fill="#38bdf8" />
+            <circle cx={svgData.targetX} cy={svgData.targetY} r="8" fill="none" stroke="#38bdf8" strokeOpacity="0.3" strokeWidth="1.5" />
+
+            {/* Hypotenuse Label: Bold bright emerald text positioned alongside the diagonal line without blocking vertices */}
+            <text
+              x={svgData.midHypotenuseX - 8}
+              y={Math.max(22, svgData.midHypotenuseY - 10)}
+              textAnchor="middle"
+              className="font-mono text-xs font-black fill-emerald-400 select-none"
+              style={{ filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.95))' }}
+            >
+              {hypotenuse} ft ({squares} sq)
+            </text>
+
+            {/* Horizontal Leg Value Label */}
+            <text
+              x={(svgData.originX + svgData.cornerX) / 2}
+              y={svgData.originY + 14}
+              textAnchor="middle"
+              className="font-mono text-[9px] font-bold fill-amber-400/90 select-none"
+            >
+              {groundDistance} ft
+            </text>
+
+            {/* Vertical Leg Value Label */}
+            <text
+              x={svgData.cornerX + 16}
+              y={(svgData.cornerY + svgData.targetY) / 2 + 3}
+              textAnchor="start"
+              className="font-mono text-[9px] font-bold fill-cyan-400/90 select-none"
+            >
+              {height} ft
+            </text>
           </svg>
-
-          {/* GLOWING TACTICAL BADGE (Directly along the Hypotenuse Vector) */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-slate-950/95 border border-emerald-500/80 rounded-xl px-3 py-1.5 shadow-xl shadow-emerald-500/10 ring-1 ring-emerald-400/40 backdrop-blur-md text-center pointer-events-auto">
-            <div className="flex items-center justify-center gap-1.5 leading-none">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                Direct LoS:
-              </span>
-              <span className="text-sm font-mono font-extrabold text-emerald-300 tabular-nums">
-                {tacticalRange} ft
-              </span>
-              <span className="text-[11px] font-mono font-bold text-cyan-300">
-                ({gridSquares} sq)
-              </span>
-            </div>
-            <div className="text-[9px] font-mono text-slate-400 mt-0.5">
-              Euclidean: <strong className="text-amber-300">{formattedTrueDistance} ft</strong> · Pitch: {pitchAngleDegrees}°
-            </div>
-          </div>
         </div>
 
-        {/* INTERACTIVE LEGS CONTROLS (Positioned directly for Ground and Altitude) */}
+        {/* 2. DIRECT INTERACTIVE LEGS CONTROLS */}
         <div className="grid grid-cols-2 gap-2.5">
-          {/* Horizontal Leg (Ground Distance) Controller */}
-          <div className="p-2 rounded-lg bg-slate-900/90 border border-amber-500/40 space-y-1.5 shadow-sm">
+          {/* Horizontal Leg (Ground Distance) */}
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-amber-500/40 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <label htmlFor="ground-leg-input" className="text-[11px] font-bold text-amber-300 flex items-center gap-1">
-                <Compass className="w-3.5 h-3.5 text-amber-400" />
-                <span>Ground Distance</span>
+              <label htmlFor="ground-leg-input" className="text-[10px] font-bold text-amber-300 font-mono tracking-wide flex items-center gap-1">
+                <Compass className="w-3 h-3 text-amber-400" />
+                <span>GROUND DISTANCE</span>
               </label>
-              <span className="text-[9px] font-mono text-amber-400/80 uppercase">Horizontal</span>
+              <span className="text-[9px] font-mono text-amber-400/80 font-bold">
+                {groundDistance}ft
+              </span>
             </div>
 
             {/* Stepper Input: [ - ] <input> [ + ] */}
@@ -295,6 +271,7 @@ export const RangeTab: React.FC = () => {
                 onClick={() => setGroundDistance((prev) => Math.max(0, prev - 5))}
                 className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
                 title="-5 ft ground distance"
+                aria-label="-5 ft ground distance"
               >
                 <Minus className="w-3.5 h-3.5" />
               </button>
@@ -314,6 +291,7 @@ export const RangeTab: React.FC = () => {
                 onClick={() => setGroundDistance((prev) => prev + 5)}
                 className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
                 title="+5 ft ground distance"
+                aria-label="+5 ft ground distance"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -338,56 +316,60 @@ export const RangeTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Vertical Leg (Altitude / Height) Controller */}
-          <div className="p-2 rounded-lg bg-slate-900/90 border border-cyan-500/40 space-y-1.5 shadow-sm">
+          {/* Vertical Leg (Height) */}
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-cyan-500/40 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <label htmlFor="altitude-leg-input" className="text-[11px] font-bold text-cyan-300 flex items-center gap-1">
-                <ArrowUpRight className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Altitude / Height</span>
+              <label htmlFor="height-leg-input" className="text-[10px] font-bold text-cyan-300 font-mono tracking-wide flex items-center gap-1">
+                <ArrowUpRight className="w-3 h-3 text-cyan-400" />
+                <span>HEIGHT</span>
               </label>
-              <span className="text-[9px] font-mono text-cyan-400/80 uppercase">Vertical</span>
+              <span className="text-[9px] font-mono text-cyan-400/80 font-bold">
+                {height}ft
+              </span>
             </div>
 
             {/* Stepper Input: [ - ] <input> [ + ] */}
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => setAltitudeDiff((prev) => Math.max(0, prev - 5))}
+                onClick={() => setHeight((prev) => Math.max(0, prev - 5))}
                 className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="-5 ft altitude"
+                title="-5 ft height"
+                aria-label="-5 ft height"
               >
                 <Minus className="w-3.5 h-3.5" />
               </button>
 
               <input
-                id="altitude-leg-input"
+                id="height-leg-input"
                 type="number"
                 min="0"
                 step="5"
-                value={altitudeDiff}
-                onChange={(e) => setAltitudeDiff(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                value={height}
+                onChange={(e) => setHeight(Math.max(0, parseInt(e.target.value, 10) || 0))}
                 className="flex-1 min-w-0 h-7 px-1.5 text-center text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-cyan-300 focus:outline-none focus:border-cyan-400 tabular-nums"
               />
 
               <button
                 type="button"
-                onClick={() => setAltitudeDiff((prev) => prev + 5)}
+                onClick={() => setHeight((prev) => prev + 5)}
                 className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="+5 ft altitude"
+                title="+5 ft height"
+                aria-label="+5 ft height"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Compact Altitude Chips: [ 10ft ] [ 30ft ] [ 60ft ] [ 100ft ] */}
+            {/* Compact Preset Chips: [ 10ft ] [ 30ft ] [ 60ft ] [ 100ft ] */}
             <div className="grid grid-cols-4 gap-1 pt-0.5">
               {[10, 30, 60, 100].map((val) => (
                 <button
                   key={val}
                   type="button"
-                  onClick={() => setAltitudeDiff(val)}
+                  onClick={() => setHeight(val)}
                   className={`py-1 text-[9px] font-mono rounded border transition cursor-pointer ${
-                    altitudeDiff === val
+                    height === val
                       ? 'bg-cyan-400 text-slate-950 font-bold border-cyan-300 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
@@ -400,7 +382,7 @@ export const RangeTab: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. COLLAPSIBLE ASHTAPOR JUMP CALCULATOR */}
+      {/* 3. COLLAPSIBLE ASHTAPOR JUMP CALCULATOR */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"
@@ -559,7 +541,7 @@ export const RangeTab: React.FC = () => {
         )}
       </div>
 
-      {/* 3. COLLAPSIBLE ASHTAPOR FALL DAMAGE CALCULATOR */}
+      {/* 4. COLLAPSIBLE ASHTAPOR FALL DAMAGE CALCULATOR */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"

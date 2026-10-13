@@ -318,10 +318,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                           type="button"
                           onClick={(e) => handleOpenEdit(member, e)}
                           className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
-                          title={`Edit ${member.name}`}
-                          aria-label={`Edit ${member.name}`}
+                          title="Edit Character"
+                          aria-label="Edit Character"
                         >
-                          <Pencil className="w-3.5 h-3.5 text-slate-400 hover:text-amber-400 cursor-pointer" />
+                          <Pencil className="w-3.5 h-3.5 text-slate-400 hover:text-amber-400" />
                         </button>
 
                         <button

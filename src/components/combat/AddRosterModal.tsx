@@ -67,6 +67,8 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
     onClose();
   };
 
+  const showAllRoles = isDm || isEditing;
+
   return (
     <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
       <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-xl p-4 shadow-2xl space-y-3">
@@ -110,20 +112,20 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
             />
           </div>
 
-          {/* Role Selector: PC/Ally for players; all 5 roles for GM */}
+          {/* Role Selector: PC, Ally, Monster, Boss, Custom */}
           <div>
             <div className="flex items-center justify-between mb-0.5">
               <label className="text-[10px] text-slate-300 font-semibold">
                 Role
               </label>
-              {isDm && (
+              {showAllRoles && (
                 <span className="text-[9px] font-mono text-amber-400">
-                  GM Roster Mode (5 Roles)
+                  {isEditing ? 'Edit Mode (5 Roles)' : 'GM Roster Mode (5 Roles)'}
                 </span>
               )}
             </div>
 
-            <div className={`grid gap-1 ${isDm ? 'grid-cols-5' : 'grid-cols-2'}`}>
+            <div className={`grid gap-1 ${showAllRoles ? 'grid-cols-5' : 'grid-cols-2'}`}>
               {/* PC */}
               <button
                 type="button"
@@ -152,8 +154,8 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
                 <span>Ally</span>
               </button>
 
-              {/* GM-Only Roles: Monster, Boss, Custom */}
-              {isDm && (
+              {/* Roles: Monster, Boss, Custom */}
+              {showAllRoles && (
                 <>
                   <button
                     type="button"
@@ -197,7 +199,7 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
               )}
             </div>
 
-            {!isDm && (
+            {!showAllRoles && (
               <p className="text-[10px] text-slate-500 mt-1">
                 Players stage PC and Ally characters. Monster and Boss roles are GM accessible.
               </p>

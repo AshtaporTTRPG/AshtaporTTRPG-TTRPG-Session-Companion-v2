@@ -415,14 +415,46 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     } catch {}
   }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus]);
 
-  // Safe incoming metadata processor that prevents empty-array or stale-cache overwrite
+  // Safe incoming metadata processor with sub-50ms turn synchronization
   const handleIncomingMetadata = useCallback((metadata: Record<string, any>) => {
     const state = (metadata[ROOM_METADATA_KEY] || metadata[COMBAT_STATE_KEY]) as
-      | CombatState
-      | { combatants?: Combatant[] }
+      | (CombatState & { currentTurnIndex?: number; currentRound?: number })
       | undefined;
 
     if (!state) return;
+
+    // Zero-lag real-time turn sync: Check and immediately update currentTurnIndex and currentRound
+    // without waiting to filter tombstones, merge maps, or re-sort the combatant array!
+    const incomingTurnIndex = (state as any).currentTurnIndex ?? state.activeTurnIndex;
+    const incomingRound = (state as any).currentRound ?? state.round;
+    const incomingTurnTime = state.lastTurnChangeTime;
+
+    const isStaleTurn =
+      incomingTurnTime !== undefined &&
+      incomingTurnTime < lastTurnChangeTimeRef.current;
+
+    if (!isStaleTurn) {
+      if (incomingTurnTime !== undefined) {
+        lastTurnChangeTimeRef.current = incomingTurnTime;
+      }
+      if (typeof incomingTurnIndex === 'number') {
+        setActiveTurnIndex(incomingTurnIndex);
+        if (state.activeCombatantId) {
+          setActiveCombatantId(state.activeCombatantId);
+        } else if (Array.isArray(state.combatants) && state.combatants[incomingTurnIndex]) {
+          setActiveCombatantId(state.combatants[incomingTurnIndex].id);
+        }
+      } else if (state.activeCombatantId) {
+        setActiveCombatantId(state.activeCombatantId);
+      }
+      if (typeof incomingRound === 'number') {
+        setRound(incomingRound);
+      }
+    }
+
+    if (state.combatStatus) {
+      setCombatStatus(state.combatStatus);
+    }
 
     const incomingList = Array.isArray(state.combatants) ? state.combatants : null;
     if (!incomingList) return;
@@ -473,27 +505,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const merged = sortInitiativeStrictDescending(Array.from(mergedMap.values()));
     setCombatants(merged);
     localCombatantsRef.current = merged;
-
-    if (fullState.lastTurnChangeTime && fullState.lastTurnChangeTime < lastTurnChangeTimeRef.current) {
-      // Ignore stale rollback
-    } else {
-      if (fullState.lastTurnChangeTime) {
-        lastTurnChangeTimeRef.current = fullState.lastTurnChangeTime;
-      }
-      if (fullState.activeCombatantId !== undefined) {
-        setActiveCombatantId(fullState.activeCombatantId);
-      }
-      if (typeof fullState.activeTurnIndex === 'number') {
-        setActiveTurnIndex(fullState.activeTurnIndex);
-      }
-      if (typeof fullState.round === 'number') {
-        setRound(fullState.round);
-      }
-    }
-
-    if (fullState.combatStatus) {
-      setCombatStatus(fullState.combatStatus);
-    }
   }, []);
 
   // Initial OBR room metadata fetch
@@ -527,12 +538,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   ) => {
     const statusToBroadcast = updatedCombatStatus || combatStatus;
     const now = Date.now();
-    const updatedState: CombatState = {
+    const updatedState: any = {
       combatants: updatedCombatants,
       activeTurnIndex: updatedTurn,
+      currentTurnIndex: updatedTurn,
       activeCombatantId:
         updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
       round: updatedRound,
+      currentRound: updatedRound,
       combatStatus: statusToBroadcast,
       lastTurnChangeTime: turnChangeTime ?? lastTurnChangeTimeRef.current,
       lastUpdated: now,
@@ -582,6 +595,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const nextIndex = sorted.findIndex((c) => c.id === nextActiveId);
     const nextCombatant = sorted[nextIndex];
 
+    // Optimistic local update (0ms delay)
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextIndex);
     setRound(nextRound);
@@ -598,7 +612,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (!isHidden) {
         const announcement = `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${nextCombatant.name}'s turn! (Round ${nextRound})`;
         liveFeedSync.recordTurnAnnouncement(announcement, true);
-        if (nextCombatant.type === 'player') {
+        if (nextCombatant.type === 'player' || nextCombatant.role === 'PC' || nextCombatant.role === 'Player') {
           setPlayerTurnAlert(`⚔️ ${nextCombatant.name.toUpperCase()}'S TURN!`);
           setTimeout(() => setPlayerTurnAlert(null), 4000);
         } else {
@@ -615,8 +629,25 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
     }
 
+    // Direct atomic broadcast to room metadata without read latency pre-fetch
     try {
-      await broadcastCombat(sorted, nextIndex, nextRound, nextActiveId, combatStatus, now);
+      if (OBR.isReady) {
+        await OBR.room.setMetadata({
+          [ROOM_METADATA_KEY]: {
+            combatants: sorted,
+            currentTurnIndex: nextIndex,
+            activeTurnIndex: nextIndex,
+            currentRound: nextRound,
+            round: nextRound,
+            activeCombatantId: nextActiveId,
+            combatStatus,
+            lastTurnChangeTime: now,
+            lastUpdated: now,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('Failed to set OBR combat metadata:', e);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -657,12 +688,30 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const prevIndex = sorted.findIndex((c) => c.id === prevActiveId);
 
+    // Optimistic local update (0ms delay)
     setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
 
+    // Direct atomic broadcast to room metadata without read latency pre-fetch
     try {
-      await broadcastCombat(sorted, prevIndex, prevRound, prevActiveId, combatStatus, now);
+      if (OBR.isReady) {
+        await OBR.room.setMetadata({
+          [ROOM_METADATA_KEY]: {
+            combatants: sorted,
+            currentTurnIndex: prevIndex,
+            activeTurnIndex: prevIndex,
+            currentRound: prevRound,
+            round: prevRound,
+            activeCombatantId: prevActiveId,
+            combatStatus,
+            lastTurnChangeTime: now,
+            lastUpdated: now,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('Failed to set OBR combat metadata:', e);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -834,8 +883,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     await broadcastCombat([], 0, 1, null, 'setup');
   };
 
-  // HP DELTA MICRO-BUTTONS (-1, -5, +5, +1)
-  const handleHpDelta = (combatantId: string, delta: number) => {
+  // Canonical role helper
+  const getCombatantCanonicalRole = (c: Combatant): 'PC' | 'Ally' | 'Monster' | 'Boss' | 'Custom' => {
+    const roleStr = (c.role || '').toLowerCase().trim();
+    const typeStr = (c.type || '').toLowerCase().trim();
+    if (roleStr === 'pc' || roleStr === 'player' || typeStr === 'player') return 'PC';
+    if (roleStr === 'ally' || typeStr === 'ally') return 'Ally';
+    if (roleStr === 'boss' || typeStr === 'boss') return 'Boss';
+    if (roleStr === 'custom' || typeStr === 'custom') return 'Custom';
+    return 'Monster';
+  };
+
+  // AUDITED HP HANDLER: APPLY HEALING
+  const applyHeal = (combatantId: string, amount: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
     const isPlayerOrAlly =
@@ -844,82 +904,28 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       target.role === 'PC' ||
       target.role === 'Player' ||
       target.role === 'Ally';
-    const isSecret = target.isReserve || target.isSecret || target.hidden;
-    const isMasked = target.maskStats || target.fogOfWar || target.type === 'monster' || target.type === 'boss';
 
     if (!isDm && !isPlayerOrAlly) return;
 
-    let currentTemp = target.tempHp ?? target.hpTemp ?? 0;
-    let currentHp = target.hpCurrent;
+    const healAmount = Math.max(0, Math.round(amount));
+    if (healAmount === 0) return;
+
+    const currentHp = Math.min(target.hpMax, target.hpCurrent + healAmount);
     let updatedDeathSaves = target.deathSaves;
+    if (currentHp > 0 && isPlayerOrAlly) {
+      updatedDeathSaves = { successes: 0, failures: 0 };
+    }
 
-    if (delta < 0) {
-      const damage = Math.abs(delta);
-      let rem = damage;
-      if (currentTemp > 0) {
-        if (rem <= currentTemp) {
-          currentTemp -= rem;
-          rem = 0;
-        } else {
-          rem -= currentTemp;
-          currentTemp = 0;
-        }
-      }
-      currentHp = Math.max(0, currentHp - rem);
+    const canonicalRole = getCombatantCanonicalRole(target);
+    const isSecret = Boolean(target.isReserve || target.isSecret || target.hidden);
 
-      // Concentration check & alert badge trigger
-      if (isConcentrating(target)) {
-        const dc = calculateConcentrationDC(damage);
-        triggerConcentrationAlert(target.id, dc);
-        const dmMsg = `⚡ ${target.name} took ${damage} dmg while concentrating! DC ${dc} CON save required.`;
-        const pMsg = isSecret ? undefined : isMasked ? `⚔️ ${target.name} took damage!` : dmMsg;
-        liveFeedSync.recordCombatLog(dmMsg, true, pMsg, isSecret);
-      }
-
-      const logDm = `⚔️ ${target.name} took ${damage} damage (${currentHp}/${target.hpMax} HP${
-        currentTemp > 0 ? `, +${currentTemp} THP` : ''
-      })`;
-
-      // Mask Stats: Table combat feed displays "[Combatant] took damage!" instead of exact numbers
-      let logP: string | undefined;
-      if (isSecret) {
-        logP = undefined;
-      } else if (isMasked) {
-        logP = `⚔️ ${target.name} took damage!`;
-      } else {
-        logP = logDm;
-      }
-      liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
-    } else {
-      currentHp = Math.min(target.hpMax, currentHp + delta);
-
-      // When PC or Ally receives healing (hp > 0), reset death saves
-      if (currentHp > 0 && isPlayerOrAlly) {
-        updatedDeathSaves = { successes: 0, failures: 0 };
-      }
-
-      // Suppress Hostile Healing in Combat Feed:
-      // When a combatant with role Monster, Boss, or Custom receives healing, do NOT log any message to the combat feed.
-      const isHostileOrCustom =
-        target.role === 'Monster' ||
-        target.role === 'Boss' ||
-        target.role === 'Custom' ||
-        target.type === 'monster' ||
-        target.type === 'boss' ||
-        target.type === 'custom';
-
-      if (!isHostileOrCustom) {
-        const logDm = `💚 ${target.name} healed +${delta} HP (${currentHp}/${target.hpMax} HP)`;
-        let logP: string | undefined;
-        if (isSecret) {
-          logP = undefined;
-        } else if (isMasked) {
-          logP = `💚 ${target.name} received healing!`;
-        } else {
-          logP = logDm;
-        }
-        liveFeedSync.recordCombatLog(logDm, true, logP, isSecret);
-      }
+    // Rule:
+    // If combatant role is Monster, Boss, or Custom: COMPLETE SILENCE.
+    // Do not invoke logCombatFeed, broadcast, or add any entry to the feed.
+    // If combatant role is PC or Ally: Log "{combatant.name} healed for {amount} HP."
+    if (canonicalRole === 'PC' || canonicalRole === 'Ally') {
+      const msg = `${target.name} healed for ${healAmount} HP.`;
+      liveFeedSync.recordCombatLog(msg, true, isSecret ? undefined : msg, isSecret);
     }
 
     const now = Date.now();
@@ -929,8 +935,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             ...c,
             hpCurrent: currentHp,
             hp: currentHp,
-            hpTemp: currentTemp,
-            tempHp: currentTemp,
             deathSaves: updatedDeathSaves,
             updatedAt: now,
           }
@@ -942,6 +946,98 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
     broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // AUDITED HP HANDLER: APPLY DAMAGE
+  const applyDamage = (combatantId: string, amount: number) => {
+    const target = combatants.find((c) => c.id === combatantId);
+    if (!target) return;
+    const isPlayerOrAlly =
+      target.type === 'player' ||
+      target.type === 'ally' ||
+      target.role === 'PC' ||
+      target.role === 'Player' ||
+      target.role === 'Ally';
+
+    if (!isDm && !isPlayerOrAlly) return;
+
+    const damageAmount = Math.max(0, Math.round(amount));
+    if (damageAmount === 0) return;
+
+    let currentTemp = target.tempHp ?? target.hpTemp ?? 0;
+    let rem = damageAmount;
+    if (currentTemp > 0) {
+      if (rem <= currentTemp) {
+        currentTemp -= rem;
+        rem = 0;
+      } else {
+        rem -= currentTemp;
+        currentTemp = 0;
+      }
+    }
+    const currentHp = Math.max(0, target.hpCurrent - rem);
+
+    // Concentration alert badge trigger
+    if (isConcentrating(target)) {
+      const dc = calculateConcentrationDC(damageAmount);
+      triggerConcentrationAlert(target.id, dc);
+    }
+
+    const canonicalRole = getCombatantCanonicalRole(target);
+    const isSecret = Boolean(target.isReserve || target.isSecret || target.hidden);
+    const isMasked = Boolean(target.maskStats || target.fogOfWar);
+
+    // Rule:
+    // If combatant is masked (Mask Stats active):
+    //   - If role === Monster: Log "Monster took damage!" (Never log as Boss).
+    //   - If role === Boss: Log "Boss took damage!"
+    //   - If role === Custom: Log "{combatant.name} took damage!"
+    //   - If role === PC or Ally: Log "{combatant.name} took damage!"
+    // If combatant is unmasked: Log "{combatant.name} took damage!"
+    // Never log exact damage numbers for masked targets.
+    let logMsg: string;
+    if (isMasked) {
+      if (canonicalRole === 'Monster') {
+        logMsg = 'Monster took damage!';
+      } else if (canonicalRole === 'Boss') {
+        logMsg = 'Boss took damage!';
+      } else {
+        logMsg = `${target.name} took damage!`;
+      }
+    } else {
+      logMsg = `${target.name} took damage!`;
+    }
+
+    liveFeedSync.recordCombatLog(logMsg, true, isSecret ? undefined : logMsg, isSecret);
+
+    const now = Date.now();
+    const updated = combatants.map((c) =>
+      c.id === combatantId
+        ? {
+            ...c,
+            hpCurrent: currentHp,
+            hp: currentHp,
+            hpTemp: currentTemp,
+            tempHp: currentTemp,
+            updatedAt: now,
+          }
+        : c
+    );
+    setCombatants(updated);
+    localCombatantsRef.current = updated;
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
+    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+  };
+
+  // HP DELTA MICRO-BUTTONS (-1, -5, +5, +1) AND INLINE POPOVER DISPATCHER
+  const handleHpDelta = (combatantId: string, delta: number) => {
+    if (delta < 0) {
+      applyDamage(combatantId, Math.abs(delta));
+    } else if (delta > 0) {
+      applyHeal(combatantId, delta);
+    }
   };
 
   // UPDATE MAX HP
