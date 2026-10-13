@@ -21,46 +21,41 @@ import {
   CombatFeedItem,
   RosterMember,
 } from '../../types/combat';
-import { COMBAT_STATE_KEY, ROOM_METADATA_KEY, CombatState } from '../../utils/obrCombatSync';
+import { COMBAT_STATE_KEY, ROOM_METADATA_KEY } from '../../utils/obrCombatSync';
 import { playTurnSound } from '../../utils/audio';
 import { executeDiceRoll } from '../../utils/dice';
-import { getHealthThreshold } from '../../utils/combatHealth';
 import { isConcentrating, calculateConcentrationDC } from '../../utils/concentration';
 import {
   Swords,
   Plus,
   RotateCcw,
-  ArrowRight,
-  ArrowLeft,
-  ArrowUpDown,
-  X,
-  Sparkles,
-  Trash2,
-  Eye,
-  EyeOff,
-  MoreVertical,
-  Edit2,
-  Check,
-  Zap,
-  Play,
+  SkipBack,
+  ChevronLeft,
+  ChevronRight,
   Radio,
-  ChevronDown,
   ChevronUp,
-  Skull,
-  User,
-  Users,
-  Crown,
-  Layers,
-  Copy,
-  Clock,
+  Rows,
+  List,
   Volume2,
   VolumeX,
-  Shield,
+  Users,
+  Copy,
+  Edit2,
+  Trash2,
+  X,
+  Eye,
+  EyeOff,
+  Sparkles,
+  User,
+  Skull,
+  Crown,
+  Layers,
 } from 'lucide-react';
 import { CombatantRow } from './CombatantRow';
 import { AddCombatantModal, NewCombatantData } from './AddCombatantModal';
 import { MyRosterDrawer } from './MyRosterDrawer';
 import { ResetCombatModal } from './ResetCombatModal';
+import { CombatFeedDrawer } from './CombatFeedDrawer';
 
 export { ROOM_METADATA_KEY, COMBAT_STATE_KEY, ROSTER_METADATA_KEY, TURN_METADATA_KEY, FEED_METADATA_KEY } from '../../types/combat';
 
@@ -187,10 +182,6 @@ const getTypeBadge = (type: CombatantType, customLabel?: string) => {
   }
 };
 
-/**
- * Clean Web Audio API turn chime synthesizer (zero external network requests or audio files)
- * Generates a gentle sine-wave oscillator at 587.33 Hz (D5) tapering to 880 Hz (A5) over 250ms
- */
 function playWebAudioTurnChime(enabled: boolean = true) {
   if (!enabled) return;
   try {
@@ -246,7 +237,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     encounterIdRef.current = encounterId;
   }, [encounterId]);
 
-  // Combat State - initialized from local storage
+  // Combat State
   const [combatants, setCombatants] = useState<Combatant[]>(() => {
     try {
       const saved = localStorage.getItem('ttrpg_combatants');
@@ -302,6 +293,47 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   });
 
+  // Density / Row expansion state
+  const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(() => new Set());
+  const isAllCompact = expandedRowIds.size === 0;
+
+  const toggleAllDensity = () => {
+    if (isAllCompact) {
+      setExpandedRowIds(new Set(combatants.map((c) => c.id)));
+    } else {
+      setExpandedRowIds(new Set());
+    }
+  };
+
+  const toggleRow = (id: string) => {
+    setExpandedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Roster Drawer State
+  const [isRosterOpen, setIsRosterOpen] = useState<boolean>(false);
+  const [rosterCount, setRosterCount] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('ashtapor_my_roster');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.length;
+      }
+    } catch {}
+    return 1;
+  });
+
+  // Slide-up Combat Feed Drawer State
+  const [isFeedOpen, setIsFeedOpen] = useState<boolean>(false);
+  const [combatFeedItems, setCombatFeedItems] = useState<UnifiedFeedItem[]>(() => {
+    const feed = liveFeedSync.getFeed();
+    return feed.filter((i) => i.type === 'combat' || i.type === 'turn').slice(-30);
+  });
+
   // Concentration Damage DC alerts map: combatantId -> { dc, expiresAt }
   const [concentrationAlerts, setConcentrationAlerts] = useState<
     Record<string, { dc: number; expiresAt: number }>
@@ -326,43 +358,32 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }, 6000);
   };
 
-  // Modal states
+  // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [actionMenuCombatantId, setActionMenuCombatantId] = useState<string | null>(null);
   const [editingCombatantId, setEditingCombatantId] = useState<string | null>(null);
 
-  // Transient deletion tombstone set (ID -> expiration timestamp)
+  // Transient tombstone set
   const deletionTombstones = useRef<Map<string, number>>(new Map());
-
-  // Recently added combatants tracking (ID -> expiration timestamp)
   const recentlyAddedIdsRef = useRef<Map<string, number>>(new Map());
-
-  // Timestamp of last local reset/clear encounter
   const lastLocalClearTimeRef = useRef<number>(0);
 
-  // Transaction Mutex Lock for Join Combat / Exit Combat / Add operations
+  // Transaction Mutex Lock
   const isSyncingRef = useRef<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const syncQueueRef = useRef<Array<() => Promise<void>>>([]);
 
-  // Inflight turn change lock & desync rollback prevention
+  // Inflight turn change lock
   const [isTurnUpdating, setIsTurnUpdating] = useState<boolean>(false);
-  const lastTurnChangeTimeRef = useRef<number>((() => {
-    try {
-      const saved = localStorage.getItem('ttrpg_last_turn_change_time');
-      return saved ? parseInt(saved, 10) : 0;
-    } catch {
-      return 0;
-    }
-  })());
+  const lastTurnChangeTimeRef = useRef<number>(Date.now());
 
   const localCombatantsRef = useRef<Combatant[]>(combatants);
   useEffect(() => {
     localCombatantsRef.current = combatants;
   }, [combatants]);
 
-  // Custom condition form state in combatant options menu
+  // Action Menu Form States
   const [conditionInput, setConditionInput] = useState<string>('');
   const [conditionTiming, setConditionTiming] = useState<'none' | 'start' | 'end'>('none');
   const [conditionIsSecret, setConditionIsSecret] = useState<boolean>(false);
@@ -370,13 +391,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   // Inline Temp HP click-edit state
   const [inlineThpId, setInlineThpId] = useState<string | null>(null);
   const [inlineThpVal, setInlineThpVal] = useState<number>(0);
-
-  // Combat Action Feed Dock state
-  const [isCombatFeedExpanded, setIsCombatFeedExpanded] = useState<boolean>(false);
-  const [combatFeedItems, setCombatFeedItems] = useState<UnifiedFeedItem[]>(() => {
-    const feed = liveFeedSync.getFeed();
-    return feed.filter((i) => i.type === 'combat' || i.type === 'turn').slice(-30);
-  });
 
   // Edit draft states
   const [editName, setEditName] = useState('');
@@ -391,7 +405,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   // Turn alert toast
   const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
 
-  // Listen for live feed updates to update combat dock
+  // Listen for live feed sync
   useEffect(() => {
     const unsub = liveFeedSync.subscribe((items) => {
       const combatEvents = items
@@ -402,7 +416,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return () => unsub();
   }, []);
 
-  // Synchronize active pointer with combatants list
+  // Synchronize active pointer with combatants list using activeCombatantId
   useEffect(() => {
     if (combatants.length === 0) {
       if (activeCombatantId !== null) setActiveCombatantId(null);
@@ -422,6 +436,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
     }
 
+    // Default to first combatant if activeCombatantId is missing or removed
     const first = sorted[0];
     if (first) {
       setActiveCombatantId(first.id);
@@ -445,7 +460,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     } catch {}
   }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus, encounterId]);
 
-  // Mutex execution helper to prevent concurrent metadata write collisions
   const withSyncLock = useCallback(async (action: () => Promise<void>) => {
     if (isSyncingRef.current) {
       return new Promise<void>((resolve, reject) => {
@@ -482,8 +496,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
   /**
    * STRICT READ-ONLY METADATA LISTENER
-   * Breaks the echo loop: Never writes metadata from inside listener!
-   * Partitions incoming metadata into roster, turn, and feed streams.
+   * Reads ashtapor/turn, ashtapor/roster, ashtapor/feed
    */
   const handleIncomingMetadata = useCallback((metadata: Record<string, any>) => {
     const now = Date.now();
@@ -491,14 +504,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     // 1. Process ashtapor/turn partitioned stream
     const turnPayload = metadata[TURN_METADATA_KEY] as TurnMetadataPayload | undefined;
     if (turnPayload) {
-      if (typeof turnPayload.currentTurnIndex === 'number') {
-        setActiveTurnIndex(turnPayload.currentTurnIndex);
+      if (turnPayload.activeCombatantId !== undefined) {
+        setActiveCombatantId(turnPayload.activeCombatantId);
       }
       if (typeof turnPayload.currentRound === 'number') {
         setRound(turnPayload.currentRound);
       }
-      if (turnPayload.activeCombatantId !== undefined) {
-        setActiveCombatantId(turnPayload.activeCombatantId);
+      if (typeof turnPayload.currentTurnIndex === 'number') {
+        setActiveTurnIndex(turnPayload.currentTurnIndex);
       }
     }
 
@@ -507,12 +520,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     if (rosterPayload) {
       const incomingEpoch = rosterPayload.encounterId;
 
-      // Drop zombies: If incoming payload has an older encounterId than current local epoch, ignore
       if (incomingEpoch && incomingEpoch < encounterIdRef.current) {
         return;
       }
 
-      // If incoming payload has a strictly newer encounter epoch, adopt it
       if (incomingEpoch && incomingEpoch > encounterIdRef.current) {
         encounterIdRef.current = incomingEpoch;
         setEncounterId(incomingEpoch);
@@ -524,7 +535,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       const activeEpoch = incomingEpoch || encounterIdRef.current;
       const rawList = Array.isArray(rosterPayload.combatants) ? rosterPayload.combatants : [];
 
-      // Clean tombstones
       for (const [id, expiry] of deletionTombstones.current.entries()) {
         if (now > expiry) deletionTombstones.current.delete(id);
       }
@@ -532,7 +542,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         if (now > expiry) recentlyAddedIdsRef.current.delete(id);
       }
 
-      // Drop any combatant tagged with an older encounterId or in tombstones
       const validIncoming = rawList.filter(
         (c) =>
           (!c.encounterId || c.encounterId === activeEpoch) &&
@@ -549,7 +558,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         }
       }
 
-      // Preserve any recently added local combatants in flight
       for (const local of localCombatantsRef.current) {
         if (!mergedMap.has(local.id) && !deletionTombstones.current.has(local.id)) {
           const isRecentlyAdded = recentlyAddedIdsRef.current.has(local.id);
@@ -566,7 +574,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       try {
         localStorage.setItem('ttrpg_combatants', JSON.stringify(sorted));
       } catch {}
-      return;
     }
 
     // 3. Process ashtapor/feed stream
@@ -589,7 +596,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       });
     }
 
-    // 4. Backwards compatibility fallback for legacy ROOM_METADATA_KEY if partitioned keys absent
+    // 4. Backwards compatibility fallback
     if (!rosterPayload && !turnPayload) {
       const legacyState = (metadata[ROOM_METADATA_KEY] || metadata[COMBAT_STATE_KEY]) as any;
       if (legacyState) {
@@ -618,7 +625,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       .catch(() => {});
   }, [handleIncomingMetadata]);
 
-  // Listen for OBR metadata changes - STRICTLY READ ONLY
+  // Listen for OBR metadata changes
   useEffect(() => {
     if (!OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
@@ -627,10 +634,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return () => unsub();
   }, [handleIncomingMetadata]);
 
-  /**
-   * PARTITIONED BROADCAST HELPERS
-   * Rule: Turn advancement or feed logging must NEVER read, write, or overwrite ashtapor/roster!
-   */
   const broadcastRoster = async (updatedCombatants: Combatant[]) => {
     if (!OBR.isReady) return;
     try {
@@ -650,19 +653,18 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   };
 
   const broadcastTurn = async (
-    updatedTurn: number,
+    updatedTurnIndex: number,
     updatedRound: number,
-    updatedActiveCombatantId?: string | null
+    updatedActiveCombatantId: string | null
   ) => {
     if (!OBR.isReady) return;
     try {
       await OBR.room.setMetadata({
         [TURN_METADATA_KEY]: {
           encounterId: encounterIdRef.current,
-          currentTurnIndex: updatedTurn,
+          activeCombatantId: updatedActiveCombatantId,
           currentRound: updatedRound,
-          activeCombatantId:
-            updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
+          currentTurnIndex: updatedTurnIndex,
         },
       });
     } catch (e) {
@@ -686,7 +688,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       type: 'combat',
     };
 
-    // Local live feed record
     liveFeedSync.recordCombatLog(message, false, playerMessage, isSecret);
 
     if (OBR.isReady) {
@@ -705,7 +706,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // Turn management: NEXT TURN with Auto-Round Increment & Web Audio Turn Bell
+  // Turn advance logic via activeCombatantId
   const handleNextTurn = async () => {
     if (combatants.length === 0 || isTurnUpdating) return;
     setIsTurnUpdating(true);
@@ -713,36 +714,33 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const now = Date.now();
     lastTurnChangeTimeRef.current = now;
-    try {
-      localStorage.setItem('ttrpg_last_turn_change_time', now.toString());
-    } catch {}
 
+    // Filter active, non-reserve combatants descending by initiative
     const sorted = sortInitiativeStrictDescending(combatants);
 
-    const currentIndex = activeCombatantId
-      ? sorted.findIndex((c) => c.id === activeCombatantId)
-      : -1;
+    let currentIndex = -1;
+    if (activeCombatantId) {
+      currentIndex = sorted.findIndex((c) => c.id === activeCombatantId);
+    }
 
-    let nextActiveId: string;
+    let nextIndex: number;
     let nextRound = round;
 
     if (currentIndex === -1 || currentIndex >= sorted.length - 1) {
-      nextActiveId = sorted[0].id;
+      nextIndex = 0;
       nextRound = round + 1;
       broadcastFeedLog(`🔔 --- Round ${nextRound} Began ---`, false);
     } else {
-      nextActiveId = sorted[currentIndex + 1].id;
+      nextIndex = currentIndex + 1;
     }
 
-    const nextIndex = sorted.findIndex((c) => c.id === nextActiveId);
     const nextCombatant = sorted[nextIndex];
+    const nextActiveId = nextCombatant ? nextCombatant.id : null;
 
-    // Optimistic local update (0ms latency)
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextIndex);
     setRound(nextRound);
 
-    // Audio Turn Chime (Web Audio API synth)
     if (isTurnChimeEnabled) {
       playWebAudioTurnChime(true);
     } else {
@@ -769,7 +767,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
     }
 
-    // Direct atomic broadcast to ashtapor/turn ONLY - NEVER writes to ashtapor/roster!
     try {
       await broadcastTurn(nextIndex, nextRound, nextActiveId);
     } finally {
@@ -777,47 +774,39 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // PREV TURN
+  // Prev Turn
   const handlePrevTurn = async () => {
     if (combatants.length === 0 || isTurnUpdating) return;
     setIsTurnUpdating(true);
     setConcentrationAlerts({});
 
-    const now = Date.now();
-    lastTurnChangeTimeRef.current = now;
-    try {
-      localStorage.setItem('ttrpg_last_turn_change_time', now.toString());
-    } catch {}
-
     const sorted = sortInitiativeStrictDescending(combatants);
-
     const currentIndex = activeCombatantId
       ? sorted.findIndex((c) => c.id === activeCombatantId)
       : 0;
 
-    let prevActiveId: string;
+    let prevIndex: number;
     let prevRound = round;
 
     if (currentIndex <= 0) {
       if (round > 1) {
-        prevActiveId = sorted[sorted.length - 1].id;
+        prevIndex = sorted.length - 1;
         prevRound = round - 1;
       } else {
-        prevActiveId = sorted[0].id;
+        prevIndex = 0;
         prevRound = 1;
       }
     } else {
-      prevActiveId = sorted[currentIndex - 1].id;
+      prevIndex = currentIndex - 1;
     }
 
-    const prevIndex = sorted.findIndex((c) => c.id === prevActiveId);
+    const prevCombatant = sorted[prevIndex];
+    const prevActiveId = prevCombatant ? prevCombatant.id : null;
 
-    // Optimistic local update
     setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
 
-    // Broadcast only to ashtapor/turn
     try {
       await broadcastTurn(prevIndex, prevRound, prevActiveId);
     } finally {
@@ -825,8 +814,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // START COMBAT
-  const handleStartCombat = () => {
+  // Start / Jump to Highest Initiative
+  const handleStartCombat = async () => {
     if (combatants.length === 0) {
       setIsAddModalOpen(true);
       return;
@@ -854,11 +843,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       );
     }
 
-    broadcastTurn(0, 1, firstId);
-    broadcastRoster(sorted);
+    await broadcastTurn(0, 1, firstId);
+    await broadcastRoster(sorted);
   };
 
-  // SORT INITIATIVE (Strict descending)
   const handleSortInitiative = () => {
     if (combatants.length === 0) return;
     const currentActiveId = activeCombatantId || combatants[activeTurnIndex]?.id || null;
@@ -876,7 +864,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastTurn(newIndex, round, currentActiveId);
   };
 
-  // ROLL INITIATIVE FOR ONE COMBATANT
   const handleRollInitiative = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -919,7 +906,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastTurn(targetIdx, round, activeCombatantId);
   };
 
-  // SMART RESET: OPTION 1 - CLEAR HOSTILES ONLY (Wave Reset within current epoch)
+  // Smart Reset: Option 1 - Clear Hostiles Only
   const handleClearHostilesOnly = async () => {
     const activeEncId = encounterIdRef.current;
     const remainingParty = combatants.filter(
@@ -941,7 +928,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setActiveTurnIndex(0);
     setRound(1);
     setCombatStatus(sortedParty.length > 0 ? 'active' : 'setup');
-    setIsClearModalOpen(false);
+    setIsResetModalOpen(false);
     setConcentrationAlerts({});
 
     try {
@@ -979,7 +966,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // SMART RESET: OPTION 2 - FULL CLEAR / END ENCOUNTER (Generates fresh new encounterId epoch)
+  // Smart Reset: Option 2 - Full Clear
   const handleFullClearCombat = async () => {
     const newEncounterId = `enc_${Date.now()}`;
     encounterIdRef.current = newEncounterId;
@@ -994,7 +981,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setActiveTurnIndex(0);
     setRound(1);
     setCombatStatus('setup');
-    setIsClearModalOpen(false);
+    setIsResetModalOpen(false);
     setConcentrationAlerts({});
     setCombatFeedItems([]);
 
@@ -1043,7 +1030,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // Canonical role helper
   const getCombatantCanonicalRole = (c: Combatant): 'PC' | 'Ally' | 'Monster' | 'Boss' | 'Custom' => {
     const roleStr = (c.role || '').toLowerCase().trim();
     const typeStr = (c.type || '').toLowerCase().trim();
@@ -1054,7 +1040,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return 'Monster';
   };
 
-  // AUDITED HP HANDLER: APPLY HEALING (Strict Factual Reporting)
+  // Audited Strict Factual Combat Feed Reporting: HEALING
   const applyHeal = (combatantId: string, amount: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1079,9 +1065,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const canonicalRole = getCombatantCanonicalRole(target);
     const isSecret = Boolean(target.isReserve || target.isSecret || target.hidden);
 
-    // Rule:
-    // If role is Monster, Boss, or Custom: ZERO LOG ENTRIES. Complete silence in ashtapor/feed!
-    // If role is PC or Ally: Log "{name} healed for {amount} HP."
+    // Strict Factual Rule:
+    // PC or Ally: Log "{name} healed for {amount} HP."
+    // Monster, Boss, Custom: COMPLETE SILENCE.
     if (canonicalRole === 'PC' || canonicalRole === 'Ally') {
       const msg = `${target.name} healed for ${healAmount} HP.`;
       broadcastFeedLog(msg, isSecret);
@@ -1107,7 +1093,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // AUDITED HP HANDLER: APPLY DAMAGE (Strict Factual Reporting)
+  // Audited Strict Factual Combat Feed Reporting: DAMAGE
   const applyDamage = (combatantId: string, amount: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1136,7 +1122,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
     const currentHp = Math.max(0, target.hpCurrent - rem);
 
-    // Concentration alert badge trigger
     if (isConcentrating(target)) {
       const dc = calculateConcentrationDC(damageAmount);
       triggerConcentrationAlert(target.id, dc);
@@ -1144,25 +1129,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const canonicalRole = getCombatantCanonicalRole(target);
     const isSecret = Boolean(target.isReserve || target.isSecret || target.hidden);
-    const isMasked = Boolean(target.maskStats || target.fogOfWar);
 
-    // Rules:
-    // If masked:
-    //   - Monster: Log "Monster took damage!"
-    //   - Boss: Log "Boss took damage!"
-    //   - Custom: Log "{name} took damage!"
-    //   - PC/Ally: Log "{name} took damage!"
-    // If unmasked: Log "{name} took damage!"
-    // Never log exact damage numbers for masked combatants.
+    // Strict Factual Reporting Rules:
+    // PC or Ally: Log "{name} took {amount} damage!" (Always includes numbers).
+    // Monster: Log "Monster took damage!" (Never log as Boss; no numbers).
+    // Boss: Log "Boss took damage!" (No numbers).
+    // Custom: Log "{name} took damage!" (No numbers).
     let logMsg: string;
-    if (isMasked) {
-      if (canonicalRole === 'Monster') {
-        logMsg = 'Monster took damage!';
-      } else if (canonicalRole === 'Boss') {
-        logMsg = 'Boss took damage!';
-      } else {
-        logMsg = `${target.name} took damage!`;
-      }
+    if (canonicalRole === 'PC' || canonicalRole === 'Ally') {
+      logMsg = `${target.name} took ${damageAmount} damage!`;
+    } else if (canonicalRole === 'Monster') {
+      logMsg = 'Monster took damage!';
+    } else if (canonicalRole === 'Boss') {
+      logMsg = 'Boss took damage!';
     } else {
       logMsg = `${target.name} took damage!`;
     }
@@ -1190,7 +1169,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // HP DELTA MICRO-BUTTONS (-1, -5, +5, +1) AND INLINE POPOVER DISPATCHER
   const handleHpDelta = (combatantId: string, delta: number) => {
     if (delta < 0) {
       applyDamage(combatantId, Math.abs(delta));
@@ -1199,7 +1177,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // UPDATE MAX HP
   const handleUpdateMaxHp = (combatantId: string, newMaxHp: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1233,7 +1210,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // UPDATE DEATH SAVES
   const handleUpdateDeathSaves = (
     combatantId: string,
     saves: { successes: number; failures: number }
@@ -1266,7 +1242,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // TABLE-WIDE COMBATANT UPDATE
   const handleUpdateCombatant = async (id: string, updates: Partial<Combatant>) => {
     const target = combatants.find((c) => c.id === id);
     if (!target) return;
@@ -1300,7 +1275,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return next;
   };
 
-  // 1-CLICK DUPLICATE MINION
   const handleDuplicateCombatant = async (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1336,7 +1310,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setActionMenuCombatantId(null);
   };
 
-  // 1-CLICK DEPLOY RESERVE COMBATANT (GM Action)
   const handleDeployCombatant = async (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1359,7 +1332,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     await broadcastRoster(updated);
   };
 
-  // INLINE TEMP HP SAVE
   const handleSaveInlineThp = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1390,7 +1362,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // ADD CUSTOM CONDITION WITH TIMING TAG
   const handleAddCustomCondition = (
     combatantId: string,
     nameToUse?: string,
@@ -1442,7 +1413,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // REMOVE CONDITION
   const handleRemoveCondition = (combatantId: string, condIdOrName: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1481,7 +1451,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastRoster(updated);
   };
 
-  // MANUAL COMBATANT REORDERING (GM Only)
   const handleMoveCombatant = (combatantId: string, direction: -1 | 1) => {
     if (!isDm || combatants.length <= 1) return;
     const sorted = sortInitiativeStrictDescending(combatants);
@@ -1533,7 +1502,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastTurn(targetActiveIdx, round, activeCombatantId);
   };
 
-  // DELETE COMBATANT (DM Only with tombstone protection)
   const handleDeleteCombatant = (combatantId: string) => {
     if (!isDm) return;
     deletionTombstones.current.set(combatantId, Date.now() + 15000);
@@ -1566,7 +1534,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastTurn(nextActiveIdx, round, nextActiveId);
   };
 
-  // START EDITING COMBATANT
   const handleStartEditing = (c: Combatant) => {
     const isPlayerOrAlly =
       c.type === 'player' ||
@@ -1587,7 +1554,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setEditTempHp(c.tempHp ?? c.hpTemp ?? 0);
   };
 
-  // SAVE EDITED COMBATANT
   const handleSaveEdit = (combatantId: string) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -1656,7 +1622,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     broadcastTurn(targetIdx, round, activeCombatantId);
   };
 
-  // ADD COMBATANT (Wrapped in Transaction Mutex Lock)
   const handleAddCombatant = async (newEntry: Omit<Combatant, 'id'>) => {
     await withSyncLock(async () => {
       const uniqueId =
@@ -1683,7 +1648,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         updatedAt: Date.now(),
       };
 
-      // Fetch fresh server snapshot
       let existingCombatants = combatants;
       if (OBR.isReady) {
         try {
@@ -1759,10 +1723,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setIsAddModalOpen(false);
   };
 
-  /**
-   * MUTEX WRITE LOCK: JOIN COMBAT FROM PERSISTENT MY ROSTER
-   * Solves multi-client race conditions with write lock and fresh server snapshot
-   */
   const handleJoinCombatFromRoster = async (member: RosterMember) => {
     await withSyncLock(async () => {
       const rollResult = executeDiceRoll({
@@ -1799,7 +1759,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           ? 'Boss'
           : 'Custom';
 
-      // 1. Fetch fresh server snapshot
       let currentRoster: Combatant[] = localCombatantsRef.current;
       let activeEpoch = encounterIdRef.current;
 
@@ -1816,7 +1775,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         }
       }
 
-      // Check if character already active in combat (by rosterId or matching name)
       const existingIdx = currentRoster.findIndex(
         (c) =>
           (c.rosterId && c.rosterId === member.id) ||
@@ -1888,7 +1846,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         false
       );
 
-      // Write partitioned roster
       await broadcastRoster(sortedList);
       if (currentRoster.length === 0) {
         await broadcastTurn(0, round, newCombatant.id);
@@ -1896,15 +1853,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     });
   };
 
-  /**
-   * MUTEX WRITE LOCK: EXIT COMBAT ROSTER ACTION
-   * Removes character from table tracker without touching local ashtapor_my_roster in localStorage.
-   */
   const handleExitCombatFromRoster = async (rosterMemberId: string) => {
     await withSyncLock(async () => {
-      // 1. Fetch fresh server snapshot
       let currentRoster: Combatant[] = localCombatantsRef.current;
-      let activeEpoch = encounterIdRef.current;
 
       if (OBR.isReady) {
         try {
@@ -1912,14 +1863,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           const rosterPayload = meta[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
           if (rosterPayload && Array.isArray(rosterPayload.combatants)) {
             currentRoster = rosterPayload.combatants;
-            activeEpoch = rosterPayload.encounterId || activeEpoch;
           }
         } catch (err) {
           console.warn('Could not fetch server snapshot before exit combat:', err);
         }
       }
 
-      // Read local roster to get character name
       const localRosterSaved: RosterMember[] = (() => {
         try {
           const s = localStorage.getItem('ashtapor_my_roster');
@@ -1951,7 +1900,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         localStorage.setItem('ttrpg_combatants', JSON.stringify(sortedRemaining));
       } catch {}
 
-      // Adjust active turn index if needed
       let nextActiveId = activeCombatantId;
       let nextActiveIdx = activeTurnIndex;
       if (activeCombatantId === targetCombatant.id) {
@@ -1966,16 +1914,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         setActiveTurnIndex(nextActiveIdx);
       }
 
-      // Log: "{character.name} left the combat."
       await broadcastFeedLog(`${removedName} left the combat.`, false);
-
-      // Write partitioned roster
       await broadcastRoster(sortedRemaining);
       await broadcastTurn(nextActiveIdx, round, nextActiveId);
     });
   };
 
-  // SYNC ROSTER MEMBER EDIT TO ACTIVE TABLE TRACKER
   const handleSyncRosterMemberStats = async (member: RosterMember) => {
     const matching = combatants.find(
       (c) =>
@@ -2012,6 +1956,20 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     );
   };
 
+  const handleClearFeed = async () => {
+    liveFeedSync.clearFeed();
+    setCombatFeedItems([]);
+    if (OBR.isReady) {
+      try {
+        await OBR.room.setMetadata({
+          [FEED_METADATA_KEY]: { items: [] },
+        });
+      } catch (err) {
+        console.warn('Failed to clear feed in OBR:', err);
+      }
+    }
+  };
+
   const visibleCombatants = combatants.filter(
     (c) => isDm || (!c.isReserve && !c.hidden && !c.isSecret)
   );
@@ -2030,24 +1988,67 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         </div>
       )}
 
-      {/* 1. HEADER ROW: Round Counter, Active Turn Name, Chime Bell, Nav Buttons */}
-      <div className="h-11 px-2.5 bg-slate-950/95 border-b border-slate-800 flex items-center justify-between shrink-0 gap-2 rounded-t-lg">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="px-2 py-0.5 rounded bg-amber-950/90 border border-amber-500/60 text-amber-300 font-mono font-bold text-[11px] shrink-0">
-            Round {round}
+      {/* 1. CASSETTE PLAYER TRANSPORT BAR */}
+      <div className="h-10 px-2 bg-slate-950/95 border-b border-slate-800 flex items-center justify-between shrink-0 gap-1.5 rounded-t-lg">
+        {/* Left: Roster Button, Round Pill, Active Turn Label */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <button
+            type="button"
+            onClick={() => setIsRosterOpen(true)}
+            className="px-2 py-1 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Open Character Roster"
+          >
+            <Users className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden xs:inline">Roster</span> ({rosterCount})
+          </button>
+
+          <span className="px-2 py-0.5 rounded bg-amber-950/50 text-amber-400 border border-amber-800/60 font-black text-xs shrink-0">
+            R{round}
           </span>
 
-          <div className="truncate text-xs font-medium text-slate-300 flex items-center gap-1">
-            <span className="text-slate-500 text-[10px] uppercase font-bold">Turn:</span>
-            <span
-              className="font-semibold text-amber-300 truncate max-w-[110px]"
-              title={activeTurnName}
-            >
-              {activeTurnName}
-            </span>
-          </div>
+          <span
+            className="text-xs font-bold text-slate-200 truncate max-w-[100px] xs:max-w-[120px]"
+            title={`Active Turn: ${activeTurnName}`}
+          >
+            TURN: {activeTurnName || 'None'}
+          </span>
+        </div>
 
-          {/* Web Audio Turn Chime Speaker Toggle */}
+        {/* Right: Transport Controls Cluster (⏮, ◀, ▶, 🔊, ≡ / ▤) */}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Start / Rewind to Top (⏮) */}
+          <button
+            type="button"
+            onClick={handleStartCombat}
+            title="Start / Jump to Highest Initiative (Top of Order)"
+            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <SkipBack className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Previous Turn (◀) */}
+          <button
+            type="button"
+            onClick={handlePrevTurn}
+            disabled={combatants.length === 0 || isTurnUpdating}
+            title="Previous Turn"
+            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center justify-center transition-colors disabled:opacity-40 cursor-pointer"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          {/* Next Turn (▶) */}
+          <button
+            type="button"
+            onClick={handleNextTurn}
+            disabled={combatants.length === 0 || isTurnUpdating}
+            title="Next Turn"
+            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded flex items-center justify-center transition-colors disabled:opacity-40 cursor-pointer shadow-sm"
+          >
+            <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+          </button>
+
+          {/* Audio Chime Toggle (🔊) */}
           <button
             type="button"
             onClick={() => {
@@ -2059,82 +2060,31 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 return next;
               });
             }}
-            className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded flex items-center justify-center transition-colors cursor-pointer"
             title={isTurnChimeEnabled ? 'Turn Chime: On (Web Audio bell)' : 'Turn Chime: Off (Muted)'}
             aria-label="Toggle Turn Chime"
           >
             {isTurnChimeEnabled ? (
               <Volume2 className="w-3.5 h-3.5 text-amber-400" />
             ) : (
-              <VolumeX className="w-3.5 h-3.5 text-slate-600" />
+              <VolumeX className="w-3.5 h-3.5 text-slate-500" />
             )}
           </button>
-        </div>
 
-        {/* Turn Nav Controls */}
-        <div className="flex items-center gap-1 shrink-0">
-          {isDm && combatStatus === 'setup' && combatants.length > 0 && (
-            <button
-              type="button"
-              onClick={handleStartCombat}
-              className="h-7 px-2 text-[11px] font-bold rounded bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center gap-1 cursor-pointer shadow-sm"
-              title="Start Combat"
-            >
-              <Play className="w-3 h-3 fill-current" />
-              <span>Start</span>
-            </button>
-          )}
-
+          {/* Global Density Toggle (≡ / ▤) */}
           <button
             type="button"
-            onClick={handlePrevTurn}
-            disabled={combatants.length === 0 || isTurnUpdating}
-            className="h-7 w-7 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition disabled:opacity-40 cursor-pointer"
-            title="Previous Turn"
+            onClick={toggleAllDensity}
+            title={isAllCompact ? 'Expand All Rows' : 'Compact All Rows'}
+            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded flex items-center justify-center transition-colors cursor-pointer"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            {isAllCompact ? <Rows className="w-3.5 h-3.5" /> : <List className="w-3.5 h-3.5" />}
           </button>
-
-          <button
-            type="button"
-            onClick={handleNextTurn}
-            disabled={combatants.length === 0 || isTurnUpdating}
-            className="h-7 px-2.5 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 transition shadow cursor-pointer disabled:opacity-40"
-            title="Advance to Next Turn (Cycles and increments round when last turn ends)"
-          >
-            <span>Next Turn</span>
-            <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
-          </button>
-
-          {isDm && (
-            <button
-              type="button"
-              onClick={handleSortInitiative}
-              className="h-7 w-7 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-              title="Strict Descending Initiative Sort"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
       </div>
 
-      {/* PERSISTENT MY ROSTER DRAWER (Local & Survives Encounter Reset) */}
-      <div className="px-2 pt-2 shrink-0">
-        <MyRosterDrawer
-          activeCombatantNames={combatants.map((c) => c.name)}
-          activeCombatants={combatants}
-          onJoinCombat={handleJoinCombatFromRoster}
-          onExitCombat={handleExitCombatFromRoster}
-          isDm={isDm}
-          playerName={playerName}
-          onUpdateActiveCombatantStats={handleSyncRosterMemberStats}
-          isSyncing={isSyncing}
-        />
-      </div>
-
-      {/* 2. COMBATANT LIST CONTAINER */}
-      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5 min-h-0">
+      {/* 2. INITIATIVE LIST CONTAINER (Reclaims vertical space with zero drawer obstruction) */}
+      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1 min-h-0">
         {visibleCombatants.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
             <Swords className="w-8 h-8 opacity-40 text-amber-400" />
@@ -2156,6 +2106,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             const isActive = activeCombatantId
               ? c.id === activeCombatantId
               : index === activeTurnIndex;
+            const isRowExpanded = expandedRowIds.has(c.id);
 
             return (
               <CombatantRow
@@ -2166,6 +2117,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 isActive={isActive}
                 isDm={isDm}
                 playerName={playerName}
+                isExpanded={isRowExpanded}
+                onToggleExpand={toggleRow}
                 isActionMenuOpen={actionMenuCombatantId === c.id}
                 onToggleActionMenu={(combatantId) => {
                   if (actionMenuCombatantId === combatantId) {
@@ -2201,139 +2154,69 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         )}
       </div>
 
-      {/* 3. COMPACT COLLAPSIBLE COMBAT FEED DOCK */}
-      <div className="border-t border-slate-800/90 bg-slate-950/95 shrink-0 flex flex-col">
-        {/* Dock Header Bar */}
-        <div className="h-8 px-2.5 flex items-center justify-between gap-2 text-xs">
+      {/* 3. SLEEK BOTTOM ACTION STRIP (36px Utility Strip) */}
+      <div className="h-9 px-2 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
+        {/* Add Combatant (+) */}
+        <button
+          type="button"
+          onClick={() => setIsAddModalOpen(true)}
+          title="Add Combatant"
+          className="w-8 h-8 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer shadow-sm"
+        >
+          <Plus className="w-4 h-4 stroke-[2.5]" />
+        </button>
+
+        {/* Feed Toggle Chip */}
+        <button
+          type="button"
+          onClick={() => setIsFeedOpen(!isFeedOpen)}
+          className="flex-1 h-8 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg flex items-center justify-between px-3 text-xs font-semibold transition-colors cursor-pointer"
+        >
+          <span className="flex items-center gap-1.5">
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>Combat Feed ({combatFeedItems.length})</span>
+          </span>
+          <ChevronUp className={`w-3.5 h-3.5 transition-transform duration-200 ${isFeedOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {/* Reset Encounter (🔄) */}
+        {isDm && (
           <button
             type="button"
-            onClick={() => setIsCombatFeedExpanded(!isCombatFeedExpanded)}
-            className="flex items-center gap-1.5 text-slate-300 hover:text-amber-300 transition cursor-pointer min-w-0"
+            onClick={() => setIsResetModalOpen(true)}
+            disabled={combatants.length === 0}
+            title="Reset / Clear Combat"
+            className="w-8 h-8 bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-800 rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer disabled:opacity-30"
           >
-            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse shrink-0" />
-            <span className="font-bold font-display text-[11px] shrink-0">Combat Feed</span>
-            <span className="text-[10px] text-slate-500 font-mono shrink-0">
-              ({combatFeedItems.length})
-            </span>
-
-            {!isCombatFeedExpanded && (() => {
-              const visibleEvent = [...combatFeedItems].reverse().find(
-                (evt) => isDm || (!evt.isSecret && evt.playerMessage !== undefined)
-              );
-              if (!visibleEvent) return null;
-              const isSecret = visibleEvent.isSecretRoll || visibleEvent.rollDetails?.visibility === 'gm_only';
-              const currentUserId = liveFeedSync.getPlayerId();
-              const isRoller = (visibleEvent.rollerId && visibleEvent.rollerId === currentUserId) || visibleEvent.sender === rollerIdentity;
-              const isAuthorized = isDm || isRoller;
-              const previewMsg = (isSecret && !isAuthorized)
-                ? `${visibleEvent.rollerName || visibleEvent.sender} made a secret roll to the DM 🔒`
-                : (!isDm && visibleEvent.playerMessage ? visibleEvent.playerMessage : visibleEvent.message);
-
-              return (
-                <span className="text-[10px] text-slate-400 truncate max-w-[200px] ml-1 opacity-80">
-                  • {previewMsg}
-                </span>
-              );
-            })()}
-
-            {isCombatFeedExpanded ? (
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            ) : (
-              <ChevronUp className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            )}
+            <RotateCcw className="w-4 h-4" />
           </button>
-
-          {isCombatFeedExpanded && combatFeedItems.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                liveFeedSync.clearFeed();
-                setCombatFeedItems([]);
-              }}
-              className="text-[10px] text-slate-400 hover:text-rose-300 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 transition cursor-pointer"
-            >
-              Clear Feed
-            </button>
-          )}
-        </div>
-
-        {/* Expanded Feed Items */}
-        {isCombatFeedExpanded && (
-          <div className="max-h-36 overflow-y-auto px-2.5 py-1.5 space-y-1 text-xs border-t border-slate-800/60 bg-slate-950/80">
-            {combatFeedItems.length === 0 ? (
-              <div className="text-center p-3 text-slate-500 text-[11px] italic">
-                No combat events logged yet. Turns, damage, and conditions will appear here.
-              </div>
-            ) : (
-              combatFeedItems.map((evt) => {
-                if (!isDm && (evt.isSecret || evt.playerMessage === undefined)) {
-                  return null;
-                }
-                const time = new Date(evt.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                });
-                const isSecret = evt.isSecretRoll || evt.rollDetails?.visibility === 'gm_only';
-                const currentUserId = liveFeedSync.getPlayerId();
-                const isRoller = (evt.rollerId && evt.rollerId === currentUserId) || evt.sender === rollerIdentity;
-                const isAuthorized = isDm || isRoller;
-                const msg = (isSecret && !isAuthorized)
-                  ? `${evt.rollerName || evt.sender} made a secret roll to the DM 🔒`
-                  : (!isDm && evt.playerMessage ? evt.playerMessage : evt.message);
-                const isDamage = msg.includes('took');
-                const isHeal = msg.includes('healed');
-
-                return (
-                  <div
-                    key={evt.id}
-                    className={`px-2 py-1 rounded-lg border text-[11px] flex items-center justify-between gap-1.5 ${
-                      isDamage
-                        ? 'bg-rose-950/30 border-rose-800/50 text-rose-200'
-                        : isHeal
-                        ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'
-                        : 'bg-slate-900/80 border-slate-800 text-slate-300'
-                    }`}
-                  >
-                    <span className="truncate flex-1">{msg}</span>
-                    <span className="text-[9px] font-mono text-slate-500 shrink-0">{time}</span>
-                  </div>
-                );
-              })
-            )}
-          </div>
         )}
       </div>
 
-      {/* 4. FOOTER CONTROLS: Add Combatant & Reset */}
-      <div className="h-10 px-2.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="h-7 px-2.5 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 shadow transition cursor-pointer"
-            title="Add Combatant to Encounter"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>Add Combatant</span>
-          </button>
-        </div>
+      {/* 4. SLIDE-UP COMBAT FEED DRAWER */}
+      <CombatFeedDrawer
+        isOpen={isFeedOpen}
+        onClose={() => setIsFeedOpen(false)}
+        feedItems={combatFeedItems}
+        isDm={isDm}
+        onClearFeed={handleClearFeed}
+        rollerIdentity={rollerIdentity}
+      />
 
-        <div className="flex items-center gap-1.5">
-          {isDm && (
-            <button
-              type="button"
-              onClick={() => setIsClearModalOpen(true)}
-              disabled={combatants.length === 0}
-              className="h-7 px-2 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-rose-950 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300 flex items-center gap-1 transition cursor-pointer disabled:opacity-30"
-              title="Reset encounter to a blank slate"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reset</span>
-            </button>
-          )}
-        </div>
-      </div>
+      {/* 5. SLIDE-OVER CHARACTER ROSTER DRAWER */}
+      <MyRosterDrawer
+        isOpen={isRosterOpen}
+        onClose={() => setIsRosterOpen(false)}
+        activeCombatantNames={combatants.map((c) => c.name)}
+        activeCombatants={combatants}
+        onJoinCombat={handleJoinCombatFromRoster}
+        onExitCombat={handleExitCombatFromRoster}
+        isDm={isDm}
+        playerName={playerName}
+        onUpdateActiveCombatantStats={handleSyncRosterMemberStats}
+        isSyncing={isSyncing}
+        onRosterCountChange={setRosterCount}
+      />
 
       {/* MODAL: ADD COMBATANT */}
       <AddCombatantModal
@@ -2343,10 +2226,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         onAdd={handleAddCombatantFromModal}
       />
 
-      {/* SMART COMBAT RESET MODAL (Clear Hostiles Only vs Full Clear with new epoch) */}
+      {/* SMART COMBAT RESET MODAL */}
       <ResetCombatModal
-        isOpen={isClearModalOpen}
-        onClose={() => setIsClearModalOpen(false)}
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
         onClearHostilesOnly={handleClearHostilesOnly}
         onFullClear={handleFullClearCombat}
         combatants={combatants}
@@ -2574,7 +2457,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 </div>
               )}
 
-              {/* Edit Combatant Form or Controls */}
+              {/* Edit Combatant Form */}
               {isEditing ? (
                 <div className="space-y-2 pt-1 border-t border-neutral-800">
                   <input
@@ -2682,7 +2565,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                       <span>Edit Stats</span>
                     </button>
 
-                    {/* GM Only: Remove combatant */}
                     {isDm && (
                       <button
                         type="button"

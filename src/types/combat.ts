@@ -66,9 +66,9 @@ export interface RosterMetadataPayload {
 
 export interface TurnMetadataPayload {
   encounterId: string;
-  currentTurnIndex: number;
+  activeCombatantId: string | null;
   currentRound: number;
-  activeCombatantId?: string | null;
+  currentTurnIndex?: number;
 }
 
 export interface CombatFeedItem {

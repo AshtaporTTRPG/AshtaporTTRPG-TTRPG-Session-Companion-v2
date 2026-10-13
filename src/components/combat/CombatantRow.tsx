@@ -17,16 +17,13 @@ import {
   X,
   Zap,
   EyeOff,
-  Eye,
   User,
   Users,
   Skull,
   Crown,
   Layers,
-  Copy,
   Clock,
   Shield,
-  Trash2,
 } from 'lucide-react';
 
 export interface CombatantRowProps {
@@ -36,6 +33,8 @@ export interface CombatantRowProps {
   isActive: boolean;
   isDm: boolean;
   playerName?: string;
+  isExpanded: boolean;
+  onToggleExpand: (id: string) => void;
   isActionMenuOpen: boolean;
   onToggleActionMenu: (combatantId: string) => void;
   onRollInitiative?: (combatantId: string) => void;
@@ -108,7 +107,6 @@ const getConditionBadgeStyle = (name: string): string => {
   }
 };
 
-// Role-Based Visual Configuration: 3px left border and matching role pill badge
 const ROLE_CONFIG: Record<
   CombatantType,
   { borderL: string; badge: string; label: string; icon: React.ReactNode }
@@ -152,6 +150,8 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   isActive,
   isDm,
   playerName,
+  isExpanded,
+  onToggleExpand,
   isActionMenuOpen,
   onToggleActionMenu,
   onRollInitiative,
@@ -172,12 +172,9 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   setInlineThpVal,
   onSaveInlineThp,
 }) => {
-  // Fog of War / Mask Stats check
   const isUnderFoW = isCombatantFoW(combatant);
   const isReserve = !!(combatant.isReserve || combatant.hidden || combatant.isSecret);
 
-  // Role permissions (v2.0.11):
-  // GM can edit everything. Players have full edit and stat-control permissions over PC and Ally combatants.
   const isPlayerOrAlly =
     combatant.role === 'PC' ||
     combatant.role === 'Player' ||
@@ -194,7 +191,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     .map(normalizeCondition)
     .filter((cond) => isDm || !cond.isSecret);
 
-  // Conditions with turn timing reminders
   const timingReminders = visibleConditions.filter(
     (cond) => cond.timing === 'start' || cond.timing === 'end'
   );
@@ -207,7 +203,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   const hpPopoverRef = useRef<HTMLDivElement>(null);
   const hpButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Concentration DC Alert state (auto-dismisses after 6s)
   const [localConcentrationAlert, setLocalConcentrationAlert] = useState<{
     dc: number;
     expiresAt: number;
@@ -215,12 +210,10 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
 
   const activeConcentrationAlert = localConcentrationAlert || concentrationAlert;
 
-  // Keep draft max HP synced with props
   useEffect(() => {
     setMaxHpInput(combatant.hpMax.toString());
   }, [combatant.hpMax]);
 
-  // Quick HP Popover Escape & Click-Outside Handlers
   useEffect(() => {
     if (!isHpPopoverOpen) return;
 
@@ -249,7 +242,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     };
   }, [isHpPopoverOpen]);
 
-  // Quick HP Popover Action Handlers
   const handleApplyDamage = () => {
     if (!canEdit) return;
     const val = parseInt(damageAmount, 10);
@@ -347,7 +339,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     if (!canEdit) return;
     const current = combatant.deathSaves || { successes: 0, failures: 0 };
     const currentVal = current[type];
-    // If clicking the current count, toggle down by 1 (e.g. click 2nd filled pip sets count to 1)
     const nextVal = currentVal === pipIndex ? pipIndex - 1 : pipIndex;
     const updatedSaves = {
       ...current,
@@ -357,13 +348,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
     onUpdateCombatant?.(combatant.id, { deathSaves: updatedSaves });
   };
 
-  // Role visual attributes
   const roleCfg = ROLE_CONFIG[combatant.type] || ROLE_CONFIG.player;
   const isPcOrAllyAtZeroHp = isPlayerOrAlly && combatant.hpCurrent === 0;
 
   return (
     <div
-      className={`min-h-[56px] py-1.5 px-2.5 rounded-xl border border-l-[3px] transition-all flex items-center justify-between gap-2 text-xs select-none relative ${
+      className={`rounded-lg border border-l-[3px] transition-all text-xs select-none relative ${
         roleCfg.borderL
       } ${
         isReserve ? 'border-dashed opacity-75' : ''
@@ -396,84 +386,52 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
         </div>
       )}
 
-      {/* COL 1: Initiative Badge & Priority Reorder Arrows */}
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => canEdit && onRollInitiative?.(combatant.id)}
-          disabled={!canEdit}
-          title={canEdit ? 'Click to roll 1d20 Initiative' : `Initiative ${combatant.initiative}`}
-          className="w-8 h-8 font-bold text-xs rounded-lg bg-neutral-800 text-amber-400 flex items-center justify-center shrink-0 tabular-nums border border-neutral-700 hover:border-amber-400 transition cursor-pointer shadow-inner disabled:cursor-default"
-        >
-          {combatant.initiative}
-        </button>
+      {/* 1. HIGH-DENSITY PRIMARY ROW (~38px height) */}
+      <div className="min-h-[38px] px-2 py-1 flex items-center justify-between gap-1.5">
+        {/* Left: Initiative badge & role accent */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => canEdit && onRollInitiative?.(combatant.id)}
+            disabled={!canEdit}
+            title={canEdit ? 'Click to roll 1d20 Initiative' : `Initiative ${combatant.initiative}`}
+            className="w-7 h-7 font-black text-xs rounded-lg bg-neutral-800 text-amber-400 flex items-center justify-center tabular-nums border border-neutral-700 hover:border-amber-400 transition cursor-pointer shadow-inner disabled:cursor-default"
+          >
+            {combatant.initiative}
+          </button>
+        </div>
 
-        {/* Priority Reordering Arrows (^ / v) for DM */}
-        {isDm && onMoveCombatant && (
-          <div className="flex flex-col gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              disabled={index === 0}
-              onClick={() => onMoveCombatant(combatant.id, -1)}
-              className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
-              title="Move Up in Priority (^)"
-            >
-              <ChevronUp className="w-3 h-3" />
-            </button>
-            <button
-              type="button"
-              disabled={index === totalVisible - 1}
-              onClick={() => onMoveCombatant(combatant.id, 1)}
-              className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
-              title="Move Down in Priority (v)"
-            >
-              <ChevronDown className="w-3 h-3" />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* COL 2: Identity, Defense, Status & Condition Chips */}
-      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Combatant Name */}
+        {/* Center: Combatant name, AC badge, Role pill, Health state pill */}
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 truncate">
           <span
-            className={`font-bold truncate max-w-[110px] ${
-              isActive ? 'text-amber-300' : 'text-slate-200'
+            className={`font-bold text-xs truncate max-w-[110px] ${
+              isActive ? 'text-amber-300 font-black' : 'text-slate-200'
             }`}
             title={combatant.name}
           >
             {combatant.name}
           </span>
 
-          {/* Inline AC Shield Badge (Public on PC/Ally or for GM; hidden if player viewing FoW/masked enemy) */}
-          {(isDm || !isUnderFoW) ? (
+          {/* AC Badge */}
+          {isDm || !isUnderFoW ? (
             <span
-              className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-cyan-300 border border-slate-700/80 flex items-center gap-1 shrink-0 shadow-sm"
-              title={`Armor Class: ${effectiveAcInfo.effectiveAc}${
-                effectiveAcInfo.bonus > 0
-                  ? ` (Base ${combatant.ac ?? combatant.armorClass ?? 10} + ${effectiveAcInfo.bonus})`
-                  : ''
-              }`}
+              className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-cyan-300 border border-slate-700/80 flex items-center gap-0.5 shrink-0 shadow-sm"
+              title={`Armor Class: ${effectiveAcInfo.effectiveAc}`}
             >
               <span>🛡️</span>
-              <span>
-                {effectiveAcInfo.bonus > 0
-                  ? `${effectiveAcInfo.effectiveAc} (+${effectiveAcInfo.bonus})`
-                  : `${effectiveAcInfo.effectiveAc} AC`}
-              </span>
+              <span>{effectiveAcInfo.effectiveAc}</span>
             </span>
           ) : (
             <span
-              className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-slate-500 border border-slate-800 flex items-center gap-1 shrink-0"
-              title="Armor Class hidden by Mask Stats"
+              className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-950 text-slate-500 border border-slate-800 flex items-center gap-0.5 shrink-0"
+              title="Armor Class hidden"
             >
               <span>🛡️</span>
-              <span>? AC</span>
+              <span>?</span>
             </span>
           )}
 
-          {/* Role Pill Badge */}
+          {/* Role Pill */}
           <span
             className={`px-1.5 py-0.2 rounded text-[9px] font-bold border flex items-center gap-0.5 shrink-0 ${roleCfg.badge}`}
           >
@@ -485,234 +443,70 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
             </span>
           </span>
 
-          {/* Dynamic Health Status Pill: Preserves FoW gating */}
+          {/* Dynamic Health State Pill */}
           {(isDm || !isUnderFoW) && (
             <span
               className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border shrink-0 ${health.badgeClass}`}
-              title={`Automated HP Status: ${health.badgeLabel} (${health.percentage}%)`}
+              title={`HP Status: ${health.badgeLabel} (${health.percentage}%)`}
             >
               {health.badgeLabel}
             </span>
           )}
 
-          {/* Reserve / Stage Deployment Button for GM */}
-          {isDm && isReserve && (
-            <button
-              type="button"
-              onClick={() => onDeployCombatant?.(combatant.id)}
-              className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-950/90 border border-purple-500/80 text-purple-300 hover:bg-purple-900 transition flex items-center gap-1 cursor-pointer shadow-sm animate-pulse"
-              title="Click to Deploy Reserve to Active Player Roster"
-            >
-              <EyeOff className="w-2.5 h-2.5 text-purple-400" />
-              <span>Reserve (Deploy)</span>
-            </button>
-          )}
-
-          {/* Mask Stats Indicator for GM */}
-          {isDm && combatant.maskStats && !isReserve && (
-            <span
-              className="px-1 py-0.2 rounded text-[9px] font-mono bg-amber-950/70 border border-amber-800/80 text-amber-300 shrink-0 flex items-center gap-0.5"
-              title="Mask Stats: HP/AC hidden from players"
-            >
-              <Shield className="w-2.5 h-2.5 text-amber-400" />
-              <span>Masked</span>
-            </span>
-          )}
-
-          {/* Concentration Damage DC Alert Badge (⚡ CON DC [val]) */}
+          {/* Concentration Damage Alert Badge */}
           {activeConcentrationAlert && (
             <span
               className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/60 flex items-center gap-0.5 animate-pulse shrink-0"
-              title={`Concentration Check DC ${activeConcentrationAlert.dc} Required (took damage)`}
+              title={`Concentration Check DC ${activeConcentrationAlert.dc}`}
             >
               <span>⚡ CON DC {activeConcentrationAlert.dc}</span>
             </span>
           )}
 
-          {/* Concentration active indicator icon */}
           {isConcentrating(combatant) && !activeConcentrationAlert && (
-            <span
-              className="text-cyan-400 shrink-0 animate-pulse"
-              title="Concentrating"
-            >
+            <span className="text-cyan-400 shrink-0 animate-pulse" title="Concentrating">
               <Zap className="w-3 h-3 fill-current" />
             </span>
           )}
         </div>
 
-        {/* Inline Condition Chips Row with click-to-remove and Timing Pills */}
-        {visibleConditions.length > 0 && (
-          <div className="flex items-center gap-1 flex-wrap pt-0.5">
-            {visibleConditions.map((cond) => {
-              const hasTiming = cond.timing === 'start' || cond.timing === 'end';
-              return (
-                <span
-                  key={cond.id || cond.name}
-                  onClick={(e) => {
-                    if (canEdit && onRemoveCondition) {
-                      e.stopPropagation();
-                      onRemoveCondition(combatant.id, cond.id || cond.name);
-                    }
-                  }}
-                  className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0 transition ${getConditionBadgeStyle(
-                    cond.name
-                  )} ${
-                    hasTiming && isActive ? 'ring-1 ring-amber-400/80 animate-pulse' : ''
-                  } ${
-                    cond.isSecret
-                      ? 'border-dashed border-rose-500/90 bg-rose-950/80 text-rose-300'
-                      : ''
-                  } ${canEdit ? 'cursor-pointer hover:opacity-80' : ''}`}
-                  title={`${cond.name}${hasTiming ? ` (Timing: ${cond.timing})` : ''}${
-                    cond.isSecret ? ' (Secret GM condition)' : ''
-                  }${canEdit ? ' (click to remove)' : ''}`}
-                >
-                  {cond.isSecret && <EyeOff className="w-2.5 h-2.5 text-rose-400" />}
-                  <span>{cond.name}</span>
-                  {hasTiming && (
-                    <span className="font-mono text-[8px] opacity-90 px-1 py-0.1 rounded bg-black/40 border border-white/10 ml-0.5">
-                      ⏱ {cond.timing === 'start' ? 'Start' : 'End'}
-                    </span>
-                  )}
-                  {canEdit && <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />}
-                </span>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* COL 3: Inline HP Controls with Interactive Quick HP Popover & PC Death Saves */}
-      <div className="flex items-center gap-1 shrink-0">
-        {!isDm && isUnderFoW ? (
-          /* Strict Player FoW / Mask Stats: Mask exact HP with ???/??? */
-          <span
-            className="text-[11px] font-mono font-bold text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 tabular-nums shadow-inner"
-            title="Entity HP masked by Fog of War / Mask Stats"
-          >
-            ???/???
-          </span>
-        ) : (
-          <>
-            {/* If PC or Ally at 0 HP: Replace -5 and -1 with 3 Success and 3 Failure Death Save Pips */}
-            {isPcOrAllyAtZeroHp ? (
-              <div
-                className="flex items-center gap-1 bg-slate-950/90 px-1.5 py-0.5 rounded-lg border border-slate-800 shadow-sm"
-                title="Death Saves: Click pips to toggle"
-              >
-                {/* 3 Success Pips */}
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[8px] font-bold text-emerald-400 mr-0.5">S:</span>
-                  {[1, 2, 3].map((pip) => {
-                    const isFilled = (combatant.deathSaves?.successes ?? 0) >= pip;
-                    return (
-                      <button
-                        key={`succ-${pip}`}
-                        type="button"
-                        onClick={() => handleToggleDeathSave('successes', pip)}
-                        className={`w-3.5 h-3.5 rounded-full border transition cursor-pointer flex items-center justify-center ${
-                          isFilled
-                            ? 'bg-emerald-500 border-emerald-400 text-slate-950 shadow-sm'
-                            : 'border-slate-600 bg-slate-900 hover:border-emerald-500'
-                        }`}
-                        title={`Death Save Success ${pip} (${isFilled ? 'Filled' : 'Empty'})`}
-                      >
-                        {isFilled && <span className="text-[8px] font-black leading-none">✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="h-3 w-px bg-slate-800 mx-0.5" />
-
-                {/* 3 Failure Pips */}
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[8px] font-bold text-rose-400 mr-0.5">F:</span>
-                  {[1, 2, 3].map((pip) => {
-                    const isFilled = (combatant.deathSaves?.failures ?? 0) >= pip;
-                    return (
-                      <button
-                        key={`fail-${pip}`}
-                        type="button"
-                        onClick={() => handleToggleDeathSave('failures', pip)}
-                        className={`w-3.5 h-3.5 rounded-full border transition cursor-pointer flex items-center justify-center ${
-                          isFilled
-                            ? 'bg-rose-500 border-rose-400 text-slate-950 shadow-sm'
-                            : 'border-slate-600 bg-slate-900 hover:border-rose-500'
-                        }`}
-                        title={`Death Save Failure ${pip} (${isFilled ? 'Filled' : 'Empty'})`}
-                      >
-                        {isFilled && <span className="text-[8px] font-black leading-none">✕</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              /* Standard micro damage buttons (-5, -1) */
-              <>
-                <button
-                  type="button"
-                  onClick={() => onHpDelta(combatant.id, -5)}
-                  disabled={!canEdit}
-                  className="h-6 w-5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-                  title="-5 HP"
-                >
-                  -5
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onHpDelta(combatant.id, -1)}
-                  disabled={!canEdit}
-                  className="h-6 w-5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-                  title="-1 HP"
-                >
-                  -1
-                </button>
-              </>
-            )}
-
-            {/* Current / Max HP display: Click opens Inline Quick HP Management Popover */}
+        {/* Right: Clickable HP Value + Chevron Toggle */}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Clickable HP button */}
+          {!isDm && isUnderFoW ? (
+            <span className="font-mono font-bold text-xs text-slate-400 px-1 py-0.5 rounded bg-slate-900 border border-slate-800 tabular-nums">
+              ???/???
+            </span>
+          ) : (
             <div className="relative">
               <button
                 ref={hpButtonRef}
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (canEdit) {
-                    setIsHpPopoverOpen((prev) => !prev);
-                  }
+                  if (canEdit) setIsHpPopoverOpen((prev) => !prev);
                 }}
                 disabled={!canEdit}
-                className={`font-bold text-slate-100 hover:text-amber-400 hover:bg-slate-800/80 px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
-                  isHpPopoverOpen ? 'text-amber-400 bg-slate-800/80' : ''
-                } disabled:cursor-default disabled:hover:text-slate-100 disabled:hover:bg-transparent`}
-                title={
-                  canEdit
-                    ? 'Click to open Quick HP Management'
-                    : `HP: ${combatant.hpCurrent}/${combatant.hpMax}`
-                }
+                className="font-mono font-bold text-xs hover:text-amber-400 px-1 py-0.5 rounded bg-slate-900 border border-slate-800 tabular-nums transition-colors cursor-pointer text-slate-200"
+                title={canEdit ? 'Click to manage HP (Damage, Heal, Set Max)' : `HP: ${combatant.hpCurrent}/${combatant.hpMax}`}
               >
                 {combatant.hpCurrent}/{combatant.hpMax}
               </button>
 
-              {/* INLINE QUICK HP POPOVER (Anchored directly below the HP button) */}
+              {/* INLINE QUICK HP POPOVER (Anchored right below HP button) */}
               {isHpPopoverOpen && canEdit && (
                 <div
                   ref={hpPopoverRef}
-                  className="absolute right-0 top-full mt-1.5 bg-slate-900 border border-slate-700/80 rounded-lg shadow-2xl p-2.5 z-50 flex flex-col gap-2 min-w-[220px] text-xs text-slate-100"
+                  className="absolute right-0 top-full mt-1 bg-slate-900 border border-slate-700/80 rounded-lg shadow-2xl p-2.5 z-50 flex flex-col gap-2 min-w-[220px] text-xs text-slate-100"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* Popover Header */}
                   <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <Heart className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                       <span className="font-bold truncate text-slate-200">
                         {combatant.name} HP
                       </span>
-                      <span
-                        className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border shrink-0 ${health.badgeClass}`}
-                      >
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border shrink-0 ${health.badgeClass}`}>
                         {health.badgeLabel}
                       </span>
                     </div>
@@ -720,13 +514,13 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       type="button"
                       onClick={() => setIsHpPopoverOpen(false)}
                       className="text-slate-400 hover:text-slate-200 p-0.5 rounded hover:bg-slate-800 transition cursor-pointer"
-                      title="Close (Escape)"
+                      title="Close"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
-                  {/* Quick Damage Row */}
+                  {/* Damage */}
                   <div className="flex items-center gap-1.5">
                     <input
                       type="number"
@@ -747,13 +541,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       onClick={handleApplyDamage}
                       disabled={!damageAmount || parseInt(damageAmount, 10) <= 0}
                       className="px-2.5 py-1 text-xs font-bold rounded bg-rose-900/90 hover:bg-rose-800 border border-rose-700 text-rose-200 hover:text-white transition cursor-pointer disabled:opacity-40 shadow-sm shrink-0"
-                      title="Deal Damage (absorbs active Temp HP first, triggers Concentration DC)"
                     >
                       Damage
                     </button>
                   </div>
 
-                  {/* Quick Heal Row */}
+                  {/* Heal */}
                   <div className="flex items-center gap-1.5">
                     <input
                       type="number"
@@ -774,13 +567,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       onClick={handleApplyHeal}
                       disabled={!healAmount || parseInt(healAmount, 10) <= 0}
                       className="px-2.5 py-1 text-xs font-bold rounded bg-emerald-900/90 hover:bg-emerald-800 border border-emerald-700 text-emerald-200 hover:text-white transition cursor-pointer disabled:opacity-40 shadow-sm shrink-0"
-                      title="Apply Healing (capped at Max HP)"
                     >
                       Heal
                     </button>
                   </div>
 
-                  {/* Edit Max HP Row */}
+                  {/* Set Max */}
                   <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-800">
                     <input
                       type="number"
@@ -800,7 +592,6 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       type="button"
                       onClick={handleApplySetMax}
                       className="px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 hover:bg-blue-500 border border-blue-400/80 text-white transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
-                      title="Set Max HP (clamps Current HP if exceeding new Max)"
                     >
                       <Check className="w-3 h-3" />
                       <span>Set Max</span>
@@ -809,100 +600,251 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                 </div>
               )}
             </div>
+          )}
 
-            {/* Inline THP Block (+X THP) */}
-            {isThpEditing ? (
-              <div className="flex items-center gap-0.5">
-                <input
-                  type="number"
-                  value={currentThpVal}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10) || 0;
-                    if (setInlineThpVal) setInlineThpVal(val);
-                    setLocalThpVal(val);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSaveThp();
-                    if (e.key === 'Escape') handleCancelThp();
-                  }}
-                  autoFocus
-                  className="w-10 px-1 py-0.5 text-[10px] font-mono rounded bg-slate-950 border border-cyan-500 text-cyan-300 text-center"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveThp}
-                  className="p-0.5 text-emerald-400 hover:text-emerald-300 cursor-pointer"
-                  title="Save THP"
-                >
-                  <Check className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCancelThp}
-                  className="p-0.5 text-slate-400 hover:text-slate-300 cursor-pointer"
-                  title="Cancel"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+          {/* Chevron Toggle Button */}
+          <button
+            type="button"
+            onClick={() => onToggleExpand(combatant.id)}
+            className="p-1 text-slate-400 hover:text-slate-200 transition cursor-pointer rounded hover:bg-slate-800"
+            title={isExpanded ? 'Collapse Row' : 'Expand Tactical Controls'}
+            aria-label={isExpanded ? 'Collapse Row' : 'Expand Tactical Controls'}
+          >
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. EXPANDED TACTICAL CONTROLS VIEW (Unfolded when isExpanded is true) */}
+      {isExpanded && (
+        <div className="px-2 pb-2 pt-1 border-t border-slate-800/80 space-y-2 bg-slate-950/40 rounded-b-lg">
+          {/* Tactical HP Controls Row: Quick Tally Buttons, THP, Death Saves */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {/* Death Saves or Tally Buttons */}
+            {isPcOrAllyAtZeroHp ? (
+              <div
+                className="flex items-center gap-1 bg-slate-950/90 px-1.5 py-0.5 rounded-lg border border-slate-800 shadow-sm"
+                title="Death Saves: Click pips to toggle"
+              >
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[8px] font-bold text-emerald-400 mr-0.5">S:</span>
+                  {[1, 2, 3].map((pip) => {
+                    const isFilled = (combatant.deathSaves?.successes ?? 0) >= pip;
+                    return (
+                      <button
+                        key={`succ-${pip}`}
+                        type="button"
+                        onClick={() => handleToggleDeathSave('successes', pip)}
+                        className={`w-3.5 h-3.5 rounded-full border transition cursor-pointer flex items-center justify-center ${
+                          isFilled
+                            ? 'bg-emerald-500 border-emerald-400 text-slate-950 shadow-sm'
+                            : 'border-slate-600 bg-slate-900 hover:border-emerald-500'
+                        }`}
+                        title={`Death Save Success ${pip}`}
+                      >
+                        {isFilled && <span className="text-[8px] font-black leading-none">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="h-3 w-px bg-slate-800 mx-0.5" />
+
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[8px] font-bold text-rose-400 mr-0.5">F:</span>
+                  {[1, 2, 3].map((pip) => {
+                    const isFilled = (combatant.deathSaves?.failures ?? 0) >= pip;
+                    return (
+                      <button
+                        key={`fail-${pip}`}
+                        type="button"
+                        onClick={() => handleToggleDeathSave('failures', pip)}
+                        className={`w-3.5 h-3.5 rounded-full border transition cursor-pointer flex items-center justify-center ${
+                          isFilled
+                            ? 'bg-rose-500 border-rose-400 text-slate-950 shadow-sm'
+                            : 'border-slate-600 bg-slate-900 hover:border-rose-500'
+                        }`}
+                        title={`Death Save Failure ${pip}`}
+                      >
+                        {isFilled && <span className="text-[8px] font-black leading-none">✕</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={handleOpenThp}
-                disabled={!canEdit}
-                className={`text-[9px] font-mono px-1 py-0.5 rounded border transition cursor-pointer ${
-                  (combatant.tempHp ?? combatant.hpTemp ?? 0) > 0
-                    ? 'text-cyan-300 bg-cyan-950/80 border-cyan-600/70 hover:bg-cyan-900/80'
-                    : 'text-slate-500 bg-slate-900 border-slate-800 hover:text-slate-300'
-                }`}
-                title={
-                  canEdit
-                    ? 'Click to edit Temp HP (+THP)'
-                    : `Temp HP: ${combatant.tempHp ?? combatant.hpTemp ?? 0}`
-                }
-              >
-                +{(combatant.tempHp ?? combatant.hpTemp ?? 0)} THP
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onHpDelta(combatant.id, -5)}
+                  disabled={!canEdit}
+                  className="h-6 px-1.5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                  title="-5 HP"
+                >
+                  -5
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onHpDelta(combatant.id, -1)}
+                  disabled={!canEdit}
+                  className="h-6 px-1.5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                  title="-1 HP"
+                >
+                  -1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onHpDelta(combatant.id, 1)}
+                  disabled={!canEdit}
+                  className="h-6 px-1.5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                  title="+1 HP"
+                >
+                  +1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onHpDelta(combatant.id, 5)}
+                  disabled={!canEdit}
+                  className="h-6 px-1.5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
+                  title="+5 HP"
+                >
+                  +5
+                </button>
+              </div>
             )}
 
-            {/* Micro heal buttons (+1, +5) */}
-            <button
-              type="button"
-              onClick={() => onHpDelta(combatant.id, 1)}
-              disabled={!canEdit}
-              className="h-6 w-5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-              title="+1 HP"
-            >
-              +1
-            </button>
-            <button
-              type="button"
-              onClick={() => onHpDelta(combatant.id, 5)}
-              disabled={!canEdit}
-              className="h-6 w-5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
-              title="+5 HP"
-            >
-              +5
-            </button>
-          </>
-        )}
-      </div>
+            {/* THP Editor / Badge */}
+            <div className="flex items-center gap-1">
+              {isThpEditing ? (
+                <div className="flex items-center gap-0.5">
+                  <input
+                    type="number"
+                    value={currentThpVal}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10) || 0;
+                      if (setInlineThpVal) setInlineThpVal(val);
+                      setLocalThpVal(val);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveThp();
+                      if (e.key === 'Escape') handleCancelThp();
+                    }}
+                    autoFocus
+                    className="w-10 px-1 py-0.5 text-[10px] font-mono rounded bg-slate-950 border border-cyan-500 text-cyan-300 text-center"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveThp}
+                    className="p-0.5 text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                    title="Save THP"
+                  >
+                    <Check className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelThp}
+                    className="p-0.5 text-slate-400 hover:text-slate-300 cursor-pointer"
+                    title="Cancel"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenThp}
+                  disabled={!canEdit}
+                  className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                    (combatant.tempHp ?? combatant.hpTemp ?? 0) > 0
+                      ? 'text-cyan-300 bg-cyan-950/80 border-cyan-600/70 hover:bg-cyan-900/80'
+                      : 'text-slate-400 bg-slate-900 border-slate-800 hover:text-slate-200'
+                  }`}
+                  title={canEdit ? 'Click to edit Temp HP (+THP)' : `Temp HP: ${combatant.tempHp ?? combatant.hpTemp ?? 0}`}
+                >
+                  +{(combatant.tempHp ?? combatant.hpTemp ?? 0)} THP
+                </button>
+              )}
 
-      {/* COL 4: Options Menu Toggle & 1-Click Duplicate */}
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => onToggleActionMenu(combatant.id)}
-          className={`h-7 w-7 rounded-lg flex items-center justify-center border transition cursor-pointer ${
-            combatant.conditions.length > 0 || isActionMenuOpen
-              ? 'bg-amber-950/70 border-amber-600/70 text-amber-300'
-              : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
-          }`}
-          title="Edit Stats, Conditions & Options"
-        >
-          <MoreVertical className="w-3.5 h-3.5" />
-        </button>
-      </div>
+              {/* GM Priority Reorder Arrows */}
+              {isDm && onMoveCombatant && (
+                <div className="flex items-center gap-0.5 ml-1">
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    onClick={() => onMoveCombatant(combatant.id, -1)}
+                    className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
+                    title="Move Up (^)"
+                  >
+                    <ChevronUp className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={index === totalVisible - 1}
+                    onClick={() => onMoveCombatant(combatant.id, 1)}
+                    className="p-0.5 text-slate-400 hover:text-amber-300 disabled:opacity-20 hover:bg-slate-800 rounded transition cursor-pointer"
+                    title="Move Down (v)"
+                  >
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* Three-dots Action Menu */}
+              <button
+                type="button"
+                onClick={() => onToggleActionMenu(combatant.id)}
+                className={`h-6 w-6 rounded-lg flex items-center justify-center border transition cursor-pointer ml-1 ${
+                  combatant.conditions.length > 0 || isActionMenuOpen
+                    ? 'bg-amber-950/70 border-amber-600/70 text-amber-300'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+                title="Edit Stats, Conditions, Minion Duplicate & Delete"
+              >
+                <MoreVertical className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Active Conditions Row */}
+          {visibleConditions.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-slate-800/60">
+              {visibleConditions.map((cond) => {
+                const hasTiming = cond.timing === 'start' || cond.timing === 'end';
+                return (
+                  <span
+                    key={cond.id || cond.name}
+                    onClick={(e) => {
+                      if (canEdit && onRemoveCondition) {
+                        e.stopPropagation();
+                        onRemoveCondition(combatant.id, cond.id || cond.name);
+                      }
+                    }}
+                    className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0 transition ${getConditionBadgeStyle(
+                      cond.name
+                    )} ${
+                      hasTiming && isActive ? 'ring-1 ring-amber-400/80 animate-pulse' : ''
+                    } ${
+                      cond.isSecret
+                        ? 'border-dashed border-rose-500/90 bg-rose-950/80 text-rose-300'
+                        : ''
+                    } ${canEdit ? 'cursor-pointer hover:opacity-80' : ''}`}
+                    title={`${cond.name}${hasTiming ? ` (Timing: ${cond.timing})` : ''}${canEdit ? ' (click to remove)' : ''}`}
+                  >
+                    {cond.isSecret && <EyeOff className="w-2.5 h-2.5 text-rose-400" />}
+                    <span>{cond.name}</span>
+                    {hasTiming && (
+                      <span className="font-mono text-[8px] opacity-90 px-1 py-0.1 rounded bg-black/40 border border-white/10 ml-0.5">
+                        ⏱ {cond.timing === 'start' ? 'Start' : 'End'}
+                      </span>
+                    )}
+                    {canEdit && <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
