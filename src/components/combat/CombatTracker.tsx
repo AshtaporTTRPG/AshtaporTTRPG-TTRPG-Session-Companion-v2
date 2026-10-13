@@ -11,6 +11,16 @@ import {
 } from '../../types/ttrpg';
 import { liveFeedSync, UnifiedFeedItem } from '../../utils/liveFeedSync';
 import OBR from '@owlbear-rodeo/sdk';
+import {
+  ROSTER_METADATA_KEY,
+  TURN_METADATA_KEY,
+  FEED_METADATA_KEY,
+  RosterMetadataPayload,
+  TurnMetadataPayload,
+  FeedMetadataPayload,
+  CombatFeedItem,
+  RosterMember,
+} from '../../types/combat';
 import { COMBAT_STATE_KEY, ROOM_METADATA_KEY, CombatState } from '../../utils/obrCombatSync';
 import { playTurnSound } from '../../utils/audio';
 import { executeDiceRoll } from '../../utils/dice';
@@ -51,9 +61,8 @@ import { CombatantRow } from './CombatantRow';
 import { AddCombatantModal, NewCombatantData } from './AddCombatantModal';
 import { MyRosterDrawer } from './MyRosterDrawer';
 import { ResetCombatModal } from './ResetCombatModal';
-import { RosterMember } from '../../types/combat';
 
-export { ROOM_METADATA_KEY, COMBAT_STATE_KEY } from '../../utils/obrCombatSync';
+export { ROOM_METADATA_KEY, COMBAT_STATE_KEY, ROSTER_METADATA_KEY, TURN_METADATA_KEY, FEED_METADATA_KEY } from '../../types/combat';
 
 interface CombatTrackerProps {
   isDm: boolean;
@@ -197,7 +206,6 @@ function playWebAudioTurnChime(enabled: boolean = true) {
 
     osc.type = 'sine';
     const now = ctx.currentTime;
-    // D5 (587.33 Hz) tapering to A5 (880 Hz) over 250ms
     osc.frequency.setValueAtTime(587.33, now);
     osc.frequency.exponentialRampToValueAtTime(880, now + 0.25);
 
@@ -220,6 +228,23 @@ function playWebAudioTurnChime(enabled: boolean = true) {
 
 export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }) => {
   const rollerIdentity = playerName || liveFeedSync.getPlayerName();
+
+  // Encounter Epoch Lifecycle State
+  const [encounterId, setEncounterId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('ashtapor_encounter_id');
+      if (saved) return saved;
+    } catch {}
+    const gen = `enc_${Date.now()}`;
+    try {
+      localStorage.setItem('ashtapor_encounter_id', gen);
+    } catch {}
+    return gen;
+  });
+  const encounterIdRef = useRef<string>(encounterId);
+  useEffect(() => {
+    encounterIdRef.current = encounterId;
+  }, [encounterId]);
 
   // Combat State - initialized from local storage
   const [combatants, setCombatants] = useState<Combatant[]>(() => {
@@ -282,7 +307,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     Record<string, { dc: number; expiresAt: number }>
   >({});
 
-  // Helper to trigger a concentration DC alert badge that auto-dismisses after 6s
   const triggerConcentrationAlert = (combatantId: string, dc: number) => {
     const expiresAt = Date.now() + 6000;
     setConcentrationAlerts((prev) => ({
@@ -316,6 +340,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
   // Timestamp of last local reset/clear encounter
   const lastLocalClearTimeRef = useRef<number>(0);
+
+  // Transaction Mutex Lock for Join Combat / Exit Combat / Add operations
+  const isSyncingRef = useRef<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const syncQueueRef = useRef<Array<() => Promise<void>>>([]);
 
   // Inflight turn change lock & desync rollback prevention
   const [isTurnUpdating, setIsTurnUpdating] = useState<boolean>(false);
@@ -412,99 +441,170 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
       localStorage.setItem('ttrpg_combat_round', round.toString());
       localStorage.setItem('ttrpg_combat_status', combatStatus);
+      localStorage.setItem('ashtapor_encounter_id', encounterId);
     } catch {}
-  }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus]);
+  }, [combatants, activeTurnIndex, activeCombatantId, round, combatStatus, encounterId]);
 
-  // Safe incoming metadata processor with sub-50ms turn synchronization
-  const handleIncomingMetadata = useCallback((metadata: Record<string, any>) => {
-    const state = (metadata[ROOM_METADATA_KEY] || metadata[COMBAT_STATE_KEY]) as
-      | (CombatState & { currentTurnIndex?: number; currentRound?: number })
-      | undefined;
+  // Mutex execution helper to prevent concurrent metadata write collisions
+  const withSyncLock = useCallback(async (action: () => Promise<void>) => {
+    if (isSyncingRef.current) {
+      return new Promise<void>((resolve, reject) => {
+        syncQueueRef.current.push(async () => {
+          try {
+            await action();
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    }
 
-    if (!state) return;
-
-    // Zero-lag real-time turn sync: Check and immediately update currentTurnIndex and currentRound
-    // without waiting to filter tombstones, merge maps, or re-sort the combatant array!
-    const incomingTurnIndex = (state as any).currentTurnIndex ?? state.activeTurnIndex;
-    const incomingRound = (state as any).currentRound ?? state.round;
-    const incomingTurnTime = state.lastTurnChangeTime;
-
-    const isStaleTurn =
-      incomingTurnTime !== undefined &&
-      incomingTurnTime < lastTurnChangeTimeRef.current;
-
-    if (!isStaleTurn) {
-      if (incomingTurnTime !== undefined) {
-        lastTurnChangeTimeRef.current = incomingTurnTime;
-      }
-      if (typeof incomingTurnIndex === 'number') {
-        setActiveTurnIndex(incomingTurnIndex);
-        if (state.activeCombatantId) {
-          setActiveCombatantId(state.activeCombatantId);
-        } else if (Array.isArray(state.combatants) && state.combatants[incomingTurnIndex]) {
-          setActiveCombatantId(state.combatants[incomingTurnIndex].id);
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    try {
+      await action();
+    } finally {
+      setTimeout(async () => {
+        const nextTask = syncQueueRef.current.shift();
+        if (nextTask) {
+          try {
+            await nextTask();
+          } catch (e) {
+            console.error('Queued sync error:', e);
+          }
         }
-      } else if (state.activeCombatantId) {
-        setActiveCombatantId(state.activeCombatantId);
-      }
-      if (typeof incomingRound === 'number') {
-        setRound(incomingRound);
-      }
+        isSyncingRef.current = false;
+        setIsSyncing(false);
+      }, 250);
     }
+  }, []);
 
-    if (state.combatStatus) {
-      setCombatStatus(state.combatStatus);
-    }
-
-    const incomingList = Array.isArray(state.combatants) ? state.combatants : null;
-    if (!incomingList) return;
-
+  /**
+   * STRICT READ-ONLY METADATA LISTENER
+   * Breaks the echo loop: Never writes metadata from inside listener!
+   * Partitions incoming metadata into roster, turn, and feed streams.
+   */
+  const handleIncomingMetadata = useCallback((metadata: Record<string, any>) => {
     const now = Date.now();
 
-    for (const [id, expiry] of deletionTombstones.current.entries()) {
-      if (now > expiry) deletionTombstones.current.delete(id);
+    // 1. Process ashtapor/turn partitioned stream
+    const turnPayload = metadata[TURN_METADATA_KEY] as TurnMetadataPayload | undefined;
+    if (turnPayload) {
+      if (typeof turnPayload.currentTurnIndex === 'number') {
+        setActiveTurnIndex(turnPayload.currentTurnIndex);
+      }
+      if (typeof turnPayload.currentRound === 'number') {
+        setRound(turnPayload.currentRound);
+      }
+      if (turnPayload.activeCombatantId !== undefined) {
+        setActiveCombatantId(turnPayload.activeCombatantId);
+      }
     }
 
-    for (const [id, expiry] of recentlyAddedIdsRef.current.entries()) {
-      if (now > expiry) recentlyAddedIdsRef.current.delete(id);
-    }
+    // 2. Process ashtapor/roster partitioned stream
+    const rosterPayload = metadata[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
+    if (rosterPayload) {
+      const incomingEpoch = rosterPayload.encounterId;
 
-    const fullState = state as CombatState;
-    const isExplicitReset =
-      fullState.combatStatus === 'setup' &&
-      fullState.lastUpdated !== undefined &&
-      fullState.lastUpdated >= lastLocalClearTimeRef.current &&
-      incomingList.length === 0;
+      // Drop zombies: If incoming payload has an older encounterId than current local epoch, ignore
+      if (incomingEpoch && incomingEpoch < encounterIdRef.current) {
+        return;
+      }
 
-    if (incomingList.length === 0 && localCombatantsRef.current.length > 0 && !isExplicitReset) {
+      // If incoming payload has a strictly newer encounter epoch, adopt it
+      if (incomingEpoch && incomingEpoch > encounterIdRef.current) {
+        encounterIdRef.current = incomingEpoch;
+        setEncounterId(incomingEpoch);
+        try {
+          localStorage.setItem('ashtapor_encounter_id', incomingEpoch);
+        } catch {}
+      }
+
+      const activeEpoch = incomingEpoch || encounterIdRef.current;
+      const rawList = Array.isArray(rosterPayload.combatants) ? rosterPayload.combatants : [];
+
+      // Clean tombstones
+      for (const [id, expiry] of deletionTombstones.current.entries()) {
+        if (now > expiry) deletionTombstones.current.delete(id);
+      }
+      for (const [id, expiry] of recentlyAddedIdsRef.current.entries()) {
+        if (now > expiry) recentlyAddedIdsRef.current.delete(id);
+      }
+
+      // Drop any combatant tagged with an older encounterId or in tombstones
+      const validIncoming = rawList.filter(
+        (c) =>
+          (!c.encounterId || c.encounterId === activeEpoch) &&
+          !deletionTombstones.current.has(c.id)
+      );
+
+      const mergedMap = new Map<string, Combatant>();
+      for (const inc of validIncoming) {
+        const local = localCombatantsRef.current.find((l) => l.id === inc.id);
+        if (local && (local.updatedAt || 0) > (inc.updatedAt || 0)) {
+          mergedMap.set(inc.id, local);
+        } else {
+          mergedMap.set(inc.id, { ...inc, encounterId: activeEpoch });
+        }
+      }
+
+      // Preserve any recently added local combatants in flight
+      for (const local of localCombatantsRef.current) {
+        if (!mergedMap.has(local.id) && !deletionTombstones.current.has(local.id)) {
+          const isRecentlyAdded = recentlyAddedIdsRef.current.has(local.id);
+          const isRecentLocal = local.updatedAt && now - local.updatedAt < 6000;
+          if ((isRecentlyAdded || isRecentLocal) && (!local.encounterId || local.encounterId === activeEpoch)) {
+            mergedMap.set(local.id, local);
+          }
+        }
+      }
+
+      const sorted = sortInitiativeStrictDescending(Array.from(mergedMap.values()));
+      setCombatants(sorted);
+      localCombatantsRef.current = sorted;
+      try {
+        localStorage.setItem('ttrpg_combatants', JSON.stringify(sorted));
+      } catch {}
       return;
     }
 
-    const validIncoming = incomingList.filter((c) => !deletionTombstones.current.has(c.id));
-
-    const mergedMap = new Map<string, Combatant>();
-    for (const inc of validIncoming) {
-      const local = localCombatantsRef.current.find((l) => l.id === inc.id);
-      if (local && (local.updatedAt || 0) > (inc.updatedAt || 0)) {
-        mergedMap.set(inc.id, local);
-      } else {
-        mergedMap.set(inc.id, inc);
-      }
+    // 3. Process ashtapor/feed stream
+    const feedPayload = metadata[FEED_METADATA_KEY] as FeedMetadataPayload | undefined;
+    if (feedPayload && Array.isArray(feedPayload.items)) {
+      setCombatFeedItems((prev) => {
+        const existingIds = new Set(prev.map((i) => i.id));
+        const newItems = feedPayload.items.filter((i) => !existingIds.has(i.id));
+        if (newItems.length === 0) return prev;
+        const mapped = newItems.map((item) => ({
+          id: item.id,
+          type: (item.type || 'combat') as any,
+          sender: item.sender,
+          message: item.message,
+          playerMessage: item.playerMessage,
+          isSecret: item.isSecret,
+          timestamp: item.timestamp,
+        }));
+        return [...prev, ...mapped].slice(-30);
+      });
     }
 
-    for (const local of localCombatantsRef.current) {
-      if (!mergedMap.has(local.id) && !deletionTombstones.current.has(local.id)) {
-        const isRecentlyAdded = recentlyAddedIdsRef.current.has(local.id);
-        const isRecentLocal = local.updatedAt && now - local.updatedAt < 8000;
-        if (isRecentlyAdded || isRecentLocal) {
-          mergedMap.set(local.id, local);
+    // 4. Backwards compatibility fallback for legacy ROOM_METADATA_KEY if partitioned keys absent
+    if (!rosterPayload && !turnPayload) {
+      const legacyState = (metadata[ROOM_METADATA_KEY] || metadata[COMBAT_STATE_KEY]) as any;
+      if (legacyState) {
+        const incomingTurnIndex = legacyState.currentTurnIndex ?? legacyState.activeTurnIndex;
+        const incomingRound = legacyState.currentRound ?? legacyState.round;
+        if (typeof incomingTurnIndex === 'number') setActiveTurnIndex(incomingTurnIndex);
+        if (typeof incomingRound === 'number') setRound(incomingRound);
+        if (legacyState.activeCombatantId) setActiveCombatantId(legacyState.activeCombatantId);
+        if (Array.isArray(legacyState.combatants)) {
+          const sorted = sortInitiativeStrictDescending(legacyState.combatants);
+          setCombatants(sorted);
+          localCombatantsRef.current = sorted;
         }
       }
     }
-
-    const merged = sortInitiativeStrictDescending(Array.from(mergedMap.values()));
-    setCombatants(merged);
-    localCombatantsRef.current = merged;
   }, []);
 
   // Initial OBR room metadata fetch
@@ -518,7 +618,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       .catch(() => {});
   }, [handleIncomingMetadata]);
 
-  // Listen for OBR metadata changes
+  // Listen for OBR metadata changes - STRICTLY READ ONLY
   useEffect(() => {
     if (!OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
@@ -527,38 +627,81 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return () => unsub();
   }, [handleIncomingMetadata]);
 
-  // Broadcast helper
-  const broadcastCombat = async (
-    updatedCombatants: Combatant[],
+  /**
+   * PARTITIONED BROADCAST HELPERS
+   * Rule: Turn advancement or feed logging must NEVER read, write, or overwrite ashtapor/roster!
+   */
+  const broadcastRoster = async (updatedCombatants: Combatant[]) => {
+    if (!OBR.isReady) return;
+    try {
+      const tagged = updatedCombatants.map((c) => ({
+        ...c,
+        encounterId: encounterIdRef.current,
+      }));
+      await OBR.room.setMetadata({
+        [ROSTER_METADATA_KEY]: {
+          encounterId: encounterIdRef.current,
+          combatants: tagged,
+        },
+      });
+    } catch (e) {
+      console.error('Failed to set partitioned ashtapor/roster metadata:', e);
+    }
+  };
+
+  const broadcastTurn = async (
     updatedTurn: number,
     updatedRound: number,
-    updatedActiveCombatantId?: string | null,
-    updatedCombatStatus?: 'setup' | 'active',
-    turnChangeTime?: number
+    updatedActiveCombatantId?: string | null
   ) => {
-    const statusToBroadcast = updatedCombatStatus || combatStatus;
-    const now = Date.now();
-    const updatedState: any = {
-      combatants: updatedCombatants,
-      activeTurnIndex: updatedTurn,
-      currentTurnIndex: updatedTurn,
-      activeCombatantId:
-        updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
-      round: updatedRound,
-      currentRound: updatedRound,
-      combatStatus: statusToBroadcast,
-      lastTurnChangeTime: turnChangeTime ?? lastTurnChangeTimeRef.current,
-      lastUpdated: now,
+    if (!OBR.isReady) return;
+    try {
+      await OBR.room.setMetadata({
+        [TURN_METADATA_KEY]: {
+          encounterId: encounterIdRef.current,
+          currentTurnIndex: updatedTurn,
+          currentRound: updatedRound,
+          activeCombatantId:
+            updatedActiveCombatantId !== undefined ? updatedActiveCombatantId : activeCombatantId,
+        },
+      });
+    } catch (e) {
+      console.error('Failed to set partitioned ashtapor/turn metadata:', e);
+    }
+  };
+
+  const broadcastFeedLog = async (
+    message: string,
+    isSecret?: boolean,
+    playerMessage?: string
+  ) => {
+    const item: CombatFeedItem = {
+      id: `cf-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      encounterId: encounterIdRef.current,
+      message,
+      playerMessage: isSecret ? undefined : (playerMessage !== undefined ? playerMessage : message),
+      sender: isDm ? 'Game Master' : rollerIdentity,
+      timestamp: Date.now(),
+      isSecret: Boolean(isSecret),
+      type: 'combat',
     };
 
-    try {
-      if (OBR.isReady) {
+    // Local live feed record
+    liveFeedSync.recordCombatLog(message, false, playerMessage, isSecret);
+
+    if (OBR.isReady) {
+      try {
+        const meta = await OBR.room.getMetadata();
+        const currentFeed = (meta[FEED_METADATA_KEY] as FeedMetadataPayload | undefined)?.items || [];
+        const nextItems = [...currentFeed, item].slice(-25);
         await OBR.room.setMetadata({
-          [ROOM_METADATA_KEY]: updatedState,
+          [FEED_METADATA_KEY]: {
+            items: nextItems,
+          },
         });
+      } catch (err) {
+        console.warn('Failed to update ashtapor/feed metadata:', err);
       }
-    } catch (e) {
-      console.error('Failed to set OBR combat metadata:', e);
     }
   };
 
@@ -583,11 +726,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     let nextActiveId: string;
     let nextRound = round;
 
-    // Auto-Round Increment: If advancing past the last combatant, automatically cycle back to the first and increment round
     if (currentIndex === -1 || currentIndex >= sorted.length - 1) {
       nextActiveId = sorted[0].id;
       nextRound = round + 1;
-      liveFeedSync.recordCombatLog(`🔔 --- Round ${nextRound} Began ---`, true);
+      broadcastFeedLog(`🔔 --- Round ${nextRound} Began ---`, false);
     } else {
       nextActiveId = sorted[currentIndex + 1].id;
     }
@@ -595,7 +737,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const nextIndex = sorted.findIndex((c) => c.id === nextActiveId);
     const nextCombatant = sorted[nextIndex];
 
-    // Optimistic local update (0ms delay)
+    // Optimistic local update (0ms latency)
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextIndex);
     setRound(nextRound);
@@ -619,35 +761,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           setPlayerTurnAlert(null);
         }
       } else {
-        liveFeedSync.recordCombatLog(
+        broadcastFeedLog(
           `⚔️ Turn ${nextIndex + 1}/${sorted.length}: It is ${nextCombatant.name}'s turn! (Round ${nextRound})`,
-          true,
-          undefined,
           true
         );
         setPlayerTurnAlert(null);
       }
     }
 
-    // Direct atomic broadcast to room metadata without read latency pre-fetch
+    // Direct atomic broadcast to ashtapor/turn ONLY - NEVER writes to ashtapor/roster!
     try {
-      if (OBR.isReady) {
-        await OBR.room.setMetadata({
-          [ROOM_METADATA_KEY]: {
-            combatants: sorted,
-            currentTurnIndex: nextIndex,
-            activeTurnIndex: nextIndex,
-            currentRound: nextRound,
-            round: nextRound,
-            activeCombatantId: nextActiveId,
-            combatStatus,
-            lastTurnChangeTime: now,
-            lastUpdated: now,
-          },
-        });
-      }
-    } catch (e) {
-      console.error('Failed to set OBR combat metadata:', e);
+      await broadcastTurn(nextIndex, nextRound, nextActiveId);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -688,30 +812,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const prevIndex = sorted.findIndex((c) => c.id === prevActiveId);
 
-    // Optimistic local update (0ms delay)
+    // Optimistic local update
     setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
 
-    // Direct atomic broadcast to room metadata without read latency pre-fetch
+    // Broadcast only to ashtapor/turn
     try {
-      if (OBR.isReady) {
-        await OBR.room.setMetadata({
-          [ROOM_METADATA_KEY]: {
-            combatants: sorted,
-            currentTurnIndex: prevIndex,
-            activeTurnIndex: prevIndex,
-            currentRound: prevRound,
-            round: prevRound,
-            activeCombatantId: prevActiveId,
-            combatStatus,
-            lastTurnChangeTime: now,
-            lastUpdated: now,
-          },
-        });
-      }
-    } catch (e) {
-      console.error('Failed to set OBR combat metadata:', e);
+      await broadcastTurn(prevIndex, prevRound, prevActiveId);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -740,13 +848,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     if (first) {
-      liveFeedSync.recordCombatLog(
+      broadcastFeedLog(
         `⚔️ Combat Started! Round 1 begins with ${first.name} (Initiative ${first.initiative}).`,
-        true
+        false
       );
     }
 
-    broadcastCombat(sorted, 0, 1, firstId, 'active');
+    broadcastTurn(0, 1, firstId);
+    broadcastRoster(sorted);
   };
 
   // SORT INITIATIVE (Strict descending)
@@ -763,7 +872,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     setCombatants(sorted);
     setActiveTurnIndex(newIndex);
-    broadcastCombat(sorted, newIndex, round, currentActiveId, combatStatus);
+    broadcastRoster(sorted);
+    broadcastTurn(newIndex, round, currentActiveId);
   };
 
   // ROLL INITIATIVE FOR ONE COMBATANT
@@ -805,11 +915,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     localCombatantsRef.current = sorted;
     setActiveTurnIndex(targetIdx);
     liveFeedSync.recordDiceRoll(rollResult, true);
-    broadcastCombat(sorted, targetIdx, round, activeCombatantId, combatStatus);
+    broadcastRoster(sorted);
+    broadcastTurn(targetIdx, round, activeCombatantId);
   };
 
-  // SMART RESET: OPTION 1 - CLEAR HOSTILES ONLY (Standard Wave Reset)
+  // SMART RESET: OPTION 1 - CLEAR HOSTILES ONLY (Wave Reset within current epoch)
   const handleClearHostilesOnly = async () => {
+    const activeEncId = encounterIdRef.current;
     const remainingParty = combatants.filter(
       (c) =>
         c.role !== 'Monster' &&
@@ -844,18 +956,35 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       localStorage.setItem('ttrpg_combat_status', sortedParty.length > 0 ? 'active' : 'setup');
     } catch {}
 
-    liveFeedSync.recordCombatLog(
-      `⚔️ Hostiles cleared! Party preserved (${sortedParty.length} heroes remaining, Round 1).`,
-      true
-    );
+    const logMsg = `⚔️ Hostiles cleared! Party preserved (${sortedParty.length} heroes remaining, Round 1).`;
+    await broadcastFeedLog(logMsg, false);
 
-    await broadcastCombat(sortedParty, 0, 1, firstPartyId, sortedParty.length > 0 ? 'active' : 'setup');
+    if (OBR.isReady) {
+      try {
+        await OBR.room.setMetadata({
+          [ROSTER_METADATA_KEY]: {
+            encounterId: activeEncId,
+            combatants: sortedParty,
+          },
+          [TURN_METADATA_KEY]: {
+            encounterId: activeEncId,
+            currentTurnIndex: 0,
+            currentRound: 1,
+            activeCombatantId: firstPartyId,
+          },
+        });
+      } catch (e) {
+        console.error('Failed to clear hostiles in OBR room:', e);
+      }
+    }
   };
 
-  // SMART RESET: OPTION 2 - FULL CLEAR / END ENCOUNTER
+  // SMART RESET: OPTION 2 - FULL CLEAR / END ENCOUNTER (Generates fresh new encounterId epoch)
   const handleFullClearCombat = async () => {
-    const now = Date.now();
-    lastLocalClearTimeRef.current = now;
+    const newEncounterId = `enc_${Date.now()}`;
+    encounterIdRef.current = newEncounterId;
+    setEncounterId(newEncounterId);
+    lastLocalClearTimeRef.current = Date.now();
     recentlyAddedIdsRef.current.clear();
     deletionTombstones.current.clear();
 
@@ -867,8 +996,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setCombatStatus('setup');
     setIsClearModalOpen(false);
     setConcentrationAlerts({});
+    setCombatFeedItems([]);
 
     try {
+      localStorage.setItem('ashtapor_encounter_id', newEncounterId);
       localStorage.setItem('ttrpg_combatants', JSON.stringify([]));
       localStorage.removeItem('ttrpg_active_combatant_id');
       localStorage.setItem('ttrpg_active_turn_index', '0');
@@ -877,10 +1008,39 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     } catch {}
 
     liveFeedSync.clearFeed();
-    setCombatFeedItems([]);
-    liveFeedSync.recordCombatLog('⚔️ Encounter ended and reset to a blank slate.', true);
+    const resetMsg = '⚔️ Encounter ended and reset to a blank slate.';
+    liveFeedSync.recordCombatLog(resetMsg, false);
 
-    await broadcastCombat([], 0, 1, null, 'setup');
+    if (OBR.isReady) {
+      try {
+        await OBR.room.setMetadata({
+          [ROSTER_METADATA_KEY]: {
+            encounterId: newEncounterId,
+            combatants: [],
+          },
+          [TURN_METADATA_KEY]: {
+            encounterId: newEncounterId,
+            currentTurnIndex: 0,
+            currentRound: 1,
+            activeCombatantId: null,
+          },
+          [FEED_METADATA_KEY]: {
+            items: [
+              {
+                id: `cf-${Date.now()}`,
+                encounterId: newEncounterId,
+                message: resetMsg,
+                sender: 'Game Master',
+                timestamp: Date.now(),
+                type: 'combat',
+              },
+            ],
+          },
+        });
+      } catch (e) {
+        console.error('Failed to reset encounter in OBR room:', e);
+      }
+    }
   };
 
   // Canonical role helper
@@ -894,7 +1054,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return 'Monster';
   };
 
-  // AUDITED HP HANDLER: APPLY HEALING
+  // AUDITED HP HANDLER: APPLY HEALING (Strict Factual Reporting)
   const applyHeal = (combatantId: string, amount: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -920,12 +1080,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const isSecret = Boolean(target.isReserve || target.isSecret || target.hidden);
 
     // Rule:
-    // If combatant role is Monster, Boss, or Custom: COMPLETE SILENCE.
-    // Do not invoke logCombatFeed, broadcast, or add any entry to the feed.
-    // If combatant role is PC or Ally: Log "{combatant.name} healed for {amount} HP."
+    // If role is Monster, Boss, or Custom: ZERO LOG ENTRIES. Complete silence in ashtapor/feed!
+    // If role is PC or Ally: Log "{name} healed for {amount} HP."
     if (canonicalRole === 'PC' || canonicalRole === 'Ally') {
       const msg = `${target.name} healed for ${healAmount} HP.`;
-      liveFeedSync.recordCombatLog(msg, true, isSecret ? undefined : msg, isSecret);
+      broadcastFeedLog(msg, isSecret);
     }
 
     const now = Date.now();
@@ -945,10 +1104,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
   };
 
-  // AUDITED HP HANDLER: APPLY DAMAGE
+  // AUDITED HP HANDLER: APPLY DAMAGE (Strict Factual Reporting)
   const applyDamage = (combatantId: string, amount: number) => {
     const target = combatants.find((c) => c.id === combatantId);
     if (!target) return;
@@ -987,14 +1146,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const isSecret = Boolean(target.isReserve || target.isSecret || target.hidden);
     const isMasked = Boolean(target.maskStats || target.fogOfWar);
 
-    // Rule:
-    // If combatant is masked (Mask Stats active):
-    //   - If role === Monster: Log "Monster took damage!" (Never log as Boss).
-    //   - If role === Boss: Log "Boss took damage!"
-    //   - If role === Custom: Log "{combatant.name} took damage!"
-    //   - If role === PC or Ally: Log "{combatant.name} took damage!"
-    // If combatant is unmasked: Log "{combatant.name} took damage!"
-    // Never log exact damage numbers for masked targets.
+    // Rules:
+    // If masked:
+    //   - Monster: Log "Monster took damage!"
+    //   - Boss: Log "Boss took damage!"
+    //   - Custom: Log "{name} took damage!"
+    //   - PC/Ally: Log "{name} took damage!"
+    // If unmasked: Log "{name} took damage!"
+    // Never log exact damage numbers for masked combatants.
     let logMsg: string;
     if (isMasked) {
       if (canonicalRole === 'Monster') {
@@ -1008,7 +1167,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       logMsg = `${target.name} took damage!`;
     }
 
-    liveFeedSync.recordCombatLog(logMsg, true, isSecret ? undefined : logMsg, isSecret);
+    broadcastFeedLog(logMsg, isSecret);
 
     const now = Date.now();
     const updated = combatants.map((c) =>
@@ -1028,7 +1187,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
   };
 
   // HP DELTA MICRO-BUTTONS (-1, -5, +5, +1) AND INLINE POPOVER DISPATCHER
@@ -1071,7 +1230,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
   };
 
   // UPDATE DEATH SAVES
@@ -1104,10 +1263,10 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
   };
 
-  // TABLE-WIDE COMBATANT UPDATE (Players can update their own PC and Ally combatants)
+  // TABLE-WIDE COMBATANT UPDATE
   const handleUpdateCombatant = async (id: string, updates: Partial<Combatant>) => {
     const target = combatants.find((c) => c.id === id);
     if (!target) return;
@@ -1123,7 +1282,6 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const next = combatants.map((c) => {
       if (c.id !== id) return c;
       const updated = { ...c, ...updates, updatedAt: now };
-      // If HP rises above 0, wipe death saves
       const nextHp = updates.hpCurrent !== undefined ? updates.hpCurrent : updates.hp;
       if (nextHp !== undefined && nextHp > 0) {
         updated.deathSaves = { successes: 0, failures: 0 };
@@ -1138,9 +1296,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       localStorage.setItem('ttrpg_combatants', JSON.stringify(next));
     } catch {}
 
-    // Sync to OBR room metadata for the whole table
-    await broadcastCombat(next, activeTurnIndex, round, activeCombatantId, combatStatus);
-
+    await broadcastRoster(next);
     return next;
   };
 
@@ -1160,6 +1316,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       ...target,
       id: uniqueId,
       name: clonedName,
+      encounterId: encounterIdRef.current,
       sortOrder: (target.sortOrder ?? 0) + 1,
       deathSaves: undefined,
       updatedAt: Date.now(),
@@ -1174,8 +1331,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
 
-    liveFeedSync.recordCombatLog(`📋 Cloned ${cloned.name} (from ${target.name}).`, true);
-    await broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    await broadcastFeedLog(`📋 Cloned ${cloned.name} (from ${target.name}).`, false);
+    await broadcastRoster(updated);
     setActionMenuCombatantId(null);
   };
 
@@ -1198,11 +1355,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     setCombatants(updated);
     localCombatantsRef.current = updated;
-    liveFeedSync.recordCombatLog(
-      `👁️ ${target.name} has entered the encounter from reserves!`,
-      true
-    );
-    await broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    await broadcastFeedLog(`👁️ ${target.name} has entered the encounter from reserves!`, false);
+    await broadcastRoster(updated);
   };
 
   // INLINE TEMP HP SAVE
@@ -1228,12 +1382,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const logDm = `🛡️ ${target.name} set Temp HP to +${val} THP.`;
     const logP = isCombatantFoW(target) ? undefined : logDm;
-    liveFeedSync.recordCombatLog(logDm, true, logP);
+    broadcastFeedLog(logDm, false, logP);
 
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
   };
 
   // ADD CUSTOM CONDITION WITH TIMING TAG
@@ -1280,12 +1434,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const timingLabel = timing === 'start' ? ' (⏱ Start)' : timing === 'end' ? ' (⏱ End)' : '';
     const logDm = `✨ Condition [${rawName}${timingLabel}]${newCond.isSecret ? ' (Secret)' : ''} applied to ${target.name}.`;
     const logP = newCond.isSecret ? undefined : `✨ Condition [${rawName}${timingLabel}] applied to ${target.name}.`;
-    liveFeedSync.recordCombatLog(logDm, true, logP);
+    broadcastFeedLog(logDm, newCond.isSecret, logP);
 
     try {
       localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
     } catch {}
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
   };
 
   // REMOVE CONDITION
@@ -1318,10 +1472,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     if (condToRemove) {
       const logDm = `✨ Condition [${condToRemove.name}] removed from ${target.name}.`;
       const logP = condToRemove.isSecret ? undefined : logDm;
-      liveFeedSync.recordCombatLog(logDm, true, logP);
+      broadcastFeedLog(logDm, condToRemove.isSecret, logP);
     }
 
-    broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    try {
+      localStorage.setItem('ttrpg_combatants', JSON.stringify(updated));
+    } catch {}
+    broadcastRoster(updated);
   };
 
   // MANUAL COMBATANT REORDERING (GM Only)
@@ -1372,7 +1529,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (foundIdx !== -1) targetActiveIdx = foundIdx;
     }
     setActiveTurnIndex(targetActiveIdx);
-    broadcastCombat(reordered, targetActiveIdx, round, activeCombatantId, combatStatus);
+    broadcastRoster(reordered);
+    broadcastTurn(targetActiveIdx, round, activeCombatantId);
   };
 
   // DELETE COMBATANT (DM Only with tombstone protection)
@@ -1387,7 +1545,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     localCombatantsRef.current = updated;
     setActionMenuCombatantId(null);
 
-    if (target) liveFeedSync.recordCombatLog(`💀 ${target.name} was removed from combat.`, true);
+    if (target) broadcastFeedLog(`💀 ${target.name} was removed from combat.`, false);
 
     let nextActiveId = activeCombatantId;
     let nextActiveIdx = 0;
@@ -1404,7 +1562,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextActiveIdx);
-    broadcastCombat(updated, nextActiveIdx, round, nextActiveId, combatStatus);
+    broadcastRoster(updated);
+    broadcastTurn(nextActiveIdx, round, nextActiveId);
   };
 
   // START EDITING COMBATANT
@@ -1493,82 +1652,88 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (found !== -1) targetIdx = found;
     }
     setActiveTurnIndex(targetIdx);
-    broadcastCombat(updated, targetIdx, round, activeCombatantId, combatStatus);
+    broadcastRoster(updated);
+    broadcastTurn(targetIdx, round, activeCombatantId);
   };
 
-  // ATOMIC COMBATANT METADATA WRITE LOCK
+  // ADD COMBATANT (Wrapped in Transaction Mutex Lock)
   const handleAddCombatant = async (newEntry: Omit<Combatant, 'id'>) => {
-    const uniqueId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    await withSyncLock(async () => {
+      const uniqueId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-    const newCombatant: Combatant = {
-      ...newEntry,
-      id: uniqueId,
-      hp: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
-      maxHp: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
-      hpCurrent: Number(newEntry.hpCurrent ?? newEntry.maxHp ?? newEntry.hpMax) || 10,
-      hpMax: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
-      tempHp: Number(newEntry.tempHp ?? newEntry.hpTemp) || 0,
-      hpTemp: Number(newEntry.tempHp ?? newEntry.hpTemp) || 0,
-      initiative: Number(newEntry.initiative) || 10,
-      ac: Number(newEntry.ac ?? newEntry.armorClass) || 10,
-      armorClass: Number(newEntry.ac ?? newEntry.armorClass) || 10,
-      conditions: newEntry.conditions || [],
-      hidden: Boolean(newEntry.hidden),
-      sortOrder: combatants.length,
-      updatedAt: Date.now(),
-    };
+      const newCombatant: Combatant = {
+        ...newEntry,
+        id: uniqueId,
+        encounterId: encounterIdRef.current,
+        hp: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
+        maxHp: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
+        hpCurrent: Number(newEntry.hpCurrent ?? newEntry.maxHp ?? newEntry.hpMax) || 10,
+        hpMax: Number(newEntry.maxHp ?? newEntry.hpMax) || 10,
+        tempHp: Number(newEntry.tempHp ?? newEntry.hpTemp) || 0,
+        hpTemp: Number(newEntry.tempHp ?? newEntry.hpTemp) || 0,
+        initiative: Number(newEntry.initiative) || 10,
+        ac: Number(newEntry.ac ?? newEntry.armorClass) || 10,
+        armorClass: Number(newEntry.ac ?? newEntry.armorClass) || 10,
+        conditions: newEntry.conditions || [],
+        hidden: Boolean(newEntry.hidden),
+        sortOrder: combatants.length,
+        updatedAt: Date.now(),
+      };
 
-    // Fetch fresh room metadata to prevent race-condition overwrites
-    let existingCombatants = combatants;
-    try {
+      // Fetch fresh server snapshot
+      let existingCombatants = combatants;
       if (OBR.isReady) {
-        const currentMeta = await OBR.room.getMetadata();
-        const metaState = (currentMeta[ROOM_METADATA_KEY] || currentMeta[COMBAT_STATE_KEY]) as any;
-        if (metaState && Array.isArray(metaState.combatants)) {
-          existingCombatants = metaState.combatants;
+        try {
+          const currentMeta = await OBR.room.getMetadata();
+          const rosterPayload = currentMeta[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
+          if (rosterPayload && Array.isArray(rosterPayload.combatants)) {
+            existingCombatants = rosterPayload.combatants;
+          }
+        } catch (err) {
+          console.warn('Could not fetch fresh room metadata before adding combatant:', err);
         }
       }
-    } catch (err) {
-      console.warn('Could not fetch fresh room metadata before adding combatant:', err);
-    }
 
-    const updatedList = sortInitiativeStrictDescending([...existingCombatants, newCombatant]);
-    setCombatants(updatedList);
-    localCombatantsRef.current = updatedList;
-    recentlyAddedIdsRef.current.set(newCombatant.id, Date.now() + 8000);
+      const updatedList = sortInitiativeStrictDescending([...existingCombatants, newCombatant]);
+      setCombatants(updatedList);
+      localCombatantsRef.current = updatedList;
+      recentlyAddedIdsRef.current.set(newCombatant.id, Date.now() + 8000);
 
-    try {
-      localStorage.setItem('ttrpg_combatants', JSON.stringify(updatedList));
-    } catch {}
+      try {
+        localStorage.setItem('ttrpg_combatants', JSON.stringify(updatedList));
+      } catch {}
 
-    let targetActiveId = activeCombatantId;
-    let targetActiveIndex = activeTurnIndex;
+      let targetActiveId = activeCombatantId;
+      let targetActiveIndex = activeTurnIndex;
 
-    if (existingCombatants.length === 0) {
-      targetActiveId = newCombatant.id;
-      targetActiveIndex = 0;
-      setActiveCombatantId(newCombatant.id);
-      setActiveTurnIndex(0);
-    } else if (activeCombatantId) {
-      const found = updatedList.findIndex((c) => c.id === activeCombatantId);
-      if (found !== -1) targetActiveIndex = found;
-      setActiveTurnIndex(targetActiveIndex);
-    }
+      if (existingCombatants.length === 0) {
+        targetActiveId = newCombatant.id;
+        targetActiveIndex = 0;
+        setActiveCombatantId(newCombatant.id);
+        setActiveTurnIndex(0);
+      } else if (activeCombatantId) {
+        const found = updatedList.findIndex((c) => c.id === activeCombatantId);
+        if (found !== -1) targetActiveIndex = found;
+        setActiveTurnIndex(targetActiveIndex);
+      }
 
-    if (!newCombatant.isReserve && !newCombatant.hidden) {
-      liveFeedSync.recordCombatLog(
-        `➕ Added ${newCombatant.name} (Init ${newCombatant.initiative}, ${newCombatant.hpMax} HP, ${newCombatant.ac} AC).`,
-        true
-      );
-    }
+      if (!newCombatant.isReserve && !newCombatant.hidden) {
+        await broadcastFeedLog(
+          `➕ Added ${newCombatant.name} (Init ${newCombatant.initiative}, ${newCombatant.hpMax} HP, ${newCombatant.ac} AC).`,
+          false
+        );
+      }
 
-    await broadcastCombat(updatedList, targetActiveIndex, round, targetActiveId, combatStatus);
+      await broadcastRoster(updatedList);
+      if (existingCombatants.length === 0) {
+        await broadcastTurn(0, round, newCombatant.id);
+      }
+    });
   };
 
-  // ADD COMBATANT HANDLER (Triggered from AddCombatantModal)
   const handleAddCombatantFromModal = async (data: NewCombatantData) => {
     await handleAddCombatant({
       name: data.name,
@@ -1594,66 +1759,228 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setIsAddModalOpen(false);
   };
 
-  // JOIN COMBAT FROM PERSISTENT MY ROSTER
+  /**
+   * MUTEX WRITE LOCK: JOIN COMBAT FROM PERSISTENT MY ROSTER
+   * Solves multi-client race conditions with write lock and fresh server snapshot
+   */
   const handleJoinCombatFromRoster = async (member: RosterMember) => {
-    const rollResult = executeDiceRoll({
-      diceType: 'd20',
-      count: 1,
-      modifier: member.initiativeMod,
-      sender: rollerIdentity,
-      isDm,
-      rollType: 'Straight roll',
-      label: `Initiative (${member.name})`,
+    await withSyncLock(async () => {
+      const rollResult = executeDiceRoll({
+        diceType: 'd20',
+        count: 1,
+        modifier: member.initiativeMod,
+        sender: rollerIdentity,
+        isDm,
+        rollType: 'Straight roll',
+        label: `Initiative (${member.name})`,
+      });
+
+      liveFeedSync.recordDiceRoll(rollResult, true);
+
+      const memberType: CombatantType =
+        member.role === 'PC'
+          ? 'player'
+          : member.role === 'Ally'
+          ? 'ally'
+          : member.role === 'Monster'
+          ? 'monster'
+          : member.role === 'Boss'
+          ? 'boss'
+          : 'custom';
+
+      const memberRoleStr =
+        member.role === 'PC'
+          ? 'Player'
+          : member.role === 'Ally'
+          ? 'Ally'
+          : member.role === 'Monster'
+          ? 'Monster'
+          : member.role === 'Boss'
+          ? 'Boss'
+          : 'Custom';
+
+      // 1. Fetch fresh server snapshot
+      let currentRoster: Combatant[] = localCombatantsRef.current;
+      let activeEpoch = encounterIdRef.current;
+
+      if (OBR.isReady) {
+        try {
+          const meta = await OBR.room.getMetadata();
+          const rosterPayload = meta[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
+          if (rosterPayload && Array.isArray(rosterPayload.combatants)) {
+            currentRoster = rosterPayload.combatants;
+            activeEpoch = rosterPayload.encounterId || activeEpoch;
+          }
+        } catch (err) {
+          console.warn('Could not fetch server snapshot before join combat:', err);
+        }
+      }
+
+      // Check if character already active in combat (by rosterId or matching name)
+      const existingIdx = currentRoster.findIndex(
+        (c) =>
+          (c.rosterId && c.rosterId === member.id) ||
+          c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+      );
+
+      const uniqueId =
+        existingIdx !== -1
+          ? currentRoster[existingIdx].id
+          : typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+      const newCombatant: Combatant = {
+        id: uniqueId,
+        rosterId: member.id,
+        encounterId: activeEpoch,
+        name: member.name,
+        role: memberRoleStr,
+        type: memberType,
+        ac: member.ac,
+        armorClass: member.ac,
+        hp: member.maxHp,
+        maxHp: member.maxHp,
+        hpCurrent: member.maxHp,
+        hpMax: member.maxHp,
+        tempHp: 0,
+        hpTemp: 0,
+        initiative: rollResult.total,
+        conditions: [],
+        hidden: false,
+        maskStats: isDm && (member.role === 'Monster' || member.role === 'Boss'),
+        isReserve: false,
+        sortOrder: currentRoster.length,
+        updatedAt: Date.now(),
+      };
+
+      let nextRoster: Combatant[];
+      if (existingIdx !== -1) {
+        nextRoster = currentRoster.map((c, i) => (i === existingIdx ? newCombatant : c));
+      } else {
+        nextRoster = [...currentRoster, newCombatant];
+      }
+
+      const sortedList = sortInitiativeStrictDescending(nextRoster);
+      setCombatants(sortedList);
+      localCombatantsRef.current = sortedList;
+      recentlyAddedIdsRef.current.set(newCombatant.id, Date.now() + 8000);
+
+      try {
+        localStorage.setItem('ttrpg_combatants', JSON.stringify(sortedList));
+      } catch {}
+
+      let targetActiveId = activeCombatantId;
+      let targetActiveIdx = activeTurnIndex;
+      if (currentRoster.length === 0) {
+        targetActiveId = newCombatant.id;
+        targetActiveIdx = 0;
+        setActiveCombatantId(newCombatant.id);
+        setActiveTurnIndex(0);
+      } else if (activeCombatantId) {
+        const found = sortedList.findIndex((c) => c.id === activeCombatantId);
+        if (found !== -1) targetActiveIdx = found;
+        setActiveTurnIndex(targetActiveIdx);
+      }
+
+      await broadcastFeedLog(
+        `⚔️ ${newCombatant.name} joined combat! (Init ${newCombatant.initiative}, ${newCombatant.hpMax} HP, ${newCombatant.ac} AC).`,
+        false
+      );
+
+      // Write partitioned roster
+      await broadcastRoster(sortedList);
+      if (currentRoster.length === 0) {
+        await broadcastTurn(0, round, newCombatant.id);
+      }
     });
+  };
 
-    liveFeedSync.recordDiceRoll(rollResult, true);
+  /**
+   * MUTEX WRITE LOCK: EXIT COMBAT ROSTER ACTION
+   * Removes character from table tracker without touching local ashtapor_my_roster in localStorage.
+   */
+  const handleExitCombatFromRoster = async (rosterMemberId: string) => {
+    await withSyncLock(async () => {
+      // 1. Fetch fresh server snapshot
+      let currentRoster: Combatant[] = localCombatantsRef.current;
+      let activeEpoch = encounterIdRef.current;
 
-    const memberType: CombatantType =
-      member.role === 'PC'
-        ? 'player'
-        : member.role === 'Ally'
-        ? 'ally'
-        : member.role === 'Monster'
-        ? 'monster'
-        : member.role === 'Boss'
-        ? 'boss'
-        : 'custom';
+      if (OBR.isReady) {
+        try {
+          const meta = await OBR.room.getMetadata();
+          const rosterPayload = meta[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
+          if (rosterPayload && Array.isArray(rosterPayload.combatants)) {
+            currentRoster = rosterPayload.combatants;
+            activeEpoch = rosterPayload.encounterId || activeEpoch;
+          }
+        } catch (err) {
+          console.warn('Could not fetch server snapshot before exit combat:', err);
+        }
+      }
 
-    const memberRoleStr =
-      member.role === 'PC'
-        ? 'Player'
-        : member.role === 'Ally'
-        ? 'Ally'
-        : member.role === 'Monster'
-        ? 'Monster'
-        : member.role === 'Boss'
-        ? 'Boss'
-        : 'Custom';
+      // Read local roster to get character name
+      const localRosterSaved: RosterMember[] = (() => {
+        try {
+          const s = localStorage.getItem('ashtapor_my_roster');
+          return s ? JSON.parse(s) : [];
+        } catch {
+          return [];
+        }
+      })();
+      const targetMember = localRosterSaved.find((m) => m.id === rosterMemberId);
+      const targetName = targetMember ? targetMember.name.toLowerCase().trim() : '';
 
-    await handleAddCombatant({
-      name: member.name,
-      role: memberRoleStr,
-      type: memberType,
-      ac: member.ac,
-      armorClass: member.ac,
-      hp: member.maxHp,
-      maxHp: member.maxHp,
-      hpCurrent: member.maxHp,
-      hpMax: member.maxHp,
-      tempHp: 0,
-      hpTemp: 0,
-      initiative: rollResult.total,
-      conditions: [],
-      hidden: false,
-      maskStats: isDm && (member.role === 'Monster' || member.role === 'Boss'),
-      isReserve: false,
+      const targetCombatant = currentRoster.find(
+        (c) =>
+          (c.rosterId && c.rosterId === rosterMemberId) ||
+          (targetName && c.name.toLowerCase().trim() === targetName)
+      );
+
+      if (!targetCombatant) return;
+
+      const removedName = targetCombatant.name;
+      deletionTombstones.current.set(targetCombatant.id, Date.now() + 15000);
+
+      const remainingCombatants = currentRoster.filter((c) => c.id !== targetCombatant.id);
+      const sortedRemaining = sortInitiativeStrictDescending(remainingCombatants);
+
+      setCombatants(sortedRemaining);
+      localCombatantsRef.current = sortedRemaining;
+      try {
+        localStorage.setItem('ttrpg_combatants', JSON.stringify(sortedRemaining));
+      } catch {}
+
+      // Adjust active turn index if needed
+      let nextActiveId = activeCombatantId;
+      let nextActiveIdx = activeTurnIndex;
+      if (activeCombatantId === targetCombatant.id) {
+        const candidate = sortedRemaining[activeTurnIndex] || sortedRemaining[0] || null;
+        nextActiveId = candidate ? candidate.id : null;
+        nextActiveIdx = candidate ? sortedRemaining.findIndex((c) => c.id === candidate.id) : 0;
+        setActiveCombatantId(nextActiveId);
+        setActiveTurnIndex(nextActiveIdx);
+      } else if (activeCombatantId) {
+        const found = sortedRemaining.findIndex((c) => c.id === activeCombatantId);
+        nextActiveIdx = found !== -1 ? found : 0;
+        setActiveTurnIndex(nextActiveIdx);
+      }
+
+      // Log: "{character.name} left the combat."
+      await broadcastFeedLog(`${removedName} left the combat.`, false);
+
+      // Write partitioned roster
+      await broadcastRoster(sortedRemaining);
+      await broadcastTurn(nextActiveIdx, round, nextActiveId);
     });
   };
 
   // SYNC ROSTER MEMBER EDIT TO ACTIVE TABLE TRACKER
   const handleSyncRosterMemberStats = async (member: RosterMember) => {
     const matching = combatants.find(
-      (c) => c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+      (c) =>
+        (c.rosterId && c.rosterId === member.id) ||
+        c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
     );
     if (!matching) return;
 
@@ -1678,21 +2005,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     setCombatants(updated);
     localCombatantsRef.current = updated;
-    await broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
-    liveFeedSync.recordCombatLog(
+    await broadcastRoster(updated);
+    await broadcastFeedLog(
       `🔄 Synced ${member.name} from roster (AC ${newAc}, Max HP ${newMax}).`,
-      true
+      false
     );
   };
 
-  // Combatant render pipeline:
-  // Decoupled from canvas items & token presence.
-  // GMs see all combatants. Players see all non-reserve/non-secret combatants.
   const visibleCombatants = combatants.filter(
     (c) => isDm || (!c.isReserve && !c.hidden && !c.isSecret)
   );
 
-  // Active combatant details
   const activeCombatant =
     combatants.find((c) => c.id === activeCombatantId) || combatants[activeTurnIndex];
   const activeTurnName = activeCombatant ? activeCombatant.name : 'None';
@@ -1800,14 +2123,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       <div className="px-2 pt-2 shrink-0">
         <MyRosterDrawer
           activeCombatantNames={combatants.map((c) => c.name)}
+          activeCombatants={combatants}
           onJoinCombat={handleJoinCombatFromRoster}
+          onExitCombat={handleExitCombatFromRoster}
           isDm={isDm}
           playerName={playerName}
           onUpdateActiveCombatantStats={handleSyncRosterMemberStats}
+          isSyncing={isSyncing}
         />
       </div>
 
-      {/* 2. COMBATANT LIST CONTAINER (Decoupled from canvas items) */}
+      {/* 2. COMBATANT LIST CONTAINER */}
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5 min-h-0">
         {visibleCombatants.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
@@ -2009,7 +2335,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         </div>
       </div>
 
-      {/* MODAL: ADD COMBATANT (Decoupled, zero token inputs, mask/reserve checkboxes) */}
+      {/* MODAL: ADD COMBATANT */}
       <AddCombatantModal
         isOpen={isAddModalOpen}
         isDm={isDm}
@@ -2017,13 +2343,14 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         onAdd={handleAddCombatantFromModal}
       />
 
-      {/* SMART COMBAT RESET MODAL (Clear Hostiles Only vs Full Clear) */}
+      {/* SMART COMBAT RESET MODAL (Clear Hostiles Only vs Full Clear with new epoch) */}
       <ResetCombatModal
         isOpen={isClearModalOpen}
         onClose={() => setIsClearModalOpen(false)}
         onClearHostilesOnly={handleClearHostilesOnly}
         onFullClear={handleFullClearCombat}
         combatants={combatants}
+        encounterId={encounterId}
       />
 
       {/* MODAL: COMBATANT ACTION / CONDITION POPUP */}
@@ -2068,7 +2395,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 </button>
               </div>
 
-              {/* Duplicate Minion Button in Action Menu (Section 3.C) */}
+              {/* Duplicate Minion Button in Action Menu */}
               <div className="flex items-center gap-2 pb-1 border-b border-neutral-800">
                 <button
                   type="button"
@@ -2096,7 +2423,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 )}
               </div>
 
-              {/* Custom Condition Open Input with Timing Badges (Section 3.F) */}
+              {/* Custom Condition Open Input with Timing Badges */}
               {canEdit && (
                 <div className="space-y-1.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">

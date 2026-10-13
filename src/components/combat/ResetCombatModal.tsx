@@ -1,5 +1,5 @@
 import React from 'react';
-import { RotateCcw, Skull, Trash2, X, Shield, Swords } from 'lucide-react';
+import { RotateCcw, Skull, Trash2, X, Sparkles } from 'lucide-react';
 import { Combatant } from '../../types/ttrpg';
 
 interface ResetCombatModalProps {
@@ -8,6 +8,7 @@ interface ResetCombatModalProps {
   onClearHostilesOnly: () => void;
   onFullClear: () => void;
   combatants: Combatant[];
+  encounterId?: string;
 }
 
 export const ResetCombatModal: React.FC<ResetCombatModalProps> = ({
@@ -16,6 +17,7 @@ export const ResetCombatModal: React.FC<ResetCombatModalProps> = ({
   onClearHostilesOnly,
   onFullClear,
   combatants,
+  encounterId,
 }) => {
   if (!isOpen) return null;
 
@@ -46,6 +48,9 @@ export const ResetCombatModal: React.FC<ResetCombatModalProps> = ({
               </h3>
               <p className="text-[10px] text-slate-400 font-mono">
                 {combatants.length} active ({partyCount} PCs/Allies · {hostileCount} Hostiles)
+                {encounterId && (
+                  <span className="ml-1 text-[9px] text-slate-500">[{encounterId.slice(-6)}]</span>
+                )}
               </p>
             </div>
           </div>
@@ -83,7 +88,7 @@ export const ResetCombatModal: React.FC<ResetCombatModalProps> = ({
                 <span className="text-[10px] font-mono opacity-80">Wave Reset</span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Removes {hostileCount} monsters and bosses. Preserves {partyCount} PCs and allies with their current HP, conditions, and position. Resets Round to 1.
+                Removes {hostileCount} monsters and bosses. Preserves {partyCount} PCs and allies with their current HP, conditions, and position within the current encounter epoch. Resets Round to 1.
               </p>
             </div>
           </button>
@@ -100,10 +105,12 @@ export const ResetCombatModal: React.FC<ResetCombatModalProps> = ({
             <div className="flex-1 min-w-0">
               <div className="text-xs font-bold text-rose-300 flex items-center justify-between">
                 <span>End Encounter (Full Clear)</span>
-                <span className="text-[10px] font-mono opacity-80">Full Wipe</span>
+                <span className="text-[10px] font-mono opacity-80 flex items-center gap-0.5">
+                  <Sparkles className="w-2.5 h-2.5" /> New Epoch
+                </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Clears all combatants and clears combat feed. Players keep their characters safely saved in My Roster.
+                Generates a fresh encounter epoch to permanently purge zombie combatants and clears feed. Characters remain 100% saved in My Roster.
               </p>
             </div>
           </button>

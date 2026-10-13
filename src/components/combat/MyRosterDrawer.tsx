@@ -14,18 +14,23 @@ import {
   Crown,
   Layers,
   User,
+  LogOut,
 } from 'lucide-react';
-import { RosterMember, RosterRole } from '../../types/combat';
+import { RosterMember, RosterRole, Combatant } from '../../types/combat';
 import { AddRosterModal } from './AddRosterModal';
 import OBR from '@owlbear-rodeo/sdk';
+import { ROSTER_METADATA_KEY, RosterMetadataPayload } from '../../types/combat';
 import { ROOM_METADATA_KEY, COMBAT_STATE_KEY } from '../../utils/obrCombatSync';
 
 interface MyRosterDrawerProps {
-  activeCombatantNames: string[];
+  activeCombatantNames?: string[];
+  activeCombatants?: Combatant[];
   onJoinCombat: (member: RosterMember) => Promise<void> | void;
+  onExitCombat?: (rosterMemberId: string) => Promise<void> | void;
   isDm: boolean;
   playerName?: string;
   onUpdateActiveCombatantStats?: (member: RosterMember) => void | Promise<void>;
+  isSyncing?: boolean;
 }
 
 const LOCAL_ROSTER_KEY = 'ashtapor_my_roster';
@@ -42,11 +47,14 @@ const DEFAULT_SAMPLE_ROSTER: RosterMember[] = [
 ];
 
 export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
-  activeCombatantNames,
+  activeCombatantNames = [],
+  activeCombatants = [],
   onJoinCombat,
+  onExitCombat,
   isDm,
   playerName = 'Adventurer',
   onUpdateActiveCombatantStats,
+  isSyncing = false,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(() => {
     try {
@@ -70,6 +78,9 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   // Modal State for Add & Edit
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
+
+  // Local loading state to dim buttons for 250ms on click
+  const [loadingMemberId, setLoadingMemberId] = useState<string | null>(null);
 
   const saveRoster = (updated: RosterMember[]) => {
     setRoster(updated);
@@ -116,13 +127,15 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     try {
       if (OBR.isReady) {
         const meta = await OBR.room.getMetadata();
-        const combatKey = meta[ROOM_METADATA_KEY] ? ROOM_METADATA_KEY : COMBAT_STATE_KEY;
-        const state = (meta[combatKey] || {}) as any;
+        const rosterPayload = meta[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
 
-        if (state && Array.isArray(state.combatants)) {
+        if (rosterPayload && Array.isArray(rosterPayload.combatants)) {
           let hasChange = false;
-          const updatedCombatants = state.combatants.map((c: any) => {
-            if (c.name.toLowerCase().trim() === member.name.toLowerCase().trim()) {
+          const updatedCombatants = rosterPayload.combatants.map((c) => {
+            if (
+              (c.rosterId && c.rosterId === member.id) ||
+              c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+            ) {
               hasChange = true;
               const newMax = member.maxHp;
               const newCur = Math.min(c.hpCurrent ?? c.hp ?? newMax, newMax);
@@ -142,8 +155,8 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
 
           if (hasChange) {
             await OBR.room.setMetadata({
-              [combatKey]: {
-                ...state,
+              [ROSTER_METADATA_KEY]: {
+                ...rosterPayload,
                 combatants: updatedCombatants,
               },
             });
@@ -168,9 +181,14 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     saveRoster(updated);
 
     // If active in combat, synchronize updated AC & Max HP to live table tracker
-    const isActive = activeCombatantNames.some(
-      (n) => n.toLowerCase().trim() === member.name.toLowerCase().trim()
+    const activeMatch = activeCombatants.find(
+      (c) =>
+        (c.rosterId && c.rosterId === member.id) ||
+        c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
     );
+    const isActive =
+      Boolean(activeMatch) ||
+      activeCombatantNames.some((n) => n.toLowerCase().trim() === member.name.toLowerCase().trim());
 
     if (isActive) {
       await syncToActiveCombatTracker(member);
@@ -185,7 +203,31 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     }
   };
 
-  const activeNamesLower = new Set(activeCombatantNames.map((n) => n.toLowerCase().trim()));
+  const handleJoinCombatClick = async (member: RosterMember) => {
+    if (isSyncing || loadingMemberId) return;
+    setLoadingMemberId(member.id);
+    try {
+      await onJoinCombat(member);
+    } finally {
+      setTimeout(() => {
+        setLoadingMemberId(null);
+      }, 250);
+    }
+  };
+
+  const handleExitCombatClick = async (memberId: string) => {
+    if (isSyncing || loadingMemberId) return;
+    setLoadingMemberId(memberId);
+    try {
+      if (onExitCombat) {
+        await onExitCombat(memberId);
+      }
+    } finally {
+      setTimeout(() => {
+        setLoadingMemberId(null);
+      }, 250);
+    }
+  };
 
   const getRoleCardStyle = (role: RosterRole) => {
     switch (role) {
@@ -284,7 +326,16 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {roster.map((member) => {
-                const isActive = activeNamesLower.has(member.name.toLowerCase().trim());
+                const activeCombatant = activeCombatants.find(
+                  (c) =>
+                    (c.rosterId && c.rosterId === member.id) ||
+                    c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+                );
+                const isInCombat =
+                  Boolean(activeCombatant) ||
+                  activeCombatantNames.some((n) => n.toLowerCase().trim() === member.name.toLowerCase().trim());
+
+                const isCardLoading = isSyncing || loadingMemberId === member.id;
 
                 return (
                   <div
@@ -312,7 +363,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                         </span>
                       </div>
 
-                      {/* Action Icons: Edit & Delete */}
+                      {/* Universal Action Icons: Edit & Delete (Rendered unconditionally for Players & DM) */}
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
@@ -321,7 +372,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                           title="Edit Character"
                           aria-label="Edit Character"
                         >
-                          <Pencil className="w-3.5 h-3.5 text-slate-400 hover:text-amber-400" />
+                          <Pencil className="w-3.5 h-3.5 text-slate-400 hover:text-amber-400 cursor-pointer" />
                         </button>
 
                         <button
@@ -355,10 +406,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                       </span>
                     </div>
 
-                    {/* Actions Strip: Active state indicator & Join Combat */}
+                    {/* Actions Strip: Active state indicator & Join / Exit Combat */}
                     <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 gap-1.5">
-                      {isActive ? (
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 font-mono text-[9px] font-bold flex items-center gap-1">
+                      {isInCombat ? (
+                        <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           <span>Active in Battle</span>
                         </span>
@@ -368,15 +419,33 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                         </span>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => onJoinCombat(member)}
-                        className="px-2 py-1 text-[10px] font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 transition flex items-center gap-1 shadow-sm cursor-pointer ml-auto"
-                        title="Roll 1d20 + Init Mod and add character to combat with full HP"
-                      >
-                        <Swords className="w-3 h-3" />
-                        <span>{isActive ? 'Re-Join' : 'Join Combat'}</span>
-                      </button>
+                      {isInCombat ? (
+                        <button
+                          type="button"
+                          onClick={() => handleExitCombatClick(member.id)}
+                          disabled={isCardLoading}
+                          className={`bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-xs px-2.5 py-1 rounded font-semibold flex items-center gap-1 transition-colors cursor-pointer ml-auto ${
+                            isCardLoading ? 'opacity-40 cursor-wait' : ''
+                          }`}
+                          title={`Exit combat with ${member.name} (keeps character saved in My Roster)`}
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          <span>Exit Combat</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleJoinCombatClick(member)}
+                          disabled={isCardLoading}
+                          className={`px-2 py-1 text-[10px] font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 transition flex items-center gap-1 shadow-sm cursor-pointer ml-auto ${
+                            isCardLoading ? 'opacity-40 cursor-wait' : ''
+                          }`}
+                          title="Roll 1d20 + Init Mod and add character to combat with full HP"
+                        >
+                          <Swords className="w-3 h-3" />
+                          <span>Join Combat</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
