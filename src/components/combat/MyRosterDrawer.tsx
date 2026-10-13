@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Users,
-  User,
   Plus,
   Trash2,
   Swords,
@@ -9,17 +8,24 @@ import {
   Heart,
   ChevronDown,
   ChevronRight,
-  X,
-  Check,
   Dices,
+  Pencil,
+  Skull,
+  Crown,
+  Layers,
+  User,
 } from 'lucide-react';
-import { RosterMember } from '../../types/combat';
+import { RosterMember, RosterRole } from '../../types/combat';
+import { AddRosterModal } from './AddRosterModal';
+import OBR from '@owlbear-rodeo/sdk';
+import { ROOM_METADATA_KEY, COMBAT_STATE_KEY } from '../../utils/obrCombatSync';
 
 interface MyRosterDrawerProps {
   activeCombatantNames: string[];
   onJoinCombat: (member: RosterMember) => Promise<void> | void;
   isDm: boolean;
   playerName?: string;
+  onUpdateActiveCombatantStats?: (member: RosterMember) => void | Promise<void>;
 }
 
 const LOCAL_ROSTER_KEY = 'ashtapor_my_roster';
@@ -40,6 +46,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   onJoinCombat,
   isDm,
   playerName = 'Adventurer',
+  onUpdateActiveCombatantStats,
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(() => {
     try {
@@ -60,12 +67,9 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     return DEFAULT_SAMPLE_ROSTER;
   });
 
-  const [isAddFormOpen, setIsAddFormOpen] = useState<boolean>(false);
-  const [newName, setNewName] = useState<string>('');
-  const [newRole, setNewRole] = useState<'PC' | 'Ally'>('PC');
-  const [newAc, setNewAc] = useState<number>(14);
-  const [newMaxHp, setNewMaxHp] = useState<number>(30);
-  const [newInitMod, setNewInitMod] = useState<number>(2);
+  // Modal State for Add & Edit
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
 
   const saveRoster = (updated: RosterMember[]) => {
     setRoster(updated);
@@ -86,37 +90,95 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     });
   };
 
-  const handleCreateMember = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-
-    const uniqueId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `r_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    const member: RosterMember = {
-      id: uniqueId,
-      name: newName.trim(),
-      role: newRole,
-      ac: Number(newAc) || 10,
-      maxHp: Math.max(1, Number(newMaxHp) || 10),
-      initiativeMod: Number(newInitMod) || 0,
-    };
-
-    const updated = [...roster, member];
-    saveRoster(updated);
-
-    // Reset form
-    setNewName('');
-    setNewRole('PC');
-    setNewAc(14);
-    setNewMaxHp(30);
-    setNewInitMod(2);
-    setIsAddFormOpen(false);
+  const handleOpenAdd = () => {
+    setEditingMember(null);
+    setIsModalOpen(true);
   };
 
-  const handleDeleteMember = (id: string, name: string) => {
+  const handleOpenEdit = (member: RosterMember, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingMember(member);
+    setIsModalOpen(true);
+  };
+
+  // Sync to active table tracker if active in combat
+  const syncToActiveCombatTracker = async (member: RosterMember) => {
+    // 1. Call prop handler if supplied by CombatTracker
+    if (onUpdateActiveCombatantStats) {
+      try {
+        await onUpdateActiveCombatantStats(member);
+      } catch (err) {
+        console.warn('Error in onUpdateActiveCombatantStats callback:', err);
+      }
+    }
+
+    // 2. Direct OBR room metadata atomic sync for table-wide propagation
+    try {
+      if (OBR.isReady) {
+        const meta = await OBR.room.getMetadata();
+        const combatKey = meta[ROOM_METADATA_KEY] ? ROOM_METADATA_KEY : COMBAT_STATE_KEY;
+        const state = (meta[combatKey] || {}) as any;
+
+        if (state && Array.isArray(state.combatants)) {
+          let hasChange = false;
+          const updatedCombatants = state.combatants.map((c: any) => {
+            if (c.name.toLowerCase().trim() === member.name.toLowerCase().trim()) {
+              hasChange = true;
+              const newMax = member.maxHp;
+              const newCur = Math.min(c.hpCurrent ?? c.hp ?? newMax, newMax);
+              return {
+                ...c,
+                ac: member.ac,
+                armorClass: member.ac,
+                maxHp: newMax,
+                hpMax: newMax,
+                hpCurrent: newCur,
+                hp: newCur,
+                updatedAt: Date.now(),
+              };
+            }
+            return c;
+          });
+
+          if (hasChange) {
+            await OBR.room.setMetadata({
+              [combatKey]: {
+                ...state,
+                combatants: updatedCombatants,
+              },
+            });
+          }
+        }
+      }
+    } catch (obrErr) {
+      console.warn('Could not sync updated roster member to OBR room metadata:', obrErr);
+    }
+  };
+
+  const handleSaveMember = async (member: RosterMember) => {
+    const isExisting = roster.some((m) => m.id === member.id);
+    let updated: RosterMember[];
+
+    if (isExisting) {
+      updated = roster.map((m) => (m.id === member.id ? member : m));
+    } else {
+      updated = [...roster, member];
+    }
+
+    saveRoster(updated);
+
+    // If active in combat, synchronize updated AC & Max HP to live table tracker
+    const isActive = activeCombatantNames.some(
+      (n) => n.toLowerCase().trim() === member.name.toLowerCase().trim()
+    );
+
+    if (isActive) {
+      await syncToActiveCombatTracker(member);
+    }
+  };
+
+  const handleDeleteMember = (id: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (window.confirm(`Remove ${name} from your persistent roster?`)) {
       const updated = roster.filter((m) => m.id !== id);
       saveRoster(updated);
@@ -124,6 +186,55 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   };
 
   const activeNamesLower = new Set(activeCombatantNames.map((n) => n.toLowerCase().trim()));
+
+  const getRoleCardStyle = (role: RosterRole) => {
+    switch (role) {
+      case 'PC':
+        return 'border-sky-500/40 bg-slate-900/90';
+      case 'Ally':
+        return 'border-emerald-500/40 bg-slate-900/90';
+      case 'Monster':
+        return 'border-rose-500/40 bg-slate-900/90';
+      case 'Boss':
+        return 'border-purple-500/50 bg-slate-900/90';
+      case 'Custom':
+        return 'border-amber-500/40 bg-slate-900/90';
+      default:
+        return 'border-slate-700 bg-slate-900/90';
+    }
+  };
+
+  const getRoleBadgeStyle = (role: RosterRole) => {
+    switch (role) {
+      case 'PC':
+        return 'bg-sky-500/20 border-sky-500/50 text-sky-400';
+      case 'Ally':
+        return 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400';
+      case 'Monster':
+        return 'bg-rose-500/20 border-rose-500/50 text-rose-400';
+      case 'Boss':
+        return 'bg-purple-600/30 border-purple-400/60 text-purple-300 font-bold';
+      case 'Custom':
+        return 'bg-amber-500/20 border-amber-500/50 text-amber-300';
+      default:
+        return 'bg-slate-800 border-slate-700 text-slate-300';
+    }
+  };
+
+  const renderRoleIcon = (role: RosterRole) => {
+    switch (role) {
+      case 'PC':
+        return <User className="w-2.5 h-2.5" />;
+      case 'Ally':
+        return <Users className="w-2.5 h-2.5" />;
+      case 'Monster':
+        return <Skull className="w-2.5 h-2.5 text-rose-400" />;
+      case 'Boss':
+        return <Crown className="w-2.5 h-2.5 text-purple-300" />;
+      case 'Custom':
+        return <Layers className="w-2.5 h-2.5 text-amber-400" />;
+    }
+  };
 
   return (
     <div className="shrink-0 bg-slate-900/90 border border-slate-800 rounded-lg overflow-hidden transition-all shadow-sm">
@@ -151,10 +262,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
             type="button"
             onClick={() => {
               if (!isOpen) setIsOpen(true);
-              setIsAddFormOpen(!isAddFormOpen);
+              handleOpenAdd();
             }}
             className="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-400/50 flex items-center gap-1 transition cursor-pointer"
-            title="Add persistent PC or Ally to local roster"
+            title="Add persistent character to local roster"
           >
             <Plus className="w-3 h-3 stroke-[2.5]" />
             <span>Add Character</span>
@@ -165,132 +276,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
       {/* Expanded Drawer Content */}
       {isOpen && (
         <div className="p-2 space-y-2 bg-[#0b0f17]/90 animate-fadeIn">
-          {/* Add Character Form (Collapsible) */}
-          {isAddFormOpen && (
-            <form
-              onSubmit={handleCreateMember}
-              className="p-2.5 rounded-lg bg-slate-900 border border-amber-500/40 space-y-2 text-xs shadow-md animate-fadeIn"
-            >
-              <div className="flex items-center justify-between pb-1 border-b border-slate-800">
-                <span className="font-bold text-amber-300 text-[11px] font-display flex items-center gap-1">
-                  <User className="w-3 h-3 text-amber-400" />
-                  <span>Add Character to Local Roster</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsAddFormOpen(false)}
-                  className="text-slate-400 hover:text-slate-200 p-0.5 rounded cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <label className="text-[10px] text-slate-400 font-semibold block mb-0.5">
-                    Character Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="e.g. Valerius, Jack (Familiar)"
-                    className="w-full px-2 py-1 text-xs rounded bg-slate-950 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                    required
-                    autoFocus
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] text-slate-400 font-semibold block mb-0.5">
-                    Role
-                  </label>
-                  <div className="grid grid-cols-2 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setNewRole('PC')}
-                      className={`py-1 text-[10px] font-bold rounded border transition cursor-pointer ${
-                        newRole === 'PC'
-                          ? 'bg-sky-500 text-slate-950 border-sky-400'
-                          : 'bg-slate-950 text-slate-400 border-slate-800'
-                      }`}
-                    >
-                      PC
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewRole('Ally')}
-                      className={`py-1 text-[10px] font-bold rounded border transition cursor-pointer ${
-                        newRole === 'Ally'
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                          : 'bg-slate-950 text-slate-400 border-slate-800'
-                      }`}
-                    >
-                      Ally
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-[10px] text-slate-400 font-semibold block mb-0.5">
-                    AC
-                  </label>
-                  <input
-                    type="number"
-                    value={newAc}
-                    onChange={(e) => setNewAc(parseInt(e.target.value, 10) || 10)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-cyan-300 text-center focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-400 font-semibold block mb-0.5">
-                    Max HP
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newMaxHp}
-                    onChange={(e) => setNewMaxHp(parseInt(e.target.value, 10) || 1)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-rose-300 text-center focus:outline-none focus:border-rose-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-400 font-semibold block mb-0.5">
-                    Init Mod
-                  </label>
-                  <input
-                    type="number"
-                    value={newInitMod}
-                    onChange={(e) => setNewInitMod(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-amber-300 text-center focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-1.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setIsAddFormOpen(false)}
-                  className="px-2.5 py-1 text-[11px] rounded bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1 text-[11px] font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 shadow cursor-pointer"
-                >
-                  Save to Roster
-                </button>
-              </div>
-            </form>
-          )}
-
           {/* Roster Cards List */}
           {roster.length === 0 ? (
             <div className="text-center p-3 text-slate-500 text-[11px] italic bg-slate-950/50 rounded border border-slate-800/80">
-              No saved characters in roster. Click "+ Add Character" to save persistent PCs or allies.
+              No saved characters in roster. Click "+ Add Character" to save persistent characters.
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -300,23 +289,20 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                 return (
                   <div
                     key={member.id}
-                    className={`p-2 rounded-lg border transition flex flex-col justify-between gap-1.5 ${
-                      member.role === 'PC'
-                        ? 'border-sky-500/40 bg-slate-900/90'
-                        : 'border-emerald-500/40 bg-slate-900/90'
-                    }`}
+                    className={`p-2 rounded-lg border transition flex flex-col justify-between gap-1.5 ${getRoleCardStyle(
+                      member.role
+                    )}`}
                   >
-                    {/* Top Row: Name & Role Badge */}
+                    {/* Top Row: Name, Role Badge, Edit & Delete Buttons */}
                     <div className="flex items-center justify-between gap-1 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
-                          className={`px-1 py-0.2 rounded text-[9px] font-bold border uppercase shrink-0 ${
-                            member.role === 'PC'
-                              ? 'bg-sky-500/20 border-sky-500/50 text-sky-400'
-                              : 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                          }`}
+                          className={`px-1 py-0.2 rounded text-[9px] font-bold border uppercase shrink-0 flex items-center gap-0.5 ${getRoleBadgeStyle(
+                            member.role
+                          )}`}
                         >
-                          {member.role}
+                          {renderRoleIcon(member.role)}
+                          <span>{member.role}</span>
                         </span>
                         <span
                           className="font-bold text-xs text-slate-100 truncate"
@@ -326,15 +312,28 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                         </span>
                       </div>
 
-                      {/* Delete from local roster */}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteMember(member.id, member.name)}
-                        className="text-slate-500 hover:text-rose-400 p-0.5 rounded hover:bg-slate-800 transition cursor-pointer shrink-0"
-                        title="Remove from roster"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      {/* Action Icons: Edit & Delete */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenEdit(member, e)}
+                          className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
+                          title={`Edit ${member.name}`}
+                          aria-label={`Edit ${member.name}`}
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-slate-400 hover:text-amber-400 cursor-pointer" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteMember(member.id, member.name, e)}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                          title="Remove from roster"
+                          aria-label={`Remove ${member.name} from roster`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Stats Strip: AC, Max HP, Initiative Mod */}
@@ -356,7 +355,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                       </span>
                     </div>
 
-                    {/* Actions Strip */}
+                    {/* Actions Strip: Active state indicator & Join Combat */}
                     <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 gap-1.5">
                       {isActive ? (
                         <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 font-mono text-[9px] font-bold flex items-center gap-1">
@@ -386,6 +385,15 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
           )}
         </div>
       )}
+
+      {/* Add / Edit Character Modal */}
+      <AddRosterModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleSaveMember}
+        initialMember={editingMember}
+        isDm={isDm}
+      />
     </div>
   );
 };

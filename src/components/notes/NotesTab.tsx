@@ -629,6 +629,24 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     saveDmNotes(updated);
   };
 
+  const handleExpandAllDmNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      dmNotes.forEach((n) => next.add(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [dmNotes]);
+
+  const handleCollapseAllDmNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      dmNotes.forEach((n) => next.delete(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [dmNotes]);
+
   // Atomic 1-Click Broadcast Teardown
   const handleStopBroadcast = async () => {
     setActiveBroadcast(null);
@@ -879,6 +897,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             onSaveDmNote={handleSaveDmNote}
             onDeleteDmNote={handleDeleteDmNote}
             onToggleReveal={handleToggleRevealDmNote}
+            onExpandAll={handleExpandAllDmNotes}
+            onCollapseAll={handleCollapseAllDmNotes}
           />
         </div>
       )}

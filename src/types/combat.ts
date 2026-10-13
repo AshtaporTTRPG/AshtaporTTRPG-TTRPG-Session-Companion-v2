@@ -34,10 +34,12 @@ export interface TokenFocusEvent {
   combatantName: string;
 }
 
+export type RosterRole = 'PC' | 'Ally' | 'Monster' | 'Boss' | 'Custom';
+
 export interface RosterMember {
   id: string;
   name: string;
-  role: 'PC' | 'Ally';
+  role: RosterRole;
   ac: number;
   maxHp: number;
   initiativeMod: number;

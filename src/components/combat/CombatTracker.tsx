@@ -1512,10 +1512,32 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     liveFeedSync.recordDiceRoll(rollResult, true);
 
+    const memberType: CombatantType =
+      member.role === 'PC'
+        ? 'player'
+        : member.role === 'Ally'
+        ? 'ally'
+        : member.role === 'Monster'
+        ? 'monster'
+        : member.role === 'Boss'
+        ? 'boss'
+        : 'custom';
+
+    const memberRoleStr =
+      member.role === 'PC'
+        ? 'Player'
+        : member.role === 'Ally'
+        ? 'Ally'
+        : member.role === 'Monster'
+        ? 'Monster'
+        : member.role === 'Boss'
+        ? 'Boss'
+        : 'Custom';
+
     await handleAddCombatant({
       name: member.name,
-      role: member.role === 'PC' ? 'Player' : 'Ally',
-      type: member.role === 'PC' ? 'player' : 'ally',
+      role: memberRoleStr,
+      type: memberType,
       ac: member.ac,
       armorClass: member.ac,
       hp: member.maxHp,
@@ -1527,9 +1549,44 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       initiative: rollResult.total,
       conditions: [],
       hidden: false,
-      maskStats: false,
+      maskStats: isDm && (member.role === 'Monster' || member.role === 'Boss'),
       isReserve: false,
     });
+  };
+
+  // SYNC ROSTER MEMBER EDIT TO ACTIVE TABLE TRACKER
+  const handleSyncRosterMemberStats = async (member: RosterMember) => {
+    const matching = combatants.find(
+      (c) => c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+    );
+    if (!matching) return;
+
+    const newMax = member.maxHp;
+    const newAc = member.ac;
+    const updated = combatants.map((c) => {
+      if (c.id === matching.id) {
+        const newHp = Math.min(c.hpCurrent ?? c.hp ?? newMax, newMax);
+        return {
+          ...c,
+          ac: newAc,
+          armorClass: newAc,
+          maxHp: newMax,
+          hpMax: newMax,
+          hpCurrent: newHp,
+          hp: newHp,
+          updatedAt: Date.now(),
+        };
+      }
+      return c;
+    });
+
+    setCombatants(updated);
+    localCombatantsRef.current = updated;
+    await broadcastCombat(updated, activeTurnIndex, round, activeCombatantId, combatStatus);
+    liveFeedSync.recordCombatLog(
+      `🔄 Synced ${member.name} from roster (AC ${newAc}, Max HP ${newMax}).`,
+      true
+    );
   };
 
   // Combatant render pipeline:
@@ -1650,6 +1707,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           onJoinCombat={handleJoinCombatFromRoster}
           isDm={isDm}
           playerName={playerName}
+          onUpdateActiveCombatantStats={handleSyncRosterMemberStats}
         />
       </div>
 

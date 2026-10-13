@@ -9,6 +9,8 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
+  ChevronsDownUp,
   Radio,
   X,
   Copy,
@@ -22,6 +24,8 @@ interface DmNotesVaultProps {
   onSaveDmNote: (note: DmSecretNote) => void;
   onDeleteDmNote: (id: string) => void;
   onToggleReveal: (note: DmSecretNote) => void;
+  onExpandAll?: () => void;
+  onCollapseAll?: () => void;
 }
 
 export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
@@ -30,6 +34,8 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
   onSaveDmNote,
   onDeleteDmNote,
   onToggleReveal,
+  onExpandAll: externalExpandAll,
+  onCollapseAll: externalCollapseAll,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedNotes, setCollapsedNotes] = useState<Record<string, boolean>>(() => {
@@ -62,6 +68,30 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
     if (!activeBroadcast) return null;
     return dmNotes.find((n) => n.id === activeBroadcast.id) || null;
   }, [dmNotes, activeBroadcast]);
+
+  const handleCreateDmNote = () => {
+    handleOpenCreate();
+  };
+
+  const handleExpandAll = () => {
+    setCollapsedNotes({});
+    try {
+      localStorage.setItem('ashtapor_dm_notes_collapsed_v1', JSON.stringify({}));
+    } catch {}
+    if (externalExpandAll) externalExpandAll();
+  };
+
+  const handleCollapseAll = () => {
+    const allCollapsed: Record<string, boolean> = {};
+    dmNotes.forEach((n) => {
+      allCollapsed[n.id] = true;
+    });
+    setCollapsedNotes(allCollapsed);
+    try {
+      localStorage.setItem('ashtapor_dm_notes_collapsed_v1', JSON.stringify(allCollapsed));
+    } catch {}
+    if (externalCollapseAll) externalCollapseAll();
+  };
 
   const handleOpenCreate = () => {
     setEditingNote(null);
@@ -141,14 +171,34 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-          <span>New Note</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleExpandAll}
+            title="Expand All"
+            aria-label="Expand All"
+            className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 transition cursor-pointer flex items-center justify-center"
+          >
+            <ChevronsUpDown className="w-4 h-4 text-slate-400 hover:text-slate-200 cursor-pointer" />
+          </button>
+          <button
+            type="button"
+            onClick={handleCollapseAll}
+            title="Collapse All"
+            aria-label="Collapse All"
+            className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 transition cursor-pointer flex items-center justify-center"
+          >
+            <ChevronsDownUp className="w-4 h-4 text-slate-400 hover:text-slate-200 cursor-pointer" />
+          </button>
+          <button
+            type="button"
+            onClick={handleCreateDmNote}
+            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0"
+            title="New Secret Note"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Search Bar if multiple notes */}

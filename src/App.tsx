@@ -9,7 +9,7 @@ import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X } from 'lucide-r
 import { isAudioEnabled, toggleAudio } from './utils/audio';
 import { CombatTracker } from './components/combat/CombatTracker';
 import { DiceChamber } from './components/DiceChamber';
-import { GeometryCalculator } from './components/GeometryCalculator';
+import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
 import { liveFeedSync } from './utils/liveFeedSync';
@@ -401,7 +401,7 @@ export default function App() {
           <DiceChamber isDm={isGM} playerName={playerName} />
         </div>
         <div className={activeTab === 'range' || (activeTab as string) === 'geometry' ? 'flex flex-col h-full' : 'hidden'}>
-          <GeometryCalculator />
+          <RangeTab />
         </div>
         <div className={activeTab === 'grimoire' ? 'flex flex-col h-full' : 'hidden'}>
           <Grimoire isDm={isGM} />

@@ -266,24 +266,68 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  // ROLL CUSTOM MACRO
+  // ROLL CUSTOM MACRO (Sandboxed execution: completely isolates macro from staged pool/modifier/mode)
   const handleRollMacro = (macro: CustomMacro, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const mode = macro.advantageMode || 'normal';
-
-    if (modifier !== 0) {
-      const { formula: combinedFormula, combinedModifier } = combineFormulaWithModifier(
-        macro.formula,
-        modifier
-      );
-      setFormulaInput(combinedFormula);
-      handleExecuteRoll(combinedFormula, mode, combinedModifier);
-    } else {
-      setFormulaInput(macro.formula);
-      handleExecuteRoll(macro.formula, mode, macro.modifier ?? 0);
+    // Map advantage/rollMode strictly from the macro
+    let activeAdvMode: 'normal' | 'advantage' | 'disadvantage' = 'normal';
+    const rawMode = (macro as any).rollMode || macro.advantageMode;
+    if (rawMode === 'advantage' || rawMode === 'Adv' || rawMode === 'adv') {
+      activeAdvMode = 'advantage';
+    } else if (rawMode === 'disadvantage' || rawMode === 'Dis' || rawMode === 'dis') {
+      activeAdvMode = 'disadvantage';
     }
+
+    const expr = macro.formula.trim();
+    if (!expr) return;
+
+    const currentUserId = liveFeedSync.getPlayerId();
+    const parsed = parseDiceFormula(expr);
+
+    // Strictly prioritize macro.modifier if defined, otherwise the parsed modifier from macro formula, otherwise 0
+    const finalMacroModifier =
+      macro.modifier !== undefined && macro.modifier !== null
+        ? macro.modifier
+        : parsed
+        ? parsed.modifier
+        : 0;
+
+    if (!parsed) {
+      // Fallback: roll 1d20 with the macro's isolated modifier
+      const fallback = executeDiceRoll({
+        diceType: 'd20',
+        count: 1,
+        advantageMode: activeAdvMode,
+        displayMode: 'sum',
+        modifier: finalMacroModifier,
+        sender: rollerName,
+        rollerName,
+        rollerId: currentUserId,
+        isDm,
+        visibility,
+        label: macro.name || expr,
+      });
+      liveFeedSync.recordDiceRoll(fallback, true);
+      return;
+    }
+
+    // Execute isolated roll using macro's formula pool and modifier
+    const result = executeDiceRoll({
+      pool: parsed.pool,
+      modifier: finalMacroModifier,
+      advantageMode: activeAdvMode,
+      displayMode: 'sum',
+      sender: rollerName,
+      rollerName,
+      rollerId: currentUserId,
+      isDm,
+      visibility,
+      label: macro.name || expr,
+    });
+
+    liveFeedSync.recordDiceRoll(result, true);
   };
 
   // MACRO MODAL CONTROLS
