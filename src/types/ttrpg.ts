@@ -54,6 +54,7 @@ export interface Combatant {
   maskStats?: boolean; // Mask Stats: HP, AC and exact damage numbers hidden from players
   isSecret?: boolean; // Secret Boss / NPC marker (completely hidden from player initiative until revealed)
   isReserve?: boolean; // Reserve / Stage: Reinforcements hidden from player roster until deployed
+  isReserved?: boolean; // Reinforcements staged/reserved alias
   sortOrder?: number; // GM manual sorting priority order
   updatedAt?: number; // State modification timestamp to prevent desync
   tokenId?: string; // Linked Owlbear Rodeo scene token ID for lightweight token focus
@@ -80,7 +81,9 @@ export function getEffectiveAc(combatant: Combatant): { effectiveAc: number; bon
     } else if (
       name.includes('+5 AC') ||
       name.toLowerCase().includes('shield spell') ||
-      name.toLowerCase().includes('three-quarters cover')
+      name.toLowerCase().includes('three-quarters cover') ||
+      name.toLowerCase().trim() === 'shield' ||
+      name.toLowerCase().startsWith('shield (')
     ) {
       bonus += 5;
     }

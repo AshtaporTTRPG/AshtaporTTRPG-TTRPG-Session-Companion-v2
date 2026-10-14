@@ -24,7 +24,9 @@ import {
   Layers,
   Clock,
   Shield,
+  Plus,
 } from 'lucide-react';
+import { ConditionPicker } from './ConditionPicker';
 
 export interface CombatantRowProps {
   combatant: Combatant;
@@ -48,6 +50,7 @@ export interface CombatantRowProps {
   onDeleteCombatant?: (combatantId: string) => void;
   onSaveThp?: (combatantId: string, thp: number) => void;
   onRemoveCondition?: (combatantId: string, condIdOrName: string) => void;
+  onAddCondition?: (combatantId: string, conditionText: string) => void;
   concentrationAlert?: { dc: number; expiresAt: number };
   inlineThpId?: string | null;
   setInlineThpId?: (id: string | null) => void;
@@ -75,36 +78,32 @@ const normalizeCondition = (c: any): CustomCondition => {
 };
 
 const getConditionBadgeStyle = (name: string): string => {
-  if (name.includes('+2 AC')) return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300 font-bold';
-  if (name.includes('+5 AC')) return 'bg-blue-950/90 border-blue-500/80 text-blue-300 font-bold';
-  switch (name) {
-    case 'Concentration':
-      return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300';
-    case 'Poisoned':
-      return 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300';
-    case 'Prone':
-      return 'bg-amber-950/90 border-amber-500/80 text-amber-300';
-    case 'Blinded':
-    case 'Deafened':
-      return 'bg-slate-800 border-slate-600 text-slate-300';
-    case 'Charmed':
-    case 'Frightened':
-      return 'bg-purple-950/90 border-purple-500/80 text-purple-300';
-    case 'Paralyzed':
-    case 'Petrified':
-    case 'Stunned':
-    case 'Incapacitated':
-      return 'bg-yellow-950/90 border-yellow-500/80 text-yellow-300';
-    case 'Grappled':
-    case 'Restrained':
-      return 'bg-blue-950/90 border-blue-500/80 text-blue-300';
-    case 'Unconscious':
-      return 'bg-rose-950/90 border-rose-600/80 text-rose-300';
-    case 'Exhaustion':
-      return 'bg-orange-950/90 border-orange-500/80 text-orange-300';
-    default:
-      return 'bg-slate-800 border-slate-700 text-slate-300';
+  const lower = (name || '').toLowerCase().trim();
+  if (name.includes('+2 AC') || lower.includes('half cover') || lower.includes('shield of faith')) {
+    return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300 font-bold';
   }
+  if (name.includes('+5 AC') || lower.startsWith('shield')) {
+    return 'bg-blue-950/90 border-blue-500/80 text-blue-300 font-bold';
+  }
+  if (lower.startsWith('concentration')) return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300';
+  if (lower.startsWith('poisoned')) return 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300';
+  if (lower.startsWith('prone')) return 'bg-amber-950/90 border-amber-500/80 text-amber-300';
+  if (lower.startsWith('blinded') || lower.startsWith('deafened')) return 'bg-slate-800 border-slate-600 text-slate-300';
+  if (lower.startsWith('charmed') || lower.startsWith('frightened')) return 'bg-purple-950/90 border-purple-500/80 text-purple-300';
+  if (
+    lower.startsWith('paralyzed') ||
+    lower.startsWith('petrified') ||
+    lower.startsWith('stunned') ||
+    lower.startsWith('incapacitated')
+  ) {
+    return 'bg-yellow-950/90 border-yellow-500/80 text-yellow-300';
+  }
+  if (lower.startsWith('grappled') || lower.startsWith('restrained')) return 'bg-blue-950/90 border-blue-500/80 text-blue-300';
+  if (lower.startsWith('unconscious')) return 'bg-rose-950/90 border-rose-600/80 text-rose-300';
+  if (lower.startsWith('exhaustion')) return 'bg-orange-950/90 border-orange-500/80 text-orange-300';
+  if (lower.startsWith('bless')) return 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300';
+  if (lower.startsWith('bane')) return 'bg-violet-950/90 border-violet-500/80 text-violet-300';
+  return 'bg-slate-800 border-slate-700 text-slate-300';
 };
 
 const ROLE_CONFIG: Record<
@@ -165,6 +164,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   onDeleteCombatant,
   onSaveThp,
   onRemoveCondition,
+  onAddCondition,
   concentrationAlert,
   inlineThpId,
   setInlineThpId,
@@ -202,6 +202,11 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   const [maxHpInput, setMaxHpInput] = useState<string>(combatant.hpMax.toString());
   const hpPopoverRef = useRef<HTMLDivElement>(null);
   const hpButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Freeform Condition Popover State
+  const [isConditionPickerOpen, setIsConditionPickerOpen] = useState<boolean>(false);
+  const conditionPickerRef = useRef<HTMLDivElement>(null);
+  const conditionTriggerRef = useRef<HTMLButtonElement>(null);
 
   const [localConcentrationAlert, setLocalConcentrationAlert] = useState<{
     dc: number;
@@ -241,6 +246,40 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [isHpPopoverOpen]);
+
+  useEffect(() => {
+    if (!isConditionPickerOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsConditionPickerOpen(false);
+      }
+    };
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        conditionPickerRef.current &&
+        !conditionPickerRef.current.contains(e.target as Node) &&
+        conditionTriggerRef.current &&
+        !conditionTriggerRef.current.contains(e.target as Node)
+      ) {
+        setIsConditionPickerOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isConditionPickerOpen]);
+
+  const handleRemoveCondition = (conditionText: string) => {
+    if (onRemoveCondition) {
+      onRemoveCondition(combatant.id, conditionText);
+    }
+  };
 
   const handleApplyDamage = () => {
     if (!canEdit) return;
@@ -805,21 +844,15 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
             </div>
           </div>
 
-          {/* Active Conditions Row */}
-          {visibleConditions.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-slate-800/60">
+          {/* Active Conditions Row & Freeform Condition Quick-Fill Trigger */}
+          {(visibleConditions.length > 0 || (canEdit && onAddCondition)) && (
+            <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-slate-800/60 relative">
               {visibleConditions.map((cond) => {
                 const hasTiming = cond.timing === 'start' || cond.timing === 'end';
                 return (
                   <span
                     key={cond.id || cond.name}
-                    onClick={(e) => {
-                      if (canEdit && onRemoveCondition) {
-                        e.stopPropagation();
-                        onRemoveCondition(combatant.id, cond.id || cond.name);
-                      }
-                    }}
-                    className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0 transition ${getConditionBadgeStyle(
+                    className={`text-[10px] bg-slate-800 text-slate-200 border border-slate-700 px-1.5 py-0.5 rounded-md flex items-center gap-1 font-medium ${getConditionBadgeStyle(
                       cond.name
                     )} ${
                       hasTiming && isActive ? 'ring-1 ring-amber-400/80 animate-pulse' : ''
@@ -827,8 +860,8 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       cond.isSecret
                         ? 'border-dashed border-rose-500/90 bg-rose-950/80 text-rose-300'
                         : ''
-                    } ${canEdit ? 'cursor-pointer hover:opacity-80' : ''}`}
-                    title={`${cond.name}${hasTiming ? ` (Timing: ${cond.timing})` : ''}${canEdit ? ' (click to remove)' : ''}`}
+                    }`}
+                    title={`${cond.name}${hasTiming ? ` (Timing: ${cond.timing})` : ''}`}
                   >
                     {cond.isSecret && <EyeOff className="w-2.5 h-2.5 text-rose-400" />}
                     <span>{cond.name}</span>
@@ -837,10 +870,63 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                         ⏱ {cond.timing === 'start' ? 'Start' : 'End'}
                       </span>
                     )}
-                    {canEdit && <X className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveCondition(cond.name);
+                        }}
+                        className="text-slate-400 hover:text-rose-400 font-bold ml-0.5 cursor-pointer leading-none"
+                        title={`Remove ${cond.name}`}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </span>
                 );
               })}
+
+              {/* Freeform Condition Quick-Fill Trigger */}
+              {canEdit && onAddCondition && (
+                <div className="relative">
+                  <button
+                    ref={conditionTriggerRef}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsConditionPickerOpen((prev) => !prev);
+                    }}
+                    className="text-[10px] bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-amber-600/50 hover:border-amber-500/80 px-1.5 py-0.5 rounded-md flex items-center gap-1 font-semibold transition cursor-pointer"
+                    title="Add Condition (Freeform & Presets)"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    <span>Condition</span>
+                  </button>
+
+                  {/* Popover */}
+                  {isConditionPickerOpen && (
+                    <div
+                      ref={conditionPickerRef}
+                      className="absolute left-0 top-full mt-1.5 bg-slate-950 border border-slate-700/90 rounded-lg shadow-2xl p-2.5 z-50 min-w-[270px] max-w-[320px] text-xs text-slate-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ConditionPicker
+                        title={`Conditions: ${combatant.name}`}
+                        onApplyCondition={(text) => {
+                          if (onAddCondition) {
+                            onAddCondition(combatant.id, text);
+                          }
+                          setIsConditionPickerOpen(false);
+                        }}
+                        onClose={() => setIsConditionPickerOpen(false)}
+                        activeConditions={visibleConditions.map((c) => c.name)}
+                        isDm={isDm}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

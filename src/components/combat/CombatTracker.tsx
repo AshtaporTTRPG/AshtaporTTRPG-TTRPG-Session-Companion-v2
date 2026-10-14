@@ -56,8 +56,21 @@ import { AddCombatantModal, NewCombatantData } from './AddCombatantModal';
 import { MyRosterDrawer } from './MyRosterDrawer';
 import { ResetCombatModal } from './ResetCombatModal';
 import { CombatFeedDrawer } from './CombatFeedDrawer';
+import { ConditionPicker } from './ConditionPicker';
 
 export { ROOM_METADATA_KEY, COMBAT_STATE_KEY, ROSTER_METADATA_KEY, TURN_METADATA_KEY, FEED_METADATA_KEY } from '../../types/combat';
+
+export const getDeterministicSortedCombatants = (combatants: Combatant[]): Combatant[] => {
+  return [...combatants]
+    .filter((c) => !c.isReserved && !c.isReserve) // Exclude staged reinforcements
+    .sort((a, b) => {
+      if (b.initiative !== a.initiative) {
+        return b.initiative - a.initiative;
+      }
+      // Deterministic secondary sort by immutable ID guarantees exact order
+      return a.id.localeCompare(b.id);
+    });
+};
 
 interface CombatTrackerProps {
   isDm: boolean;
@@ -86,36 +99,32 @@ const CONDITIONS_LIST: (Condition | string)[] = [
 ];
 
 const getConditionBadgeStyle = (name: string): string => {
-  if (name.includes('+2 AC')) return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300 font-bold';
-  if (name.includes('+5 AC')) return 'bg-blue-950/90 border-blue-500/80 text-blue-300 font-bold';
-  switch (name) {
-    case 'Concentration':
-      return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300';
-    case 'Poisoned':
-      return 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300';
-    case 'Prone':
-      return 'bg-amber-950/90 border-amber-500/80 text-amber-300';
-    case 'Blinded':
-    case 'Deafened':
-      return 'bg-slate-800 border-slate-600 text-slate-300';
-    case 'Charmed':
-    case 'Frightened':
-      return 'bg-purple-950/90 border-purple-500/80 text-purple-300';
-    case 'Paralyzed':
-    case 'Petrified':
-    case 'Stunned':
-    case 'Incapacitated':
-      return 'bg-yellow-950/90 border-yellow-500/80 text-yellow-300';
-    case 'Grappled':
-    case 'Restrained':
-      return 'bg-blue-950/90 border-blue-500/80 text-blue-300';
-    case 'Unconscious':
-      return 'bg-rose-950/90 border-rose-600/80 text-rose-300';
-    case 'Exhaustion':
-      return 'bg-orange-950/90 border-orange-500/80 text-orange-300';
-    default:
-      return 'bg-slate-800 border-slate-700 text-slate-300';
+  const lower = (name || '').toLowerCase().trim();
+  if (name.includes('+2 AC') || lower.includes('half cover') || lower.includes('shield of faith')) {
+    return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300 font-bold';
   }
+  if (name.includes('+5 AC') || lower.startsWith('shield')) {
+    return 'bg-blue-950/90 border-blue-500/80 text-blue-300 font-bold';
+  }
+  if (lower.startsWith('concentration')) return 'bg-cyan-950/90 border-cyan-500/80 text-cyan-300';
+  if (lower.startsWith('poisoned')) return 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300';
+  if (lower.startsWith('prone')) return 'bg-amber-950/90 border-amber-500/80 text-amber-300';
+  if (lower.startsWith('blinded') || lower.startsWith('deafened')) return 'bg-slate-800 border-slate-600 text-slate-300';
+  if (lower.startsWith('charmed') || lower.startsWith('frightened')) return 'bg-purple-950/90 border-purple-500/80 text-purple-300';
+  if (
+    lower.startsWith('paralyzed') ||
+    lower.startsWith('petrified') ||
+    lower.startsWith('stunned') ||
+    lower.startsWith('incapacitated')
+  ) {
+    return 'bg-yellow-950/90 border-yellow-500/80 text-yellow-300';
+  }
+  if (lower.startsWith('grappled') || lower.startsWith('restrained')) return 'bg-blue-950/90 border-blue-500/80 text-blue-300';
+  if (lower.startsWith('unconscious')) return 'bg-rose-950/90 border-rose-600/80 text-rose-300';
+  if (lower.startsWith('exhaustion')) return 'bg-orange-950/90 border-orange-500/80 text-orange-300';
+  if (lower.startsWith('bless')) return 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300';
+  if (lower.startsWith('bane')) return 'bg-violet-950/90 border-violet-500/80 text-violet-300';
+  return 'bg-slate-800 border-slate-700 text-slate-300';
 };
 
 export const normalizeCondition = (c: any): CustomCondition => {
@@ -377,6 +386,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   // Inflight turn change lock
   const [isTurnUpdating, setIsTurnUpdating] = useState<boolean>(false);
   const lastTurnChangeTimeRef = useRef<number>(Date.now());
+  const localTurnSeqRef = useRef<number>(0);
 
   const localCombatantsRef = useRef<Combatant[]>(combatants);
   useEffect(() => {
@@ -424,7 +434,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       return;
     }
 
-    const sorted = sortInitiativeStrictDescending(combatants);
+    const sorted = getDeterministicSortedCombatants(combatants);
+    if (sorted.length === 0) {
+      if (activeCombatantId !== null) setActiveCombatantId(null);
+      if (activeTurnIndex !== 0) setActiveTurnIndex(0);
+      return;
+    }
 
     if (activeCombatantId) {
       const foundIdx = sorted.findIndex((c) => c.id === activeCombatantId);
@@ -504,14 +519,35 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     // 1. Process ashtapor/turn partitioned stream
     const turnPayload = metadata[TURN_METADATA_KEY] as TurnMetadataPayload | undefined;
     if (turnPayload) {
-      if (turnPayload.activeCombatantId !== undefined) {
-        setActiveCombatantId(turnPayload.activeCombatantId);
-      }
-      if (typeof turnPayload.currentRound === 'number') {
-        setRound(turnPayload.currentRound);
-      }
-      if (typeof turnPayload.currentTurnIndex === 'number') {
-        setActiveTurnIndex(turnPayload.currentTurnIndex);
+      const incomingTurnSeq = typeof turnPayload.turnSeq === 'number' ? turnPayload.turnSeq : undefined;
+      // Stale Echo Inbound Filtering:
+      // If incoming.turnSeq <= localTurnSeqRef.current, DISCARD THE PACKET.
+      if (incomingTurnSeq !== undefined) {
+        if (incomingTurnSeq <= localTurnSeqRef.current) {
+          // DISCARD THE PACKET. Do not update local turn state.
+        } else {
+          localTurnSeqRef.current = incomingTurnSeq;
+          if (turnPayload.activeCombatantId !== undefined) {
+            setActiveCombatantId(turnPayload.activeCombatantId);
+          }
+          if (typeof turnPayload.currentRound === 'number') {
+            setRound(turnPayload.currentRound);
+          }
+          if (typeof turnPayload.currentTurnIndex === 'number') {
+            setActiveTurnIndex(turnPayload.currentTurnIndex);
+          }
+        }
+      } else {
+        // Fallback for legacy rooms without turnSeq
+        if (turnPayload.activeCombatantId !== undefined) {
+          setActiveCombatantId(turnPayload.activeCombatantId);
+        }
+        if (typeof turnPayload.currentRound === 'number') {
+          setRound(turnPayload.currentRound);
+        }
+        if (typeof turnPayload.currentTurnIndex === 'number') {
+          setActiveTurnIndex(turnPayload.currentTurnIndex);
+        }
       }
     }
 
@@ -527,6 +563,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (incomingEpoch && incomingEpoch > encounterIdRef.current) {
         encounterIdRef.current = incomingEpoch;
         setEncounterId(incomingEpoch);
+        localTurnSeqRef.current = 0;
         try {
           localStorage.setItem('ashtapor_encounter_id', incomingEpoch);
         } catch {}
@@ -655,9 +692,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const broadcastTurn = async (
     updatedTurnIndex: number,
     updatedRound: number,
-    updatedActiveCombatantId: string | null
+    updatedActiveCombatantId: string | null,
+    turnSeqToBroadcast?: number
   ) => {
     if (!OBR.isReady) return;
+    const seq = turnSeqToBroadcast ?? localTurnSeqRef.current;
     try {
       await OBR.room.setMetadata({
         [TURN_METADATA_KEY]: {
@@ -665,6 +704,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           activeCombatantId: updatedActiveCombatantId,
           currentRound: updatedRound,
           currentTurnIndex: updatedTurnIndex,
+          turnSeq: seq,
         },
       });
     } catch (e) {
@@ -715,8 +755,12 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const now = Date.now();
     lastTurnChangeTimeRef.current = now;
 
-    // Filter active, non-reserve combatants descending by initiative
-    const sorted = sortInitiativeStrictDescending(combatants);
+    // Filter active, non-reserve combatants descending by initiative with deterministic tie-breaker
+    const sorted = getDeterministicSortedCombatants(combatants);
+    if (sorted.length === 0) {
+      setIsTurnUpdating(false);
+      return;
+    }
 
     let currentIndex = -1;
     if (activeCombatantId) {
@@ -737,6 +781,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const nextCombatant = sorted[nextIndex];
     const nextActiveId = nextCombatant ? nextCombatant.id : null;
 
+    // Monotonic turn sequence increment
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
+    // Optimistically update local state
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextIndex);
     setRound(nextRound);
@@ -768,7 +817,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     try {
-      await broadcastTurn(nextIndex, nextRound, nextActiveId);
+      await broadcastTurn(nextIndex, nextRound, nextActiveId, nextSeq);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -780,7 +829,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setIsTurnUpdating(true);
     setConcentrationAlerts({});
 
-    const sorted = sortInitiativeStrictDescending(combatants);
+    const sorted = getDeterministicSortedCombatants(combatants);
+    if (sorted.length === 0) {
+      setIsTurnUpdating(false);
+      return;
+    }
     const currentIndex = activeCombatantId
       ? sorted.findIndex((c) => c.id === activeCombatantId)
       : 0;
@@ -803,12 +856,17 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const prevCombatant = sorted[prevIndex];
     const prevActiveId = prevCombatant ? prevCombatant.id : null;
 
+    // Monotonic turn sequence increment
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
+    // Optimistically update local state
     setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
 
     try {
-      await broadcastTurn(prevIndex, prevRound, prevActiveId);
+      await broadcastTurn(prevIndex, prevRound, prevActiveId, nextSeq);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -820,11 +878,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       setIsAddModalOpen(true);
       return;
     }
-    const sorted = sortInitiativeStrictDescending(combatants);
+    const sorted = getDeterministicSortedCombatants(combatants);
+    if (sorted.length === 0) {
+      setIsAddModalOpen(true);
+      return;
+    }
     const first = sorted[0];
     const firstId = first ? first.id : null;
 
-    setCombatants(sorted);
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
+    const strictSorted = sortInitiativeStrictDescending(combatants);
+    setCombatants(strictSorted);
     setActiveTurnIndex(0);
     setActiveCombatantId(firstId);
     setRound(1);
@@ -843,8 +909,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       );
     }
 
-    await broadcastTurn(0, 1, firstId);
-    await broadcastRoster(sorted);
+    await broadcastTurn(0, 1, firstId, nextSeq);
+    await broadcastRoster(strictSorted);
   };
 
   const handleSortInitiative = () => {
@@ -858,10 +924,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (idx !== -1) newIndex = idx;
     }
 
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
     setCombatants(sorted);
     setActiveTurnIndex(newIndex);
     broadcastRoster(sorted);
-    broadcastTurn(newIndex, round, currentActiveId);
+    broadcastTurn(newIndex, round, currentActiveId, nextSeq);
   };
 
   const handleRollInitiative = (combatantId: string) => {
@@ -898,12 +967,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (found !== -1) targetIdx = found;
     }
 
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
     setCombatants(sorted);
     localCombatantsRef.current = sorted;
     setActiveTurnIndex(targetIdx);
     liveFeedSync.recordDiceRoll(rollResult, true);
     broadcastRoster(sorted);
-    broadcastTurn(targetIdx, round, activeCombatantId);
+    broadcastTurn(targetIdx, round, activeCombatantId, nextSeq);
   };
 
   // Smart Reset: Option 1 - Clear Hostiles Only
@@ -921,6 +993,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
     const sortedParty = sortInitiativeStrictDescending(remainingParty);
     const firstPartyId = sortedParty[0]?.id || null;
+
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
 
     setCombatants(sortedParty);
     localCombatantsRef.current = sortedParty;
@@ -958,6 +1033,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             currentTurnIndex: 0,
             currentRound: 1,
             activeCombatantId: firstPartyId,
+            turnSeq: nextSeq,
           },
         });
       } catch (e) {
@@ -971,6 +1047,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const newEncounterId = `enc_${Date.now()}`;
     encounterIdRef.current = newEncounterId;
     setEncounterId(newEncounterId);
+    localTurnSeqRef.current = 0;
     lastLocalClearTimeRef.current = Date.now();
     recentlyAddedIdsRef.current.clear();
     deletionTombstones.current.clear();
@@ -1010,6 +1087,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             currentTurnIndex: 0,
             currentRound: 1,
             activeCombatantId: null,
+            turnSeq: 0,
           },
           [FEED_METADATA_KEY]: {
             items: [
@@ -1497,9 +1575,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       const foundIdx = reordered.findIndex((c) => c.id === activeCombatantId);
       if (foundIdx !== -1) targetActiveIdx = foundIdx;
     }
+
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
     setActiveTurnIndex(targetActiveIdx);
     broadcastRoster(reordered);
-    broadcastTurn(targetActiveIdx, round, activeCombatantId);
+    broadcastTurn(targetActiveIdx, round, activeCombatantId, nextSeq);
   };
 
   const handleDeleteCombatant = (combatantId: string) => {
@@ -1528,10 +1610,13 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (nextActiveIdx === -1) nextActiveIdx = 0;
     }
 
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
     setActiveCombatantId(nextActiveId);
     setActiveTurnIndex(nextActiveIdx);
     broadcastRoster(updated);
-    broadcastTurn(nextActiveIdx, round, nextActiveId);
+    broadcastTurn(nextActiveIdx, round, nextActiveId, nextSeq);
   };
 
   const handleStartEditing = (c: Combatant) => {
@@ -2142,6 +2227,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 onDeployCombatant={handleDeployCombatant}
                 onDeleteCombatant={handleDeleteCombatant}
                 onRemoveCondition={handleRemoveCondition}
+                onAddCondition={(combatantId, conditionText) => handleAddCustomCondition(combatantId, conditionText)}
                 concentrationAlert={concentrationAlerts[c.id]}
                 inlineThpId={inlineThpId}
                 setInlineThpId={setInlineThpId}
@@ -2306,114 +2392,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
                 )}
               </div>
 
-              {/* Custom Condition Open Input with Timing Badges */}
+              {/* Freeform Condition Quick-Fill System */}
               {canEdit && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Add Condition &amp; Timing Reminder
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={conditionInput}
-                      onChange={(e) => setConditionInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAddCustomCondition(menuCombatant.id);
-                        }
-                      }}
-                      placeholder="Type custom condition..."
-                      className="flex-1 px-2 py-1 text-xs rounded-lg bg-neutral-950 border border-neutral-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                    />
-
-                    {/* Timing Selector: None | Start | End */}
-                    <div className="flex items-center rounded border border-neutral-700 bg-neutral-950 p-0.5 text-[9px] font-bold shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setConditionTiming('none')}
-                        className={`px-1.5 py-0.5 rounded transition ${
-                          conditionTiming === 'none'
-                            ? 'bg-neutral-800 text-slate-200'
-                            : 'text-neutral-500 hover:text-neutral-300'
-                        }`}
-                        title="No timing reminder"
-                      >
-                        None
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConditionTiming('start')}
-                        className={`px-1.5 py-0.5 rounded transition ${
-                          conditionTiming === 'start'
-                            ? 'bg-amber-400 text-neutral-950 font-bold'
-                            : 'text-neutral-500 hover:text-neutral-300'
-                        }`}
-                        title="Alert GM at Turn Start"
-                      >
-                        ⏱ Start
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConditionTiming('end')}
-                        className={`px-1.5 py-0.5 rounded transition ${
-                          conditionTiming === 'end'
-                            ? 'bg-sky-400 text-neutral-950 font-bold'
-                            : 'text-neutral-500 hover:text-neutral-300'
-                        }`}
-                        title="Alert GM at Turn End"
-                      >
-                        ⏱ End
-                      </button>
-                    </div>
-
-                    {isDm && (
-                      <label
-                        className="flex items-center gap-1 text-[11px] text-slate-300 shrink-0 cursor-pointer select-none"
-                        title="Secret: GM only (concealed from players)"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={conditionIsSecret}
-                          onChange={(e) => setConditionIsSecret(e.target.checked)}
-                          className="rounded bg-neutral-950 border-neutral-700 text-rose-500 cursor-pointer"
-                        />
-                        <span className="text-[10px] font-bold text-rose-400">Secret</span>
-                      </label>
+                <div className="space-y-1.5 pt-1 border-t border-neutral-800">
+                  <ConditionPicker
+                    title="Add Condition & Timing Reminder"
+                    onApplyCondition={(conditionText) =>
+                      handleAddCustomCondition(menuCombatant.id, conditionText)
+                    }
+                    activeConditions={menuCombatant.conditions.map(
+                      (c) => normalizeCondition(c).name
                     )}
-
-                    <button
-                      type="button"
-                      onClick={() => handleAddCustomCondition(menuCombatant.id)}
-                      className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 cursor-pointer shrink-0 transition"
-                    >
-                      Add
-                    </button>
-                  </div>
-
-                  {/* Quick Suggestion Badges */}
-                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-0.5">
-                    {CONDITIONS_LIST.map((cond) => {
-                      const isAlreadyAdded = menuCombatant.conditions.some(
-                        (item) => normalizeCondition(item).name === cond
-                      );
-                      return (
-                        <button
-                          key={cond}
-                          type="button"
-                          onClick={() => handleAddCustomCondition(menuCombatant.id, cond)}
-                          className={`text-[9px] px-1.5 py-0.5 rounded border transition cursor-pointer ${
-                            isAlreadyAdded
-                              ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
-                              : 'bg-neutral-950 border-neutral-800 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          +{cond}
-                        </button>
-                      );
-                    })}
-                  </div>
-
+                    isDm={isDm}
+                  />
                   {/* Active Conditions in Menu with remove toggle */}
                   {menuCombatant.conditions.length > 0 && (
                     <div className="pt-1.5 border-t border-neutral-800">

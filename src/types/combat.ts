@@ -68,6 +68,7 @@ export interface TurnMetadataPayload {
   encounterId: string;
   activeCombatantId: string | null;
   currentRound: number;
+  turnSeq: number; // Monotonically increasing integer
   currentTurnIndex?: number;
 }
 
