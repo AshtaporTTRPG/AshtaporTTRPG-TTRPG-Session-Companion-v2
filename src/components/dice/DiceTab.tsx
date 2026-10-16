@@ -420,14 +420,17 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[#0b0f17] select-none p-2 gap-2 text-slate-100">
-      {/* 1. ROW 1: 1-TAP QUICK D20 STRIP & VISIBILITY SELECTOR (Consolidated ~28px / h-7) */}
+      {/* 1. ROW 1: QUICK D20 MICRO-LABEL & SANDBOXED ACTIONS + VISIBILITY SELECTOR */}
       <div className="flex items-center justify-between gap-1.5 shrink-0 px-0.5">
-        {/* Left: Quick d20 Strip */}
+        {/* Left: Quick D20 Section */}
         <div className="flex items-center gap-1 shrink-0">
+          <span className="text-[10px] font-black uppercase tracking-wider text-amber-500/80 mr-1 shrink-0 select-none">
+            Quick D20:
+          </span>
           <button
             type="button"
             onClick={() => handleQuickD20Roll('normal')}
-            className="h-7 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-md text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-sm"
+            className="h-7 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-md text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer shadow-sm"
             title="Quick Flat 1d20 Roll"
           >
             <span>🎲</span>
@@ -436,7 +439,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           <button
             type="button"
             onClick={() => handleQuickD20Roll('advantage')}
-            className="h-7 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-md text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-sm"
+            className="h-7 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-md text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer shadow-sm"
             title="Quick Advantage Roll (2d20, Keep Highest)"
           >
             <span>⚔️</span>
@@ -445,7 +448,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           <button
             type="button"
             onClick={() => handleQuickD20Roll('disadvantage')}
-            className="h-7 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-md text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-sm"
+            className="h-7 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-md text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer shadow-sm"
             title="Quick Disadvantage Roll (2d20, Keep Lowest)"
           >
             <span>🛡️</span>
@@ -494,10 +497,10 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         </div>
       </div>
 
-      {/* 2. COMPACT CONTROLS AREA (Formula Bar + Consolidated Staging Toolstrip) */}
+      {/* 2. COMPACT CONTROLS AREA (Formula Bar + Two-Tier Staging & Modifier Toolstrips) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
-        {/* Row 2: Formula Bar & Roll Button */}
-        <div className="relative flex items-center h-8 w-full gap-1.5">
+        {/* Row 2: Formula Bar & Primary Roll Action */}
+        <div className="relative flex items-center h-9 w-full gap-1.5">
           <div className="relative flex-1 h-full flex items-center">
             <input
               type="text"
@@ -510,7 +513,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
                 }
               }}
               placeholder="e.g. 1d20+5, 2d20 + 1d8 + 5"
-              className="w-full h-8 px-2.5 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition pr-7 placeholder:text-slate-600"
+              className="w-full h-9 px-2.5 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition pr-7 placeholder:text-slate-600"
             />
             {formulaInput && (
               <button
@@ -526,16 +529,16 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           <button
             type="button"
             onClick={() => handleExecuteRoll()}
-            className="h-8 px-3 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 transition shadow cursor-pointer shrink-0 flex items-center gap-1 font-display tracking-wider uppercase font-bold"
+            className="h-9 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-lg transition shadow cursor-pointer shrink-0 flex items-center gap-1 font-display tracking-wider uppercase"
             title="Roll dice expression"
           >
             ROLL
           </button>
         </div>
 
-        {/* Row 3: Compact Staging & Modifier Toolstrip */}
-        <div className="flex items-center justify-between gap-1 w-full overflow-x-auto no-scrollbar pt-0.5">
-          {/* Left: Die chips (+d4, +d6, +d8, +d10, +d12, +d20, +d100) */}
+        {/* Row 3: Sub-Strip 1 (Polyhedrals + Result Mode) */}
+        <div className="flex items-center justify-between gap-1 h-7">
+          {/* Left: Polyhedral Chips without '+' prefix, d20 highlighted */}
           <div className="flex items-center gap-1 shrink-0">
             {INTERACTIVE_DICE.map((die) => {
               const isD20 = die === 'd20';
@@ -544,112 +547,112 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
                   key={die}
                   type="button"
                   onClick={() => handleDieButtonClick(die)}
-                  className={`h-7 px-1.5 text-xs font-mono font-bold rounded border transition cursor-pointer shadow-sm shrink-0 flex items-center justify-center ${
+                  className={`h-6 px-1.5 text-xs rounded transition-colors shrink-0 flex items-center justify-center cursor-pointer ${
                     isD20
-                      ? 'border-amber-500/60 text-amber-400 bg-amber-950/20 hover:bg-amber-900/30'
-                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+                      ? 'font-bold bg-amber-950/25 text-amber-400 border border-amber-500/60 hover:bg-amber-900/30'
+                      : 'font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
                   }`}
                   title={`Add ${die} to formula`}
                 >
-                  +{die}
+                  {die}
                 </button>
               );
             })}
           </div>
 
-          {/* Center: Compact modifier stepper: MOD [-] {mod} [+] */}
-          <div className="flex items-center gap-0.5 bg-slate-950 rounded-md border border-slate-800 px-1.5 h-7 shrink-0 text-xs">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase mr-0.5">MOD</span>
+          {/* Right: Result Calculation Toggle [ Sum | Indiv ] */}
+          <div className="flex items-center p-0.5 bg-slate-950 border border-slate-800 rounded text-[10px] h-6 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDisplayMode('sum')}
+              className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
+                displayMode === 'sum'
+                  ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Sum: Combine total of all roll instances"
+            >
+              Sum
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisplayMode('individual')}
+              className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
+                displayMode === 'individual'
+                  ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Indiv: Individual line item outputs without grand total"
+            >
+              Indiv
+            </button>
+          </div>
+        </div>
+
+        {/* Row 4: Sub-Strip 2 (Modifier Stepper + D20 Roll Mode) */}
+        <div className="flex items-center justify-between gap-1.5 h-7 mt-1.5">
+          {/* Left: Modifier Stepper (MOD label + [-] + [+5] + [+]) */}
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase select-none mr-0.5">MOD</span>
             <button
               type="button"
               onClick={() => handleModifierStep(-1)}
-              className="w-4 h-5 rounded text-xs bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center transition cursor-pointer"
+              className="w-6 h-6 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded flex items-center justify-center text-xs font-bold shrink-0 transition-colors cursor-pointer"
               title="Decrease modifier (-1)"
             >
-              <Minus className="w-2.5 h-2.5" />
+              <Minus className="w-3 h-3" />
             </button>
-            <span className="text-xs font-mono font-bold text-amber-300 min-w-[22px] text-center tabular-nums">
+            <span className="min-w-[32px] text-center font-mono font-bold text-xs text-amber-400 tabular-nums select-none">
               {formattedMod}
             </span>
             <button
               type="button"
               onClick={() => handleModifierStep(1)}
-              className="w-4 h-5 rounded text-xs bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center transition cursor-pointer"
+              className="w-6 h-6 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded flex items-center justify-center text-xs font-bold shrink-0 transition-colors cursor-pointer"
               title="Increase modifier (+1)"
             >
-              <Plus className="w-2.5 h-2.5" />
+              <Plus className="w-3 h-3" />
             </button>
           </div>
 
-          {/* Right: Adv / Straight / Dis and Sum / Indiv toggles */}
-          <div className="flex items-center gap-1 shrink-0">
-            {/* Segmented [Adv | Straight | Dis] */}
-            <div className="flex items-center p-0.5 bg-slate-950 rounded-md border border-slate-800 h-7 text-[10px]">
-              <button
-                type="button"
-                onClick={() => setAdvantageMode('advantage')}
-                className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                  advantageMode === 'advantage'
-                    ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Advantage: Roll 2d20, keep highest"
-              >
-                Adv
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdvantageMode('normal')}
-                className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                  advantageMode === 'normal'
-                    ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Straight roll"
-              >
-                Straight
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdvantageMode('disadvantage')}
-                className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                  advantageMode === 'disadvantage'
-                    ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Disadvantage: Roll 2d20, keep lowest"
-              >
-                Dis
-              </button>
-            </div>
-
-            {/* Segmented [Sum | Indiv] */}
-            <div className="flex items-center p-0.5 bg-slate-950 rounded-md border border-slate-800 h-7 text-[10px]">
-              <button
-                type="button"
-                onClick={() => setDisplayMode('sum')}
-                className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                  displayMode === 'sum'
-                    ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Sum: Combine total of all roll instances"
-              >
-                Sum
-              </button>
-              <button
-                type="button"
-                onClick={() => setDisplayMode('individual')}
-                className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                  displayMode === 'individual'
-                    ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Indiv: Individual line item outputs without grand total"
-              >
-                Indiv
-              </button>
-            </div>
+          {/* Right: D20 Roll Mode Segmented Control [ Adv | Straight | Dis ] */}
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setAdvantageMode('advantage')}
+              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+                advantageMode === 'advantage'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Advantage: Roll 2d20, keep highest"
+            >
+              Adv
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdvantageMode('normal')}
+              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+                advantageMode === 'normal'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Straight roll"
+            >
+              Straight
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdvantageMode('disadvantage')}
+              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+                advantageMode === 'disadvantage'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Disadvantage: Roll 2d20, keep lowest"
+            >
+              Dis
+            </button>
           </div>
         </div>
       </div>
