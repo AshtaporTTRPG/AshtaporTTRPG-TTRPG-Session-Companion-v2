@@ -54,6 +54,18 @@ const CATEGORY_ORDER: NoteCategory[] = [
   'Hook',
 ];
 
+const CATEGORY_ABBREVIATIONS: Record<string, string> = {
+  All: 'All',
+  General: 'Gen',
+  NPC: 'NPC',
+  Quest: 'Qst',
+  Combat: 'Cbt',
+  Loot: 'Loot',
+  Location: 'Loc',
+  Scene: 'Scene',
+  Hook: 'Hook',
+};
+
 export const NoteCardList: React.FC<NoteCardListProps> = ({
   notes,
   expandedIds: externalExpandedIds,
@@ -452,11 +464,12 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             </div>
           </div>
 
-          {/* Single-Row Scrollable Category Filter Strip */}
-          <div className="h-7 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 flex-nowrap whitespace-nowrap">
+          {/* High-Density Category Micro-Pills Strip */}
+          <div className="h-6 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5 px-0.5">
             {visibleCategories.map((cat) => {
               const isSelected = selectedCategory === cat;
               const count = categoryCounts[cat] || 0;
+              const abbr = CATEGORY_ABBREVIATIONS[cat] || cat;
               const activeStyle =
                 CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
 
@@ -467,12 +480,12 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
                   onClick={() => handleCategoryPillClick(cat)}
                   className={
                     isSelected
-                      ? `border text-[11px] px-2 py-0.5 rounded-full transition-colors cursor-pointer shrink-0 whitespace-nowrap ${activeStyle}`
-                      : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border border-slate-800 text-[11px] px-2 py-0.5 rounded-full transition-colors cursor-pointer shrink-0 whitespace-nowrap'
+                      ? `px-1.5 py-0.5 text-[10px] font-bold rounded-full border transition-colors shrink-0 cursor-pointer text-slate-100 ${activeStyle}`
+                      : 'px-1.5 py-0.5 text-[10px] font-semibold rounded-full border transition-colors shrink-0 cursor-pointer bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
                   }
                   title={`Filter by ${cat} (${count})`}
                 >
-                  {cat} ({count})
+                  {abbr} {count}
                 </button>
               );
             })}

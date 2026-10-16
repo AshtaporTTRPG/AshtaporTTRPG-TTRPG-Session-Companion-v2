@@ -50,6 +50,18 @@ const CATEGORY_ORDER: NoteCategory[] = [
   'Hook',
 ];
 
+export const CATEGORY_ABBREVIATIONS: Record<string, string> = {
+  All: 'All',
+  General: 'Gen',
+  NPC: 'NPC',
+  Quest: 'Qst',
+  Combat: 'Cbt',
+  Loot: 'Loot',
+  Location: 'Loc',
+  Scene: 'Scene',
+  Hook: 'Hook',
+};
+
 const DEFAULT_MY_NOTES: NoteItem[] = [
   {
     id: 'my-note-1',
@@ -897,6 +909,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     setCategoryByTab((prev) => ({ ...prev, [activeSubTab]: 'All' }));
   };
 
+  // Auto-fallback to 'All' if selected category count drops to 0
+  useEffect(() => {
+    if (activeSelectedCategory !== 'All' && (categoryCounts[activeSelectedCategory] || 0) === 0) {
+      setCategoryByTab((prev) => ({
+        ...prev,
+        [activeSubTab]: 'All',
+      }));
+    }
+  }, [activeSelectedCategory, categoryCounts, activeSubTab]);
+
   // JSON Export Backup (`⋮` Maintenance Dropdown)
   const handleExportJSON = () => {
     setIsMaintenanceMenuOpen(false);
@@ -921,7 +943,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         : myNotes;
 
     const payload: NotesExportPayload = {
-      version: '2.0.18',
+      version: '2.0.19',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes: notesToExport,
@@ -1238,11 +1260,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         </div>
       </div>
 
-      {/* 3. SINGLE-ROW SCROLLABLE CATEGORY FILTER STRIP */}
-      <div className="h-7 shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 flex-nowrap whitespace-nowrap">
+      {/* 3. HIGH-DENSITY CATEGORY MICRO-PILLS STRIP (Zero Parentheses, 440px Interior Fit) */}
+      <div className="h-6 shrink-0 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5">
         {visibleCategories.map((cat) => {
           const isSelected = activeSelectedCategory === cat;
           const count = categoryCounts[cat] || 0;
+          const abbr = CATEGORY_ABBREVIATIONS[cat] || cat;
           const activeStyle =
             CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
 
@@ -1253,12 +1276,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               onClick={() => handleSelectCategory(cat)}
               className={
                 isSelected
-                  ? `border text-[11px] px-2 py-0.5 rounded-full transition-colors cursor-pointer shrink-0 whitespace-nowrap ${activeStyle}`
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border border-slate-800 text-[11px] px-2 py-0.5 rounded-full transition-colors cursor-pointer shrink-0 whitespace-nowrap'
+                  ? `px-1.5 py-0.5 text-[10px] font-bold rounded-full border transition-colors shrink-0 cursor-pointer text-slate-100 ${activeStyle}`
+                  : 'px-1.5 py-0.5 text-[10px] font-semibold rounded-full border transition-colors shrink-0 cursor-pointer bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
               }
               title={`Filter by ${cat} (${count})`}
             >
-              {cat} ({count})
+              {abbr} {count}
             </button>
           );
         })}
