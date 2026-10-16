@@ -1,13 +1,46 @@
-export type NoteCategory = 'General' | 'NPC' | 'Quest' | 'Loot' | 'Combat' | 'Location';
+export type NoteCategory =
+  | 'General'
+  | 'NPC'
+  | 'Quest'
+  | 'Combat'
+  | 'Loot'
+  | 'Location'
+  | 'Scene'
+  | 'Hook';
 
 export const NOTE_CATEGORIES: NoteCategory[] = [
   'General',
   'NPC',
   'Quest',
-  'Loot',
   'Combat',
+  'Loot',
+  'Location',
+  'Scene',
+  'Hook',
+];
+
+export const PLAYER_NOTE_CATEGORIES: NoteCategory[] = [
+  'General',
+  'NPC',
+  'Quest',
+  'Loot',
   'Location',
 ];
+
+export const GM_NOTE_CATEGORIES: NoteCategory[] = [
+  'General',
+  'NPC',
+  'Quest',
+  'Combat',
+  'Loot',
+  'Location',
+  'Scene',
+  'Hook',
+];
+
+export function getAvailableCategories(isGM: boolean): NoteCategory[] {
+  return isGM ? GM_NOTE_CATEGORIES : PLAYER_NOTE_CATEGORIES;
+}
 
 export interface NoteItem {
   id: string;

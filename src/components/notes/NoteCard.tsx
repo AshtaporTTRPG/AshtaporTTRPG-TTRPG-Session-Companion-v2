@@ -14,38 +14,68 @@ import { NoteItem, NoteCategory } from '../../types/notes';
 
 export const CATEGORY_STYLES: Record<
   NoteCategory,
-  { borderL: string; badge: string; text: string }
+  { borderL: string; badge: string; text: string; activePill: string }
 > = {
+  General: {
+    borderL: 'border-l-slate-500',
+    badge: 'bg-slate-500/10 text-slate-400 border border-slate-500/30',
+    text: 'text-slate-400',
+    activePill: 'border-slate-400 bg-slate-800/80 text-slate-100 font-bold',
+  },
   NPC: {
     borderL: 'border-l-amber-500',
     badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/30',
     text: 'text-amber-400',
+    activePill: 'border-amber-500 bg-amber-950/40 text-amber-200 font-bold',
   },
   Quest: {
     borderL: 'border-l-sky-500',
     badge: 'bg-sky-500/10 text-sky-400 border border-sky-500/30',
     text: 'text-sky-400',
+    activePill: 'border-sky-500 bg-sky-950/40 text-sky-200 font-bold',
   },
   Combat: {
     borderL: 'border-l-rose-500',
     badge: 'bg-rose-500/10 text-rose-400 border border-rose-500/30',
     text: 'text-rose-400',
+    activePill: 'border-rose-500 bg-rose-950/40 text-rose-200 font-bold',
   },
   Loot: {
     borderL: 'border-l-emerald-500',
     badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
     text: 'text-emerald-400',
+    activePill: 'border-emerald-500 bg-emerald-950/40 text-emerald-200 font-bold',
   },
   Location: {
     borderL: 'border-l-purple-500',
     badge: 'bg-purple-500/10 text-purple-400 border border-purple-500/30',
     text: 'text-purple-400',
+    activePill: 'border-purple-500 bg-purple-950/40 text-purple-200 font-bold',
   },
-  General: {
-    borderL: 'border-l-slate-500',
-    badge: 'bg-slate-500/10 text-slate-400 border border-slate-500/30',
-    text: 'text-slate-400',
+  Scene: {
+    borderL: 'border-l-indigo-500',
+    badge: 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30',
+    text: 'text-indigo-300',
+    activePill: 'border-indigo-500 bg-indigo-950/40 text-indigo-200 font-bold',
   },
+  Hook: {
+    borderL: 'border-l-fuchsia-500',
+    badge: 'bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30',
+    text: 'text-fuchsia-300',
+    activePill: 'border-fuchsia-500 bg-fuchsia-950/40 text-fuchsia-200 font-bold',
+  },
+};
+
+export const CATEGORY_PILL_ACTIVE_STYLES: Record<string, string> = {
+  All: 'border-amber-500 bg-amber-950/40 font-bold text-slate-100',
+  General: CATEGORY_STYLES.General.activePill,
+  NPC: CATEGORY_STYLES.NPC.activePill,
+  Quest: CATEGORY_STYLES.Quest.activePill,
+  Combat: CATEGORY_STYLES.Combat.activePill,
+  Loot: CATEGORY_STYLES.Loot.activePill,
+  Location: CATEGORY_STYLES.Location.activePill,
+  Scene: CATEGORY_STYLES.Scene.activePill,
+  Hook: CATEGORY_STYLES.Hook.activePill,
 };
 
 export interface NoteCardProps {
@@ -53,7 +83,7 @@ export interface NoteCardProps {
   isExpanded: boolean;
   isRevealed?: boolean;
   onToggleExpand: (e?: React.MouseEvent) => void;
-  onTogglePin: () => void;
+  onTogglePin?: () => void;
   onDelete: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onToggleReveal?: () => void;
@@ -71,7 +101,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const cat = (note.category && CATEGORY_STYLES[note.category] ? note.category : 'General') as NoteCategory;
+  const cat = (
+    note.category && CATEGORY_STYLES[note.category] ? note.category : 'General'
+  ) as NoteCategory;
   const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -98,9 +130,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     formattedDate = 'Recently';
   }
 
-  const wordCount = note.content && note.content.trim()
-    ? note.content.trim().split(/\s+/).length
-    : 0;
+  const wordCount =
+    note.content && note.content.trim() ? note.content.trim().split(/\s+/).length : 0;
 
   return (
     <div
@@ -209,22 +240,24 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           </button>
 
           {/* Pin / Unpin Button */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onTogglePin();
-            }}
-            className={`p-1 rounded transition cursor-pointer shrink-0 ${
-              note.isPinned
-                ? 'text-amber-400 hover:text-amber-300 bg-amber-950/60 ring-1 ring-amber-400/60 shadow-sm'
-                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-            }`}
-            title={note.isPinned ? 'Unpin note' : 'Pin note to top'}
-            aria-label={note.isPinned ? 'Unpin note' : 'Pin note to top'}
-          >
-            <Pin className={`w-3.5 h-3.5 ${note.isPinned ? 'fill-amber-400' : ''}`} />
-          </button>
+          {onTogglePin && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePin();
+              }}
+              className={`p-1 rounded transition cursor-pointer shrink-0 ${
+                note.isPinned
+                  ? 'text-amber-400 hover:text-amber-300 bg-amber-950/60 ring-1 ring-amber-400/60 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+              }`}
+              title={note.isPinned ? 'Unpin note' : 'Pin note to top'}
+              aria-label={note.isPinned ? 'Unpin note' : 'Pin note to top'}
+            >
+              <Pin className={`w-3.5 h-3.5 ${note.isPinned ? 'fill-amber-400' : ''}`} />
+            </button>
+          )}
 
           {/* Inline Edit Button (pencil) */}
           <button

@@ -1,14 +1,22 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
 import {
   User,
   Scroll,
   Lock,
-  Clock,
-  Check,
+  Search,
+  ChevronsUpDown,
+  ChevronsDownUp,
+  MoreVertical,
+  Download,
+  Upload,
+  X,
 } from 'lucide-react';
 import {
   NoteItem,
+  NoteCategory,
+  NOTE_CATEGORIES,
+  NotesExportPayload,
   DmSecretNote,
   BroadcastNotePayload,
   NotesScope,
@@ -21,14 +29,26 @@ import {
   LOCAL_DM_NOTES_KEY,
 } from '../../types/notes';
 import { ROOM_METADATA_KEY } from '../../utils/obrCombatSync';
-import { NoteCardList } from './NoteCardList';
+import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
 import { DmNotesVault } from '../DmNotesVault';
+import { CreateNoteModal } from './CreateNoteModal';
 
 // Re-export for App.tsx and external consumers
 export type { BroadcastNotePayload, NotesScope } from '../../types/notes';
 export { OBR_BROADCAST_NOTE_KEY, OBR_TABLE_NOTES_KEY } from '../../types/notes';
 
 export const LOCAL_EXPANDED_NOTES_KEY = 'ashtapor_notes_expanded_ids';
+
+const CATEGORY_ORDER: NoteCategory[] = [
+  'General',
+  'NPC',
+  'Quest',
+  'Combat',
+  'Loot',
+  'Location',
+  'Scene',
+  'Hook',
+];
 
 const DEFAULT_MY_NOTES: NoteItem[] = [
   {
@@ -119,6 +139,7 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
     content:
       'Trigger: When the party advances past the broken gargoyle, 4 Shadow Archers fire from murder holes (AC 13, HP 14, +5 to hit, 1d8+3 piercing + 1d6 necrotic).\n\nTrap DC 15 Perception: Hidden pressure plate at bridge center trips a falling portcullis (DC 14 Dex save or 2d10 bludgeoning and pinned).',
     category: 'Combat',
+    isPinned: true,
     createdAt: Date.now() - 3600000,
     updatedAt: Date.now() - 3600000,
   },
@@ -128,8 +149,29 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
     content:
       'Inquisitor Vane is secretly a doppelganger working under the orders of the Crimson Veil. If inspected with True Seeing or Divine Sense, detects as Monstrosity (Shapechanger).\n\nIf captured alive, carries a silver ring bearing the serpent crest of House Ashtapor.',
     category: 'NPC',
+    isPinned: false,
     createdAt: Date.now() - 7200000,
     updatedAt: Date.now() - 7200000,
+  },
+  {
+    id: 'dm-note-3',
+    title: 'Cathedral of Ashen Glass (Read-Aloud)',
+    content:
+      'Pillars of fused black obsidian arch into the gloom overhead. Pale violet braziers cast long, flickering shadows across a cracked mosaic of the Sun Father, while the faint chime of unseen censer bells echoes from the reliquary vault.',
+    category: 'Scene',
+    isPinned: false,
+    createdAt: Date.now() - 10800000,
+    updatedAt: Date.now() - 10800000,
+  },
+  {
+    id: 'dm-note-4',
+    title: 'The Missing Caravan Ledger',
+    content:
+      'A blood-stained manifest found in the wrecked wagon lists three crates of "Star-Iron Ingots" delivered to the Magistrate’s private estate—implicating the town council in smuggling arms to the cult.',
+    category: 'Hook',
+    isPinned: false,
+    createdAt: Date.now() - 14400000,
+    updatedAt: Date.now() - 14400000,
   },
 ];
 
@@ -206,10 +248,14 @@ function migrateToNoteCards(
           createdAt: new Date().toISOString(),
         };
       }
+      const validCat: NoteCategory =
+        item.category && NOTE_CATEGORIES.includes(item.category)
+          ? item.category
+          : 'General';
       return {
         id: item.id || `note-${Date.now()}-${index}`,
         title: item.title || 'Untitled Note',
-        category: item.category || 'General',
+        category: validCat,
         content: typeof item.content === 'string' ? item.content : '',
         isPinned: !!item.isPinned,
         updatedAt: item.updatedAt || new Date().toISOString(),
@@ -288,6 +334,41 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   const currentRole: 'GM' | 'PLAYER' = isDm ? 'GM' : 'PLAYER';
   const authorName = playerName || (isDm ? 'Game Master' : 'Player');
 
+  // Per-sub-tab Search & Category Filter state (retained across sub-tab switches)
+  const [searchByTab, setSearchByTab] = useState<Record<SubTabType, string>>({
+    myNotes: '',
+    tableNotes: '',
+    dmNotes: '',
+  });
+  const [categoryByTab, setCategoryByTab] = useState<Record<SubTabType, string>>({
+    myNotes: 'All',
+    tableNotes: 'All',
+    dmNotes: 'All',
+  });
+
+  // Maintenance Dropdown (`⋮`) state & ref
+  const [isMaintenanceMenuOpen, setIsMaintenanceMenuOpen] = useState(false);
+  const maintenanceMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Create / Edit Note Modal state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState<NoteItem | DmSecretNote | null>(null);
+
+  useEffect(() => {
+    if (!isMaintenanceMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        maintenanceMenuRef.current &&
+        !maintenanceMenuRef.current.contains(e.target as Node)
+      ) {
+        setIsMaintenanceMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMaintenanceMenuOpen]);
+
   // 2. "My Notes" State (Strictly Local)
   const [myNotes, setMyNotes] = useState<NoteItem[]>(() => {
     try {
@@ -326,7 +407,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     } catch {}
     return DEFAULT_TABLE_NOTES;
   });
-  const [tableSaveStatus, setTableSaveStatus] = useState<'synced' | 'saving'>('synced');
   const tableDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 4. "DM Notes" State (Secret Vault)
@@ -356,10 +436,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     if (stored !== null) {
       return stored;
     }
-    // First run / initial load default: expand all notes by default
     const initial = new Set<string>();
     myNotes.forEach((n) => initial.add(n.id));
     tableNotes.forEach((n) => initial.add(n.id));
+    dmNotes.forEach((n) => initial.add(n.id));
     persistExpandedIdsToStorage(initial);
     return initial;
   });
@@ -438,6 +518,37 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     });
   }, [tableNotes]);
 
+  // Expand / Collapse All for DM Notes
+  const handleExpandAllDmNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      dmNotes.forEach((n) => next.add(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [dmNotes]);
+
+  const handleCollapseAllDmNotes = useCallback(() => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      dmNotes.forEach((n) => next.delete(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
+  }, [dmNotes]);
+
+  const handleExpandAllActiveTab = () => {
+    if (activeSubTab === 'myNotes') handleExpandAllMyNotes();
+    else if (activeSubTab === 'tableNotes') handleExpandAllTableNotes();
+    else handleExpandAllDmNotes();
+  };
+
+  const handleCollapseAllActiveTab = () => {
+    if (activeSubTab === 'myNotes') handleCollapseAllMyNotes();
+    else if (activeSubTab === 'tableNotes') handleCollapseAllTableNotes();
+    else handleCollapseAllDmNotes();
+  };
+
   const handleSaveMyNote = (note: NoteItem) => {
     const exists = myNotes.some((n) => n.id === note.id);
     const updated = exists
@@ -499,7 +610,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           });
           setTableNotes(loaded);
 
-          // If first-run with no saved expansion preference, expand newly loaded table notes
           if (loadExpandedIdsFromStorage() === null) {
             setExpandedNoteIds((prev) => {
               const next = new Set(prev);
@@ -509,7 +619,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             });
           }
 
-          // Offline caching resilience
           try {
             localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
           } catch {}
@@ -536,8 +645,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
 
   // Debounced Room Sync for Table Notes
   const triggerDebouncedTableSync = useCallback((notesToSync: NoteItem[]) => {
-    setTableSaveStatus('saving');
-
     if (tableDebounceTimerRef.current) {
       clearTimeout(tableDebounceTimerRef.current);
     }
@@ -556,8 +663,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         }
       } catch (err) {
         console.error('Error syncing table notes:', err);
-      } finally {
-        setTableSaveStatus('synced');
       }
     }, 350);
   }, []);
@@ -619,6 +724,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       ? dmNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...dmNotes];
     saveDmNotes(updated);
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev).add(note.id);
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
   };
 
   const handleDeleteDmNote = async (id: string) => {
@@ -627,25 +737,20 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     }
     const updated = dmNotes.filter((n) => n.id !== id);
     saveDmNotes(updated);
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
   };
 
-  const handleExpandAllDmNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      dmNotes.forEach((n) => next.add(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [dmNotes]);
-
-  const handleCollapseAllDmNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      dmNotes.forEach((n) => next.delete(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [dmNotes]);
+  const handleTogglePinDmNote = (id: string) => {
+    const updated = dmNotes.map((n) =>
+      n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: Date.now() } : n
+    );
+    saveDmNotes(updated);
+  };
 
   // Atomic 1-Click Broadcast Teardown
   const handleStopBroadcast = async () => {
@@ -728,95 +833,438 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return () => unsub();
   }, []);
 
+  // Active sub-tab notes list for category counts
+  const activeNotesList = useMemo<Array<{ category?: NoteCategory }>>(() => {
+    if (activeSubTab === 'myNotes') return myNotes;
+    if (activeSubTab === 'tableNotes') return tableNotes;
+    return dmNotes;
+  }, [activeSubTab, myNotes, tableNotes, dmNotes]);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      All: activeNotesList.length,
+      General: 0,
+      NPC: 0,
+      Quest: 0,
+      Combat: 0,
+      Loot: 0,
+      Location: 0,
+      Scene: 0,
+      Hook: 0,
+    };
+    activeNotesList.forEach((n) => {
+      const cat =
+        n.category && NOTE_CATEGORIES.includes(n.category) ? n.category : 'General';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [activeNotesList]);
+
+  // Only show categories with count > 0 (always keep All visible at index 0)
+  const visibleCategories = useMemo(() => {
+    const list = ['All'];
+    CATEGORY_ORDER.forEach((cat) => {
+      if ((categoryCounts[cat] || 0) > 0) {
+        list.push(cat);
+      }
+    });
+    return list;
+  }, [categoryCounts]);
+
+  const activeSearchQuery = searchByTab[activeSubTab] || '';
+  const activeSelectedCategory = categoryByTab[activeSubTab] || 'All';
+
+  const handleSearchChange = (value: string) => {
+    setSearchByTab((prev) => ({
+      ...prev,
+      [activeSubTab]: value,
+    }));
+  };
+
+  const handleSelectCategory = (cat: string) => {
+    setCategoryByTab((prev) => {
+      const current = prev[activeSubTab] || 'All';
+      const next = current === cat || cat === 'All' ? 'All' : cat;
+      return {
+        ...prev,
+        [activeSubTab]: next,
+      };
+    });
+  };
+
+  const handleResetActiveFilters = () => {
+    setSearchByTab((prev) => ({ ...prev, [activeSubTab]: '' }));
+    setCategoryByTab((prev) => ({ ...prev, [activeSubTab]: 'All' }));
+  };
+
+  // JSON Export Backup (`⋮` Maintenance Dropdown)
+  const handleExportJSON = () => {
+    setIsMaintenanceMenuOpen(false);
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const fileName = `ashtapor-notes-${dateStr}.json`;
+    const notesToExport: NoteItem[] =
+      activeSubTab === 'tableNotes'
+        ? tableNotes
+        : activeSubTab === 'dmNotes'
+        ? dmNotes.map((d) => ({
+            id: d.id,
+            title: d.title,
+            category: d.category || 'General',
+            content: d.content,
+            isPinned: !!d.isPinned,
+            updatedAt: new Date(d.updatedAt).toISOString(),
+            createdAt: new Date(d.createdAt).toISOString(),
+            authorRole: 'GM',
+            authorName,
+          }))
+        : myNotes;
+
+    const payload: NotesExportPayload = {
+      version: '2.0.18',
+      exportedAt: now.toISOString(),
+      source: 'ashtapor-session-companion',
+      notes: notesToExport,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // JSON Import Backup (`⋮` Maintenance Dropdown)
+  const handleTriggerImport = () => {
+    setIsMaintenanceMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      let rawNotes: any[] = [];
+      if (Array.isArray(parsed)) {
+        rawNotes = parsed;
+      } else if (parsed && Array.isArray(parsed.notes)) {
+        rawNotes = parsed.notes;
+      } else if (parsed && typeof parsed === 'object') {
+        rawNotes = Object.values(parsed);
+      }
+
+      if (!Array.isArray(rawNotes) || rawNotes.length === 0) {
+        return;
+      }
+
+      const validList: NoteItem[] = [];
+      for (const item of rawNotes) {
+        if (item && (typeof item.title === 'string' || typeof item.content === 'string')) {
+          const categoryVal: NoteCategory =
+            item.category && NOTE_CATEGORIES.includes(item.category)
+              ? item.category
+              : 'General';
+          validList.push({
+            id:
+              item.id ||
+              `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            title: (item.title || 'Untitled Note').trim(),
+            category: categoryVal,
+            content: typeof item.content === 'string' ? item.content : '',
+            isPinned: !!item.isPinned,
+            updatedAt: item.updatedAt || new Date().toISOString(),
+            createdAt: item.createdAt || new Date().toISOString(),
+            authorRole: item.authorRole,
+            authorName: item.authorName,
+          });
+        }
+      }
+
+      if (validList.length > 0) {
+        handleImportMyNotes(validList);
+      }
+    } catch (err) {
+      console.error('Failed to import JSON file:', err);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Open Create Modal (`+` button)
+  const handleOpenCreateModal = () => {
+    setEditingNote(null);
+    setIsCreateModalOpen(true);
+  };
+
+  // Open Edit Modal from NoteCard or DmNotesVault
+  const handleOpenEditNote = (note: NoteItem | DmSecretNote, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingNote(note);
+    setIsCreateModalOpen(true);
+  };
+
+  const handleSaveFromModal = (data: {
+    title: string;
+    category: NoteCategory;
+    content: string;
+    isPinned: boolean;
+  }) => {
+    if (activeSubTab === 'dmNotes') {
+      if (editingNote) {
+        const updatedDm: DmSecretNote = {
+          ...(editingNote as DmSecretNote),
+          title: data.title,
+          category: data.category,
+          content: data.content,
+          isPinned: data.isPinned,
+          updatedAt: Date.now(),
+        };
+        handleSaveDmNote(updatedDm);
+      } else {
+        const createdDm: DmSecretNote = {
+          id: `dm-note-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          title: data.title,
+          category: data.category,
+          content: data.content,
+          isPinned: data.isPinned,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        handleSaveDmNote(createdDm);
+      }
+    } else {
+      const id =
+        editingNote?.id ||
+        (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+
+      const updatedNote: NoteItem = {
+        id,
+        title: data.title,
+        category: data.category,
+        content: data.content,
+        isPinned: data.isPinned,
+        updatedAt: new Date().toISOString(),
+        createdAt: editingNote?.createdAt || new Date().toISOString(),
+        authorRole: (editingNote as NoteItem)?.authorRole || currentRole,
+        authorName: (editingNote as NoteItem)?.authorName || authorName,
+      };
+
+      if (activeSubTab === 'tableNotes') {
+        handleSaveTableNote(updatedNote);
+      } else {
+        handleSaveMyNote(updatedNote);
+      }
+    }
+
+    setIsCreateModalOpen(false);
+    setEditingNote(null);
+  };
+
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-2 gap-2 relative">
-      {/* 1. SUB-TAB HEADER: [👤 My Notes (N)] [📜 Table Notes (N)] [🔒 DM Notes (N) (GM Only)] */}
-      <div className="shrink-0 p-1 bg-slate-900/95 border border-slate-800 rounded-xl shadow-sm">
-        <div
-          className={`grid gap-1 w-full ${
-            isDm ? 'grid-cols-3' : 'grid-cols-2'
-          }`}
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-1.5 gap-1.5 relative">
+      {/* Hidden File Input for JSON Import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {/* 1. COMPACT SUB-TAB NAVIGATION BAR (h-7 Segmented Pill Control) */}
+      <div className="h-7 shrink-0 flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
+        {/* My Notes Trigger */}
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('myNotes')}
+          className={
+            activeSubTab === 'myNotes'
+              ? 'text-xs font-bold bg-amber-500 text-slate-950 px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+              : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+          }
+          title="My Notes (Stored locally on your machine)"
         >
-          {/* My Notes Sub-Tab Trigger with Badge */}
+          <User className="w-3 h-3 mr-1 shrink-0" />
+          <span className="truncate">My Notes</span>
+          <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
+            {myNotes.length}
+          </span>
+        </button>
+
+        {/* Table Notes Trigger */}
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('tableNotes')}
+          className={
+            activeSubTab === 'tableNotes'
+              ? 'text-xs font-bold bg-amber-500 text-slate-950 px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+              : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+          }
+          title="Table Notes (Shared collaborative cards across the room)"
+        >
+          <Scroll className="w-3 h-3 mr-1 shrink-0" />
+          <span className="truncate">Table Notes</span>
+          <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
+            {tableNotes.length}
+          </span>
+        </button>
+
+        {/* DM Notes Trigger (GM Only) */}
+        {isDm && (
           <button
             type="button"
-            onClick={() => setActiveSubTab('myNotes')}
-            className={`flex items-center justify-center gap-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition cursor-pointer truncate ${
-              activeSubTab === 'myNotes'
-                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-            title="Private Player Scratchpad (Stored locally on your machine)"
+            onClick={() => setActiveSubTab('dmNotes')}
+            className={
+              activeSubTab === 'dmNotes'
+                ? 'text-xs font-bold bg-rose-600 text-white px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+                : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+            }
+            title="DM Notes Vault & Broadcast (GM Only)"
           >
-            <User className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">My Notes</span>
-            <span
-              className={`ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] border font-mono ${
-                activeSubTab === 'myNotes'
-                  ? 'bg-slate-950 text-amber-400 border-slate-800'
-                  : 'bg-slate-800 text-slate-300 border-slate-700'
-              }`}
-            >
-              {myNotes.length}
+            <Lock className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">DM Notes</span>
+            <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
+              {dmNotes.length}
             </span>
+            {activeBroadcast && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-1 shrink-0" />
+            )}
           </button>
+        )}
+      </div>
 
-          {/* Table Notes Sub-Tab Trigger with Badge */}
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('tableNotes')}
-            className={`flex items-center justify-center gap-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition cursor-pointer truncate ${
-              activeSubTab === 'tableNotes'
-                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-            title="Table Notes (Shared collaborative cards in real time across the room)"
-          >
-            <Scroll className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Table Notes</span>
-            <span
-              className={`ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] border font-mono ${
-                activeSubTab === 'tableNotes'
-                  ? 'bg-slate-950 text-amber-400 border-slate-800'
-                  : 'bg-slate-800 text-slate-300 border-slate-700'
-              }`}
-            >
-              {tableNotes.length}
-            </span>
-          </button>
-
-          {/* DM Notes Sub-Tab Trigger with Badge (GM Only) */}
-          {isDm && (
+      {/* 2. STREAMLINED UTILITY BAR & MAINTENANCE DROPDOWN (`⋮`) */}
+      <div className="shrink-0 flex items-center gap-1.5">
+        {/* Search Input (h-7 text-xs) */}
+        <div className="relative flex-1 min-w-0">
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={activeSearchQuery}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search notes..."
+            className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
+          />
+          {activeSearchQuery && (
             <button
               type="button"
-              onClick={() => setActiveSubTab('dmNotes')}
-              className={`flex items-center justify-center gap-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition cursor-pointer truncate ${
-                activeSubTab === 'dmNotes'
-                  ? 'bg-rose-500 text-slate-950 font-bold shadow-sm'
-                  : 'text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-900/50'
-              }`}
-              title="DM Notes Vault & Broadcast (GM Only)"
+              onClick={() => handleSearchChange('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+              title="Clear search"
             >
-              <Lock className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">DM Notes</span>
-              <span
-                className={`ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] border font-mono ${
-                  activeSubTab === 'dmNotes'
-                    ? 'bg-slate-950 text-rose-400 border-slate-800'
-                    : 'bg-slate-800 text-slate-300 border-slate-700'
-                }`}
-              >
-                {dmNotes.length}
-              </span>
-              {activeBroadcast && (
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse ml-0.5" />
-              )}
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
+
+        {/* Compact Icon Utilities: Expand All, Collapse All, Maintenance Menu (`⋮`), + New Note */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={handleExpandAllActiveTab}
+            title="Expand All"
+            aria-label="Expand All"
+            className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+          >
+            <ChevronsUpDown className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCollapseAllActiveTab}
+            title="Collapse All"
+            aria-label="Collapse All"
+            className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+          >
+            <ChevronsDownUp className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Maintenance Dropdown (`⋮`) for JSON Export & JSON Import */}
+          <div className="relative" ref={maintenanceMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsMaintenanceMenuOpen((prev) => !prev)}
+              title="Backup & Maintenance"
+              aria-label="Backup & Maintenance"
+              className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+            >
+              <MoreVertical className="w-3.5 h-3.5" />
+            </button>
+
+            {isMaintenanceMenuOpen && (
+              <div className="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
+                <button
+                  type="button"
+                  onClick={handleExportJSON}
+                  className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>⬇ Export JSON Backup</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerImport}
+                  className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>⬆ Import JSON Backup</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Compact `+` New Note Icon Button */}
+          <button
+            type="button"
+            onClick={handleOpenCreateModal}
+            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+            title="Create New Note"
+          >
+            +
+          </button>
+        </div>
       </div>
 
-      {/* 2. SUB-TAB 1: "MY NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
+      {/* 3. SINGLE-ROW SCROLLABLE CATEGORY FILTER STRIP */}
+      <div className="h-7 shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-0.5 flex-nowrap whitespace-nowrap">
+        {visibleCategories.map((cat) => {
+          const isSelected = activeSelectedCategory === cat;
+          const count = categoryCounts[cat] || 0;
+          const activeStyle =
+            CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
+
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => handleSelectCategory(cat)}
+              className={
+                isSelected
+                  ? `border text-[11px] px-2 py-0.5 rounded-full transition-colors cursor-pointer shrink-0 whitespace-nowrap ${activeStyle}`
+                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border border-slate-800 text-[11px] px-2 py-0.5 rounded-full transition-colors cursor-pointer shrink-0 whitespace-nowrap'
+              }
+              title={`Filter by ${cat} (${count})`}
+            >
+              {cat} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 4. SUB-TAB 1: "MY NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
       <div className={activeSubTab === 'myNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
         <NoteCardList
           notes={myNotes}
@@ -832,22 +1280,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           currentRole={currentRole}
           currentAuthorName={authorName}
           emptyMessage="No personal notes yet."
-          emptySubtitle="Create organized cards for quests, loot, NPCs, and secrets."
-          headerInfo={
-            <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900/70 border border-slate-800/80 rounded-xl text-[11px] text-slate-400">
-              <div className="flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-amber-400" />
-                <span className="font-semibold text-slate-200">Private Scratchpad</span>
-              </div>
-              <span className="text-[10px] font-mono text-cyan-400">
-                ashtapor_my_notes
-              </span>
-            </div>
-          }
+          emptySubtitle="Click '+' above to create cards for quests, loot, NPCs, or scenes."
+          hideControls={true}
+          externalSearchQuery={searchByTab.myNotes}
+          externalSelectedCategory={categoryByTab.myNotes}
+          onExternalResetFilters={handleResetActiveFilters}
+          onExternalEditNote={handleOpenEditNote}
         />
       </div>
 
-      {/* 3. SUB-TAB 2: "TABLE NOTES" VIEW (KEEP-ALIVE STATE RETENTION WITH EXPAND/COLLAPSE ALL PARITY) */}
+      {/* 5. SUB-TAB 2: "TABLE NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
       <div className={activeSubTab === 'tableNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
         <NoteCardList
           notes={tableNotes}
@@ -863,32 +1305,15 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           currentAuthorName={authorName}
           emptyMessage="No table notes shared yet."
           emptySubtitle="Any player or DM can add shared quests, clues, or inventory."
-          headerInfo={
-            <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900/70 border border-slate-800/80 rounded-xl text-[11px]">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Scroll className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="font-semibold text-slate-200 truncate">Shared Campaign Table</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                {tableSaveStatus === 'saving' ? (
-                  <span className="text-amber-400 flex items-center gap-1 text-[10px] font-mono">
-                    <Clock className="w-3 h-3 animate-spin" />
-                    <span>Syncing...</span>
-                  </span>
-                ) : (
-                  <span className="text-emerald-400 flex items-center gap-1 text-[10px] font-mono font-medium">
-                    <Check className="w-3 h-3 stroke-[2.5]" />
-                    <span>Room Synced</span>
-                  </span>
-                )}
-              </div>
-            </div>
-          }
+          hideControls={true}
+          externalSearchQuery={searchByTab.tableNotes}
+          externalSelectedCategory={categoryByTab.tableNotes}
+          onExternalResetFilters={handleResetActiveFilters}
+          onExternalEditNote={handleOpenEditNote}
         />
       </div>
 
-      {/* 4. SUB-TAB 3: "DM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
+      {/* 6. SUB-TAB 3: "DM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
       {isDm && (
         <div className={activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
           <DmNotesVault
@@ -897,11 +1322,37 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             onSaveDmNote={handleSaveDmNote}
             onDeleteDmNote={handleDeleteDmNote}
             onToggleReveal={handleToggleRevealDmNote}
+            onTogglePinDmNote={handleTogglePinDmNote}
+            expandedIds={expandedNoteIds}
+            onToggleExpand={handleToggleExpandNote}
             onExpandAll={handleExpandAllDmNotes}
             onCollapseAll={handleCollapseAllDmNotes}
+            hideControls={true}
+            externalSearchQuery={searchByTab.dmNotes}
+            externalSelectedCategory={categoryByTab.dmNotes}
+            onExternalResetFilters={handleResetActiveFilters}
+            onExternalEditDmNote={handleOpenEditNote}
           />
         </div>
       )}
+
+      {/* 7. UNIFIED CREATE / EDIT NOTE MODAL (GM-Gated Scene & Hook Categories) */}
+      <CreateNoteModal
+        isOpen={isCreateModalOpen}
+        isGM={isDm}
+        isDmSecretNote={activeSubTab === 'dmNotes'}
+        editingNote={editingNote}
+        defaultCategory={
+          activeSelectedCategory !== 'All'
+            ? (activeSelectedCategory as NoteCategory)
+            : 'General'
+        }
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setEditingNote(null);
+        }}
+        onSave={handleSaveFromModal}
+      />
     </div>
   );
 };
