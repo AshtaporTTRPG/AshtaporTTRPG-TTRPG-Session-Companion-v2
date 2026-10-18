@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   Users,
@@ -14,18 +19,25 @@ import {
   User,
   LogOut,
   X,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { RosterMember, RosterRole, Combatant } from '../../types/combat';
 import { AddRosterModal } from './AddRosterModal';
+import { EditRosterModal } from '../roster/EditRosterModal';
 import OBR from '@owlbear-rodeo/sdk';
 import { ROSTER_METADATA_KEY, RosterMetadataPayload } from '../../types/combat';
 
-interface MyRosterDrawerProps {
+export interface MyRosterDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   activeCombatantNames?: string[];
   activeCombatants?: Combatant[];
-  onJoinCombat: (member: RosterMember) => Promise<void> | void;
+  onJoinCombat: (
+    member: RosterMember,
+    customInitiative?: number,
+    linkedPcId?: string,
+    linkedPcName?: string
+  ) => Promise<void> | void;
   onExitCombat?: (rosterMemberId: string) => Promise<void> | void;
   isDm: boolean;
   playerName?: string;
@@ -35,17 +47,6 @@ interface MyRosterDrawerProps {
 }
 
 const LOCAL_ROSTER_KEY = 'ashtapor_my_roster';
-
-const DEFAULT_SAMPLE_ROSTER: RosterMember[] = [
-  {
-    id: 'roster-valerius',
-    name: 'Valerius',
-    role: 'PC',
-    ac: 18,
-    maxHp: 38,
-    initiativeMod: 2,
-  },
-];
 
 export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   isOpen,
@@ -60,15 +61,22 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   isSyncing = false,
   onRosterCountChange,
 }) => {
+  // Purge demo character Valerius and initialize cleanly to []
   const [roster, setRoster] = useState<RosterMember[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_ROSTER_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          // Filter out hardcoded demo character Valerius
+          const sanitized = parsed.filter(
+            (m) => m && m.id !== 'roster-valerius' && m.name?.trim().toLowerCase() !== 'valerius'
+          );
+          return sanitized;
+        }
       }
     } catch {}
-    return DEFAULT_SAMPLE_ROSTER;
+    return [];
   });
 
   useEffect(() => {
@@ -76,8 +84,11 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   }, [roster.length, onRosterCountChange]);
 
   // Modal State for Add & Edit
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
+
+  // Selected PC link mapping for Allies in Roster
+  const [linkedPcByMemberId, setLinkedPcByMemberId] = useState<Record<string, string>>({});
 
   // Local loading state to dim buttons for 250ms on click
   const [loadingMemberId, setLoadingMemberId] = useState<string | null>(null);
@@ -93,14 +104,12 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   };
 
   const handleOpenAdd = () => {
-    setEditingMember(null);
-    setIsModalOpen(true);
+    setIsAddModalOpen(true);
   };
 
   const handleOpenEdit = (member: RosterMember, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingMember(member);
-    setIsModalOpen(true);
   };
 
   // Sync to active table tracker if active in combat
@@ -191,11 +200,16 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     }
   };
 
-  const handleJoinCombatClick = async (member: RosterMember) => {
+  const handleJoinCombatClick = async (
+    member: RosterMember,
+    customInit?: number,
+    linkedPcId?: string,
+    linkedPcName?: string
+  ) => {
     if (isSyncing || loadingMemberId) return;
     setLoadingMemberId(member.id);
     try {
-      await onJoinCombat(member);
+      await onJoinCombat(member, customInit, linkedPcId, linkedPcName);
     } finally {
       setTimeout(() => {
         setLoadingMemberId(null);
@@ -266,6 +280,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     }
   };
 
+  const activePcs = activeCombatants.filter(
+    (c) => c.type === 'player' || c.role === 'PC' || c.role === 'Player'
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -330,9 +348,12 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                 );
                 const isInCombat =
                   Boolean(activeCombatant) ||
-                  activeCombatantNames.some((n) => n.toLowerCase().trim() === member.name.toLowerCase().trim());
+                  activeCombatantNames.some(
+                    (n) => n.toLowerCase().trim() === member.name.toLowerCase().trim()
+                  );
 
                 const isCardLoading = isSyncing || loadingMemberId === member.id;
+                const isAlly = member.role === 'Ally';
 
                 return (
                   <div
@@ -352,12 +373,12 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                           {renderRoleIcon(member.role)}
                           <span>{member.role}</span>
                         </span>
-                        <span
-                          className="font-bold text-xs text-slate-100 truncate"
+                        <h4
+                          className="font-bold text-slate-100 font-display truncate text-xs"
                           title={member.name}
                         >
                           {member.name}
-                        </span>
+                        </h4>
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
@@ -365,47 +386,75 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                           type="button"
                           onClick={(e) => handleOpenEdit(member, e)}
                           className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
-                          title="Edit Character"
+                          title={`Edit ${member.name}`}
                           aria-label={`Edit ${member.name}`}
                         >
-                          <Pencil className="w-3.5 h-3.5" />
+                          <Pencil className="w-3 h-3" />
                         </button>
-
                         <button
                           type="button"
                           onClick={(e) => handleDeleteMember(member.id, member.name, e)}
-                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
-                          title="Remove from roster"
-                          aria-label={`Remove ${member.name} from roster`}
+                          className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                          title={`Delete ${member.name}`}
+                          aria-label={`Delete ${member.name}`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Stats Strip: AC, Max HP, Initiative Mod */}
-                    <div className="flex items-center gap-2.5 text-[10px] font-mono text-slate-400 bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/80">
-                      <span className="flex items-center gap-1">
-                        <Shield className="w-3 h-3 text-cyan-400" />
-                        <span className="text-slate-200 font-bold">{member.ac}</span> AC
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Heart className="w-3 h-3 text-rose-400" />
-                        <span className="text-slate-200 font-bold">{member.maxHp}</span> HP
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Dices className="w-3 h-3 text-amber-400" />
-                        <span className="text-amber-300 font-bold">
+                    {/* Middle Row: Stats (AC, HP, Init Mod) */}
+                    <div className="grid grid-cols-3 gap-1.5 py-1 px-1.5 rounded-lg bg-slate-950/70 border border-slate-800/80 text-[11px] font-mono">
+                      <div className="flex items-center gap-1 text-cyan-300">
+                        <Shield className="w-3 h-3 text-cyan-400 shrink-0" />
+                        <span className="text-slate-400 text-[10px]">AC:</span>
+                        <span className="font-bold">{member.ac}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-rose-300">
+                        <Heart className="w-3 h-3 text-rose-400 shrink-0" />
+                        <span className="text-slate-400 text-[10px]">HP:</span>
+                        <span className="font-bold">{member.maxHp}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-amber-300">
+                        <Dices className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span className="text-slate-400 text-[10px]">Init:</span>
+                        <span className="font-bold">
                           {member.initiativeMod >= 0 ? `+${member.initiativeMod}` : member.initiativeMod}
-                        </span>{' '}
-                        Init
-                      </span>
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Actions Strip: Active state indicator & Join / Exit Combat */}
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 gap-1.5">
+                    {/* Linked Ally Initiative Option if member is Ally and not yet in combat */}
+                    {!isInCombat && isAlly && activePcs.length > 0 && (
+                      <div className="flex items-center justify-between gap-1 p-1.5 rounded bg-slate-950 border border-emerald-500/30 text-[10px]">
+                        <span className="text-emerald-400 font-semibold flex items-center gap-1 shrink-0">
+                          <LinkIcon className="w-3 h-3" /> Act with PC:
+                        </span>
+                        <select
+                          value={linkedPcByMemberId[member.id] || ''}
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            setLinkedPcByMemberId((prev) => ({
+                              ...prev,
+                              [member.id]: selectedId,
+                            }));
+                          }}
+                          className="bg-slate-900 border border-slate-700 text-slate-200 text-[10px] rounded px-1 py-0.5 max-w-[130px] truncate"
+                        >
+                          <option value="">-- Roll Standard --</option>
+                          {activePcs.map((pc) => (
+                            <option key={pc.id} value={pc.id}>
+                              {pc.name} (Init {pc.initiative})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* Bottom Row: Status Indicator & Join / Exit Action */}
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
                       {isInCombat ? (
-                        <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                        <span className="flex items-center gap-1 text-emerald-400 font-bold text-[10px]">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           <span>In Combat</span>
                         </span>
@@ -431,12 +480,28 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => handleJoinCombatClick(member)}
+                          onClick={() => {
+                            if (isAlly && linkedPcByMemberId[member.id]) {
+                              const targetPc = activePcs.find(
+                                (p) => p.id === linkedPcByMemberId[member.id]
+                              );
+                              if (targetPc) {
+                                const linkedInit = Number((targetPc.initiative - 0.01).toFixed(2));
+                                handleJoinCombatClick(member, linkedInit, targetPc.id, targetPc.name);
+                                return;
+                              }
+                            }
+                            handleJoinCombatClick(member);
+                          }}
                           disabled={isCardLoading}
                           className={`px-2.5 py-1 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 transition flex items-center gap-1 shadow-sm cursor-pointer ml-auto ${
                             isCardLoading ? 'opacity-40 cursor-wait' : ''
                           }`}
-                          title="Roll 1d20 + Init Mod and add character to combat with full HP"
+                          title={
+                            isAlly && linkedPcByMemberId[member.id]
+                              ? 'Join combat linked to selected PC initiative (-0.01)'
+                              : 'Roll 1d20 + Init Mod and add character to combat with full HP'
+                          }
                         >
                           <Swords className="w-3.5 h-3.5" />
                           <span>Join Combat</span>
@@ -450,13 +515,22 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
           )}
         </div>
 
-        {/* Add / Edit Character Modal */}
+        {/* Add Character Modal */}
         <AddRosterModal
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
           onSave={handleSaveMember}
-          initialMember={editingMember}
+          initialMember={null}
           isDm={isDm}
+        />
+
+        {/* Edit Character Modal with strict role gating */}
+        <EditRosterModal
+          isOpen={Boolean(editingMember)}
+          onClose={() => setEditingMember(null)}
+          onSave={handleSaveMember}
+          member={editingMember}
+          isGM={isDm}
         />
       </div>
     </>

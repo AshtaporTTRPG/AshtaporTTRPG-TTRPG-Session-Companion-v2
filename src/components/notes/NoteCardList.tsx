@@ -42,6 +42,9 @@ export interface NoteCardListProps {
   onExternalResetFilters?: () => void;
   onExternalEditNote?: (note: NoteItem, e: React.MouseEvent) => void;
   onOpenReader?: (id: string) => void;
+  isGM?: boolean;
+  currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
+  onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my') => void;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [
@@ -89,6 +92,9 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   onExternalResetFilters,
   onExternalEditNote,
   onOpenReader,
+  isGM = currentRole === 'GM',
+  currentVault = 'myNotes',
+  onTransfer,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<string>('All');
@@ -530,6 +536,9 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               onDelete={() => onDeleteNote(note.id)}
               onEdit={(e) => handleOpenEdit(note, e)}
               onOpenReader={onOpenReader}
+              isGM={isGM}
+              currentVault={currentVault}
+              onTransfer={onTransfer}
             />
           ))
         )}

@@ -956,9 +956,28 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     });
 
     const newInit = rollResult.total;
-    const updated = combatants.map((c) =>
+    let updated = combatants.map((c) =>
       c.id === combatantId ? { ...c, initiative: newInit, updatedAt: Date.now() } : c
     );
+    // If target is a PC, update any linked allies
+    const targetCombatant = combatants.find((c) => c.id === combatantId);
+    if (
+      targetCombatant &&
+      (targetCombatant.type === 'player' ||
+        targetCombatant.role === 'Player' ||
+        targetCombatant.role === 'PC')
+    ) {
+      updated = updated.map((c) => {
+        if (c.linkedPcId === combatantId) {
+          return {
+            ...c,
+            initiative: Number((newInit - 0.01).toFixed(2)),
+            updatedAt: Date.now(),
+          };
+        }
+        return c;
+      });
+    }
     const sorted = sortInitiativeStrictDescending(updated);
 
     let targetIdx = activeTurnIndex;
@@ -1691,6 +1710,25 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           }
         : c
     );
+    // If target is a PC, update any linked allies
+    const editedCombatant = combatants.find((c) => c.id === editingCombatantId);
+    if (
+      editedCombatant &&
+      (editedCombatant.type === 'player' ||
+        editedCombatant.role === 'Player' ||
+        editedCombatant.role === 'PC')
+    ) {
+      updated = updated.map((c) => {
+        if (c.linkedPcId === editingCombatantId) {
+          return {
+            ...c,
+            initiative: Number((editInit - 0.01).toFixed(2)),
+            updatedAt: Date.now(),
+          };
+        }
+        return c;
+      });
+    }
     updated = sortInitiativeStrictDescending(updated);
     setCombatants(updated);
     localCombatantsRef.current = updated;
@@ -1804,23 +1842,36 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       isReserve: data.isReserve,
       hidden: data.isReserve,
       isSecret: data.isReserve,
+      linkedPcId: data.linkedPcId,
+      linkedPcName: data.linkedPcName,
     });
     setIsAddModalOpen(false);
   };
 
-  const handleJoinCombatFromRoster = async (member: RosterMember) => {
+  const handleJoinCombatFromRoster = async (
+    member: RosterMember,
+    customInitiative?: number,
+    linkedPcId?: string,
+    linkedPcName?: string
+  ) => {
     await withSyncLock(async () => {
-      const rollResult = executeDiceRoll({
-        diceType: 'd20',
-        count: 1,
-        modifier: member.initiativeMod,
-        sender: rollerIdentity,
-        isDm,
-        rollType: 'Straight roll',
-        label: `Initiative (${member.name})`,
-      });
+      let finalInitiative: number;
+      if (customInitiative !== undefined) {
+        finalInitiative = customInitiative;
+      } else {
+        const rollResult = executeDiceRoll({
+          diceType: 'd20',
+          count: 1,
+          modifier: member.initiativeMod,
+          sender: rollerIdentity,
+          isDm,
+          rollType: 'Straight roll',
+          label: `Initiative (${member.name})`,
+        });
 
-      liveFeedSync.recordDiceRoll(rollResult, true);
+        liveFeedSync.recordDiceRoll(rollResult, true);
+        finalInitiative = rollResult.total;
+      }
 
       const memberType: CombatantType =
         member.role === 'PC'
@@ -1888,7 +1939,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         hpMax: member.maxHp,
         tempHp: 0,
         hpTemp: 0,
-        initiative: rollResult.total,
+        initiative: finalInitiative,
+        linkedPcId,
+        linkedPcName,
         conditions: [],
         hidden: false,
         maskStats: isDm && (member.role === 'Monster' || member.role === 'Boss'),
@@ -2310,6 +2363,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         isDm={isDm}
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddCombatantFromModal}
+        activeCombatants={combatants}
       />
 
       {/* SMART COMBAT RESET MODAL */}

@@ -1,20 +1,40 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, Copy, Check, Pencil } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight } from 'lucide-react';
 import { NoteItem, DmSecretNote, NoteCategory } from '../../types/notes';
 import { CATEGORY_STYLES } from './NoteCard';
+import { copyToClipboard } from '../../utils/clipboard';
 
 export interface NoteReaderViewProps {
   note: NoteItem | DmSecretNote;
   onBack: () => void;
   onEdit: () => void;
+  isGM?: boolean;
+  currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
+  onTransfer?: (action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my') => void;
 }
 
 export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   note,
   onBack,
   onEdit,
+  isGM = false,
+  currentVault = 'myNotes',
+  onTransfer,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const transferRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isTransferOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (transferRef.current && !transferRef.current.contains(e.target as Node)) {
+        setIsTransferOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isTransferOpen]);
 
   // Keyboard shortcut: Esc to return to standard notes view
   useEffect(() => {
@@ -33,13 +53,13 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   ) as NoteCategory;
   const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
-  const handleCopyFullNote = () => {
+  const handleCopyFullNote = async () => {
     const textToCopy = `${note.title}\n[${cat}]\n\n${note.content}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy);
+    const ok = await copyToClipboard(textToCopy);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   const formattedDate = useMemo(() => {
@@ -99,8 +119,80 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
           </h2>
         </div>
 
-        {/* Right Action Icons: Copy All & Edit */}
+        {/* Right Action Icons: Transfer, Copy All & Edit */}
         <div className="flex items-center gap-1 shrink-0">
+          {/* DM Transfer Action Menu (Visible strictly when isGM === true) */}
+          {isGM && onTransfer && (
+            <div className="relative" ref={transferRef}>
+              <button
+                type="button"
+                onClick={() => setIsTransferOpen((prev) => !prev)}
+                title="Transfer note across vaults"
+                className="px-2 py-1 text-xs font-semibold rounded bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 hover:border-amber-400 transition cursor-pointer flex items-center gap-1"
+              >
+                <ArrowUpRight className="w-3.5 h-3.5" />
+                <span>Transfer</span>
+              </button>
+
+              {isTransferOpen && (
+                <div className="absolute right-0 top-full mt-1 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-xs font-sans">
+                  {currentVault !== 'tableNotes' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTransferOpen(false);
+                        onTransfer('copy_to_table');
+                      }}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>📋</span>
+                      <span>Copy to Table Notes</span>
+                    </button>
+                  )}
+                  {currentVault !== 'tableNotes' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTransferOpen(false);
+                        onTransfer('move_to_table');
+                      }}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>➔</span>
+                      <span>Move to Table Notes</span>
+                    </button>
+                  )}
+                  {currentVault !== 'dmNotes' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTransferOpen(false);
+                        onTransfer('move_to_dm');
+                      }}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>🔒</span>
+                      <span>Move to DM Notes</span>
+                    </button>
+                  )}
+                  {currentVault !== 'myNotes' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTransferOpen(false);
+                        onTransfer('move_to_my');
+                      }}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>👤</span>
+                      <span>Move to My Notes</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleCopyFullNote}

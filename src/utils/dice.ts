@@ -45,6 +45,7 @@ export interface ExecuteRollOptions {
   visibility?: RollVisibility;
   rollType?: RollTypeCategory;
   label?: string;
+  macroName?: string;
 }
 
 export function executeDiceRoll({
@@ -62,6 +63,7 @@ export function executeDiceRoll({
   visibility = 'public',
   rollType = 'Straight roll',
   label = '',
+  macroName,
 }: ExecuteRollOptions): DiceRollResult {
   const resolvedSender =
     rollerName && rollerName.trim()
@@ -192,6 +194,7 @@ export function executeDiceRoll({
       formula,
       individualSummary: allIndividualLineItems.join(' | '),
       individualLineItems: allIndividualLineItems,
+      macroName,
     };
   }
 
@@ -398,6 +401,7 @@ export function executeDiceRoll({
     individualSummary,
     individualLineItems: allIndividualLineItems,
     instances,
+    macroName,
   };
 }
 
@@ -543,3 +547,34 @@ export function combineFormulaWithModifier(
     combinedModifier,
   };
 }
+
+/**
+ * Parses macro formula using standardized regex: ^(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?$
+ * Supports expressions like 1d20+5, 2d6+3, 1d8-1, 8d6
+ */
+export function parseMacroFormula(formula: string): {
+  count: number;
+  sides: number;
+  modifier: number;
+  dieType: DieType;
+} | null {
+  if (!formula) return null;
+  const cleaned = formula.trim();
+  const match = cleaned.match(/^(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?$/i);
+  if (!match) return null;
+
+  const count = parseInt(match[1], 10);
+  const sides = parseInt(match[2], 10);
+  const sign = match[3];
+  const modVal = match[4] ? parseInt(match[4], 10) : 0;
+  const modifier = sign === '-' ? -modVal : modVal;
+  const dieType = `d${sides}` as DieType;
+
+  return {
+    count,
+    sides,
+    modifier,
+    dieType,
+  };
+}
+

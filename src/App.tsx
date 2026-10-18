@@ -5,8 +5,10 @@
 
 import React, { useState, useEffect } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
-import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X } from 'lucide-react';
+import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X, Copy, Check } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from './utils/audio';
+import { copyToClipboard } from './utils/clipboard';
+import { runBootSanitizerOnce } from './utils/notesSanitizer';
 import { CombatTracker } from './components/combat/CombatTracker';
 import { DiceChamber } from './components/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
@@ -55,9 +57,11 @@ export default function App() {
     return null;
   });
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
+  const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
-  // Initialize OBR Lifecycle and read initial pin preference
+  // Initialize OBR Lifecycle, boot sanitizer, and read initial pin preference
   useEffect(() => {
+    runBootSanitizerOnce();
     OBR.onReady(async () => {
       try {
         const role = await OBR.player.getRole();
@@ -475,18 +479,51 @@ export default function App() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
-                className="text-neutral-400 hover:text-neutral-200 p-1 rounded-md hover:bg-neutral-800 transition cursor-pointer"
-                title={isGM ? "Stop Revealing & Close" : "Dismiss"}
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const text = `${broadcastNote.title}\n\n${broadcastNote.content}`;
+                    const ok = await copyToClipboard(text);
+                    if (ok) {
+                      setBroadcastCopied(true);
+                      setTimeout(() => setBroadcastCopied(false), 1500);
+                    }
+                  }}
+                  className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                    broadcastCopied
+                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                      : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-neutral-700 hover:border-amber-400/50'
+                  }`}
+                  title="Copy message to clipboard"
+                >
+                  {broadcastCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Copy Message</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
+                  className="text-neutral-400 hover:text-neutral-200 p-1 rounded-md hover:bg-neutral-800 transition cursor-pointer"
+                  title={isGM ? "Stop Revealing & Close" : "Dismiss"}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Note Text Content */}
-            <div className="p-3 rounded-xl bg-neutral-950/90 border border-neutral-800 text-xs text-neutral-200 font-sans leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">
+            <div className="p-3 rounded-xl bg-neutral-950/90 border border-neutral-800 text-xs text-neutral-200 font-sans leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200">
               {broadcastNote.content}
             </div>
 

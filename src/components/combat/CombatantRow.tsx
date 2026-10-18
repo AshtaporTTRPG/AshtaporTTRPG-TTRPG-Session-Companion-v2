@@ -25,6 +25,7 @@ import {
   Clock,
   Shield,
   Plus,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { ConditionPicker } from './ConditionPicker';
 
@@ -142,7 +143,7 @@ const ROLE_CONFIG: Record<
   },
 };
 
-export const CombatantRow: React.FC<CombatantRowProps> = ({
+const CombatantRowInner: React.FC<CombatantRowProps> = ({
   combatant,
   index,
   totalVisible,
@@ -184,7 +185,50 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
 
   const canEdit = isDm || isPlayerOrAlly;
 
-  const health = getHealthThreshold(combatant.hpCurrent, combatant.hpMax);
+  // 300ms trailing debounce for rapid HP adjustments (-5, -1, +1, +5)
+  const [localHp, setLocalHp] = useState<number>(combatant.hpCurrent);
+  const pendingHpDeltaRef = useRef<number>(0);
+  const hpDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isDebouncingHpRef = useRef<boolean>(false);
+  const isInputFocusedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!isDebouncingHpRef.current) {
+      setLocalHp(combatant.hpCurrent);
+    }
+  }, [combatant.hpCurrent]);
+
+  useEffect(() => {
+    return () => {
+      if (hpDebounceTimerRef.current) {
+        clearTimeout(hpDebounceTimerRef.current);
+        if (pendingHpDeltaRef.current !== 0) {
+          onHpDelta(combatant.id, pendingHpDeltaRef.current);
+        }
+      }
+    };
+  }, [combatant.id, onHpDelta]);
+
+  const handleQuickHpAdjust = (delta: number) => {
+    if (!canEdit) return;
+    isDebouncingHpRef.current = true;
+    pendingHpDeltaRef.current += delta;
+    setLocalHp((prev) => Math.max(0, Math.min(combatant.hpMax, prev + delta)));
+
+    if (hpDebounceTimerRef.current) {
+      clearTimeout(hpDebounceTimerRef.current);
+    }
+    hpDebounceTimerRef.current = setTimeout(() => {
+      const totalDelta = pendingHpDeltaRef.current;
+      pendingHpDeltaRef.current = 0;
+      isDebouncingHpRef.current = false;
+      if (totalDelta !== 0) {
+        onHpDelta(combatant.id, totalDelta);
+      }
+    }, 300);
+  };
+
+  const health = getHealthThreshold(localHp, combatant.hpMax);
   const effectiveAcInfo = getEffectiveAc(combatant);
 
   const visibleConditions = combatant.conditions
@@ -215,9 +259,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
 
   const activeConcentrationAlert = localConcentrationAlert || concentrationAlert;
 
+  // Input Focus Shielding: Do not overwrite active input while popover open or focused
   useEffect(() => {
-    setMaxHpInput(combatant.hpMax.toString());
-  }, [combatant.hpMax]);
+    if (!isHpPopoverOpen && !isInputFocusedRef.current) {
+      setMaxHpInput(combatant.hpMax.toString());
+    }
+  }, [combatant.hpMax, isHpPopoverOpen]);
 
   useEffect(() => {
     if (!isHpPopoverOpen) return;
@@ -482,6 +529,19 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
             </span>
           </span>
 
+          {/* Linked Ally Badge */}
+          {(combatant.linkedPcId || combatant.linkedPcName) && (
+            <span
+              className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 flex items-center gap-0.5 shrink-0 shadow-sm"
+              title={`Linked to PC: ${combatant.linkedPcName || 'PC'}`}
+            >
+              <LinkIcon className="w-2.5 h-2.5 text-emerald-400" />
+              <span className="truncate max-w-[80px]">
+                {combatant.linkedPcName ? `🔗 ${combatant.linkedPcName}` : '🔗 Linked'}
+              </span>
+            </span>
+          )}
+
           {/* Dynamic Health State Pill */}
           {(isDm || !isUnderFoW) && (
             <span
@@ -527,9 +587,9 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                 }}
                 disabled={!canEdit}
                 className="font-mono font-bold text-xs hover:text-amber-400 px-1 py-0.5 rounded bg-slate-900 border border-slate-800 tabular-nums transition-colors cursor-pointer text-slate-200"
-                title={canEdit ? 'Click to manage HP (Damage, Heal, Set Max)' : `HP: ${combatant.hpCurrent}/${combatant.hpMax}`}
+                title={canEdit ? 'Click to manage HP (Damage, Heal, Set Max)' : `HP: ${localHp}/${combatant.hpMax}`}
               >
-                {combatant.hpCurrent}/{combatant.hpMax}
+                {localHp}/{combatant.hpMax}
               </button>
 
               {/* INLINE QUICK HP POPOVER (Anchored right below HP button) */}
@@ -567,6 +627,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       placeholder="Damage"
                       value={damageAmount}
                       onChange={(e) => setDamageAmount(e.target.value)}
+                      onFocus={() => {
+                        isInputFocusedRef.current = true;
+                      }}
+                      onBlur={() => {
+                        isInputFocusedRef.current = false;
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -593,6 +659,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       placeholder="Heal"
                       value={healAmount}
                       onChange={(e) => setHealAmount(e.target.value)}
+                      onFocus={() => {
+                        isInputFocusedRef.current = true;
+                      }}
+                      onBlur={() => {
+                        isInputFocusedRef.current = false;
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -619,6 +691,12 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                       placeholder="Max HP"
                       value={maxHpInput}
                       onChange={(e) => setMaxHpInput(e.target.value)}
+                      onFocus={() => {
+                        isInputFocusedRef.current = true;
+                      }}
+                      onBlur={() => {
+                        isInputFocusedRef.current = false;
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -715,7 +793,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => onHpDelta(combatant.id, -5)}
+                  onClick={() => handleQuickHpAdjust(-5)}
                   disabled={!canEdit}
                   className="h-6 px-1.5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
                   title="-5 HP"
@@ -724,7 +802,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onHpDelta(combatant.id, -1)}
+                  onClick={() => handleQuickHpAdjust(-1)}
                   disabled={!canEdit}
                   className="h-6 px-1.5 rounded bg-slate-800 hover:bg-rose-900 border border-slate-700 hover:border-rose-700 text-rose-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
                   title="-1 HP"
@@ -733,7 +811,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onHpDelta(combatant.id, 1)}
+                  onClick={() => handleQuickHpAdjust(1)}
                   disabled={!canEdit}
                   className="h-6 px-1.5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
                   title="+1 HP"
@@ -742,7 +820,7 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onHpDelta(combatant.id, 5)}
+                  onClick={() => handleQuickHpAdjust(5)}
                   disabled={!canEdit}
                   className="h-6 px-1.5 rounded bg-slate-800 hover:bg-emerald-900 border border-slate-700 hover:border-emerald-700 text-emerald-300 font-mono text-[10px] font-bold flex items-center justify-center transition disabled:opacity-30 cursor-pointer"
                   title="+5 HP"
@@ -935,4 +1013,51 @@ export const CombatantRow: React.FC<CombatantRowProps> = ({
   );
 };
 
+export const CombatantRow = React.memo(
+  CombatantRowInner,
+  (prev, next) => {
+    // 1. Compare isActive and row expansion / action menu state
+    if (prev.isActive !== next.isActive) return false;
+    if (prev.isExpanded !== next.isExpanded) return false;
+    if (prev.isActionMenuOpen !== next.isActionMenuOpen) return false;
+    if (prev.isDm !== next.isDm) return false;
+    if (prev.concentrationAlert?.dc !== next.concentrationAlert?.dc) return false;
+    if (prev.inlineThpId !== next.inlineThpId) return false;
+    if (prev.inlineThpVal !== next.inlineThpVal) return false;
+
+    // 2. Core combatant fields comparison
+    const p = prev.combatant;
+    const n = next.combatant;
+    if (p.id !== n.id) return false;
+    if (p.initiative !== n.initiative) return false;
+    if (p.hpCurrent !== n.hpCurrent || (p.hp ?? 0) !== (n.hp ?? 0)) return false;
+    if (p.hpMax !== n.hpMax || (p.maxHp ?? 0) !== (n.maxHp ?? 0)) return false;
+    if ((p.tempHp ?? p.hpTemp ?? 0) !== (n.tempHp ?? n.hpTemp ?? 0)) return false;
+    if (p.name !== n.name || p.type !== n.type || p.role !== n.role) return false;
+    if (p.linkedPcId !== n.linkedPcId || p.linkedPcName !== n.linkedPcName) return false;
+    if (p.hidden !== n.hidden || p.isReserve !== n.isReserve || p.maskStats !== n.maskStats) return false;
+    if (
+      p.deathSaves?.successes !== n.deathSaves?.successes ||
+      p.deathSaves?.failures !== n.deathSaves?.failures
+    ) {
+      return false;
+    }
+
+    // 3. Conditions comparison
+    const pConds = p.conditions || [];
+    const nConds = n.conditions || [];
+    if (pConds.length !== nConds.length) return false;
+    for (let i = 0; i < pConds.length; i++) {
+      const pc = pConds[i];
+      const nc = nConds[i];
+      const pName = typeof pc === 'string' ? pc : pc.name;
+      const nName = typeof nc === 'string' ? nc : nc.name;
+      if (pName !== nName) return false;
+    }
+
+    return true;
+  }
+);
+
 export default CombatantRow;
+

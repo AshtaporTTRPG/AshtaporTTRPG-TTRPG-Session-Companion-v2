@@ -86,6 +86,8 @@ export const CreateNoteModal: React.FC<CreateNoteModalProps> = ({
     });
   };
 
+  const liveWordCount = content.trim() ? content.trim().split(/\s+/).filter(Boolean).length : 0;
+
   return (
     <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
       <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl p-4 shadow-2xl space-y-3">
@@ -190,12 +192,10 @@ export const CreateNoteModal: React.FC<CreateNoteModalProps> = ({
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-            <span className="text-[10px] text-slate-500 flex items-center gap-1">
+            <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/80" />
               <span>
-                {isDmSecretNote
-                  ? 'Can be broadcast to table anytime with 👁'
-                  : 'Auto-saved locally'}
+                ● Auto-saved locally · {liveWordCount} words
               </span>
             </span>
 

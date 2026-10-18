@@ -29,44 +29,7 @@ const NOTE_CATEGORIES: { id: NoteCategory; label: string; badgeLabel: string; ba
   { id: 'lore', label: 'World Lore', badgeLabel: 'Lore', badgeClass: 'bg-blue-950 text-blue-300 border-blue-700/80' },
 ];
 
-const INITIAL_NOTES: SessionNote[] = [
-  {
-    id: 'note-1',
-    title: 'Cultist Midnight Meeting Clue',
-    category: 'clue',
-    content: 'Strange purple ichor near the cellar stairs. The castle crypt keeper has been missing for 3 days. Rumor of a meeting at midnight in the forest grove.',
-    isPinned: true,
-    createdAt: Date.now() - 3600000,
-    updatedAt: Date.now() - 3600000,
-  },
-  {
-    id: 'note-2',
-    title: 'Party Loot & Magic Items',
-    category: 'loot',
-    content: 'Party Currency: 240 Units, 3 Cubes (75 Units), 1 Bar (100 Units). 3x Potions of Healing (Bonus Action roll, Action max heal). +1 Longsword attuned to Valerius.',
-    isPinned: true,
-    createdAt: Date.now() - 7200000,
-    updatedAt: Date.now() - 7200000,
-  },
-  {
-    id: 'note-3',
-    title: 'Sister Theresa (Morning Dawn)',
-    category: 'npc',
-    content: 'Priestess in Caladria who can conduct the Resurrection Ritual (base DC 8 + prior deaths). Requires pure unit alloy contribution.',
-    isPinned: false,
-    createdAt: Date.now() - 10800000,
-    updatedAt: Date.now() - 10800000,
-  },
-  {
-    id: 'note-4',
-    title: 'General Supplies',
-    category: 'general',
-    content: 'Stocked 50ft hempen rope, 4 torches, 2 flasks of oil, and 5 rations per party member before descending.',
-    isPinned: false,
-    createdAt: Date.now() - 14400000,
-    updatedAt: Date.now() - 14400000,
-  },
-];
+const INITIAL_NOTES: SessionNote[] = [];
 
 export const NotesAndReference: React.FC = () => {
   const [notes, setNotes] = useState<SessionNote[]>(() => {

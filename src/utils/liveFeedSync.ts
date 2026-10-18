@@ -51,6 +51,7 @@ export interface UnifiedFeedItem {
     individualSummary?: string;
     individualLineItems?: string[];
     instances?: RollInstance[];
+    macroName?: string;
   };
 }
 
@@ -329,6 +330,7 @@ class LiveFeedSyncManager {
         individualSummary: roll.individualSummary,
         individualLineItems: roll.individualLineItems,
         instances: roll.instances,
+        macroName: roll.macroName,
       },
     };
 

@@ -60,6 +60,8 @@ export interface Combatant {
   tokenId?: string; // Linked Owlbear Rodeo scene token ID for lightweight token focus
   encounterId?: string; // Tagged encounter epoch
   rosterId?: string; // Link to user's saved RosterMember id
+  linkedPcId?: string; // Linked PC id for shared Ally initiative
+  linkedPcName?: string; // Name of linked PC for display
 }
 
 /**
@@ -219,6 +221,7 @@ export interface DiceRollResult {
   individualSummary?: string;
   individualLineItems?: string[];
   instances?: RollInstance[];
+  macroName?: string;
 }
 
 export type PinCategory = 'general' | 'npc' | 'quest' | 'loot' | 'secret' | 'landmark' | 'tavern' | 'settlement';

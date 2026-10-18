@@ -9,6 +9,8 @@ import {
 import {
   executeDiceRoll,
   parseDiceFormula,
+  parseMacroFormula,
+  rollSingleDie,
   addDieToFormula,
   setFormulaModifier,
   combineFormulaWithModifier,
@@ -33,6 +35,9 @@ import {
   ChevronUp,
   X,
 } from 'lucide-react';
+import { AddCustomMacroModal } from './AddCustomMacroModal';
+import { EditCustomMacroModal } from './EditCustomMacroModal';
+import { RollFeedCard } from './RollFeedCard';
 
 export interface DiceTabProps {
   isDm: boolean;
@@ -56,10 +61,6 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   const [isMacrosOpen, setIsMacrosOpen] = useState<boolean>(false);
   const [editingMacro, setEditingMacro] = useState<CustomMacro | null>(null);
   const [isAddMacroOpen, setIsAddMacroOpen] = useState<boolean>(false);
-  const [macroName, setMacroName] = useState<string>('');
-  const [macroFormula, setMacroFormula] = useState<string>('1d20+5');
-  const [macroMode, setMacroMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal');
-  const [macroMod, setMacroMod] = useState<number>(0);
 
   // Dice History Feed State
   const [rollHistory, setRollHistory] = useState<DiceRollResult[]>(() => {
@@ -293,7 +294,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  // ROLL CUSTOM MACRO (Sandboxed execution: completely isolates macro from staged pool/modifier/mode)
+  // ROLL CUSTOM MACRO (Universal formula parsing with regex ^(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?$)
   const handleRollMacro = (macro: CustomMacro, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -311,38 +312,92 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     if (!expr) return;
 
     const currentUserId = liveFeedSync.getPlayerId();
-    const parsed = parseDiceFormula(expr);
+    const parsedMacro = parseMacroFormula(expr);
 
-    // Strictly prioritize macro.modifier if defined, otherwise the parsed modifier from macro formula, otherwise 0
-    const finalMacroModifier =
-      macro.modifier !== undefined && macro.modifier !== null
-        ? macro.modifier
-        : parsed
-        ? parsed.modifier
-        : 0;
+    if (parsedMacro) {
+      const { count, sides, modifier, dieType } = parsedMacro;
 
-    if (!parsed) {
-      // Fallback: roll 1d20 with the macro's isolated modifier
-      const fallback = executeDiceRoll({
-        diceType: 'd20',
-        count: 1,
-        advantageMode: activeAdvMode,
+      if (activeAdvMode === 'advantage' || activeAdvMode === 'disadvantage') {
+        // Roll base die twice, pick winning face, and append formula modifier cleanly
+        const valA = rollSingleDie(sides);
+        const valB = rollSingleDie(sides);
+        const isAdv = activeAdvMode === 'advantage';
+        const winningFace = isAdv ? Math.max(valA, valB) : Math.min(valA, valB);
+        const discardedFace = isAdv ? Math.min(valA, valB) : Math.max(valA, valB);
+        const total = winningFace + modifier;
+        const isCrit = sides === 20 && winningFace === 20;
+        const isFumble = sides === 20 && winningFace === 1;
+
+        const modStr = modifier !== 0 ? (modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`) : '';
+        const breakdownLine = `${count}d${sides} (${isAdv ? 'Adv' : 'Dis'}): [${winningFace}, ~~${discardedFace}~~]${modStr} = ${total}`;
+
+        const result: DiceRollResult = {
+          id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          timestamp: Date.now(),
+          sender: rollerName,
+          rollerName,
+          rollerId: currentUserId,
+          isDm,
+          visibility,
+          rollType: 'Straight roll',
+          diceType: dieType || 'd20',
+          count: 1,
+          modifier,
+          rolls: [winningFace],
+          rawRolls: [valA, valB],
+          pairedRolls: [
+            {
+              pairIndex: 1,
+              die1: valA,
+              die2: valB,
+              selected: winningFace,
+              discarded: discardedFace,
+              modifier,
+              totalWithModifier: total,
+              lineItem: `[${winningFace}, ~~${discardedFace}~~]${modStr}`,
+            },
+          ],
+          total,
+          advantageMode: activeAdvMode,
+          breakdown: [breakdownLine],
+          formula: `${expr} (${isAdv ? 'Advantage' : 'Disadvantage'})`,
+          label: macro.name,
+          macroName: macro.name,
+          isCrit,
+          isFumble,
+          displayMode: 'sum',
+        };
+
+        liveFeedSync.recordDiceRoll(result, true);
+        return;
+      }
+
+      // Straight roll using standardized formula parsing
+      const result = executeDiceRoll({
+        diceType: dieType || 'd20',
+        count,
+        modifier,
+        advantageMode: 'normal',
         displayMode: 'sum',
-        modifier: finalMacroModifier,
         sender: rollerName,
         rollerName,
         rollerId: currentUserId,
         isDm,
         visibility,
-        label: macro.name || expr,
+        label: macro.name,
+        macroName: macro.name,
       });
-      liveFeedSync.recordDiceRoll(fallback, true);
+
+      liveFeedSync.recordDiceRoll(result, true);
       return;
     }
 
-    // Execute isolated roll using macro's formula pool and modifier
+    // Fallback if multi-pool formula (e.g., 2d20+1d8+5)
+    const parsed = parseDiceFormula(expr);
+    const finalMacroModifier = parsed ? parsed.modifier : 0;
+
     const result = executeDiceRoll({
-      pool: parsed.pool,
+      pool: parsed?.pool,
       modifier: finalMacroModifier,
       advantageMode: activeAdvMode,
       displayMode: 'sum',
@@ -352,6 +407,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
       isDm,
       visibility,
       label: macro.name || expr,
+      macroName: macro.name,
     });
 
     liveFeedSync.recordDiceRoll(result, true);
@@ -360,46 +416,13 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   // MACRO MODAL CONTROLS
   const handleOpenAddMacro = () => {
     setEditingMacro(null);
-    setMacroName('');
-    setMacroFormula(formulaInput || '1d20+5');
-    setMacroMode(advantageMode);
-    setMacroMod(modifier);
     setIsAddMacroOpen(true);
   };
 
   const handleOpenEditMacro = (m: CustomMacro, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingMacro(m);
-    setMacroName(m.name);
-    setMacroFormula(m.formula);
-    setMacroMode(m.advantageMode || 'normal');
-    setMacroMod(m.modifier ?? 0);
     setIsAddMacroOpen(true);
-  };
-
-  const handleSaveMacro = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!macroName.trim() || !macroFormula.trim()) return;
-
-    if (editingMacro) {
-      const updated = updateCustomMacro(editingMacro.id, {
-        name: macroName.trim(),
-        formula: macroFormula.trim(),
-        advantageMode: macroMode,
-        modifier: macroMod,
-      });
-      setMacros(updated);
-    } else {
-      const created = addCustomMacro(
-        macroName.trim(),
-        macroFormula.trim(),
-        macroMode,
-        macroMod
-      );
-      setMacros((prev) => [...prev, created]);
-    }
-    setIsAddMacroOpen(false);
-    setEditingMacro(null);
   };
 
   const handleDeleteMacro = (id: string, e: React.MouseEvent) => {
@@ -807,277 +830,48 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
                 );
               }
 
-              const hasInstances = roll.instances && roll.instances.length > 0;
-
               return (
-                <div
+                <RollFeedCard
                   key={roll.id}
-                  className={`bg-slate-900/90 border rounded-lg p-2 text-xs select-none shadow-sm transition space-y-1.5 ${
-                    roll.isCrit
-                      ? 'border-emerald-500/80 bg-emerald-950/15 ring-1 ring-emerald-500/30'
-                      : roll.isFumble
-                      ? 'border-rose-600/80 bg-rose-950/15 ring-1 ring-rose-500/30'
-                      : isGmOnly
-                      ? 'border-purple-800/60 bg-purple-950/20'
-                      : 'border-slate-800'
-                  }`}
-                >
-                  {/* Header Row: Flex row with Roller name + Expression on left, Bold Total + RotateCcw on right */}
-                  <div className="flex items-center justify-between gap-1.5 pb-1 border-b border-slate-800/80">
-                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                      <span
-                        className="font-bold text-slate-200 truncate max-w-[100px]"
-                        title={roll.rollerName || roll.sender}
-                      >
-                        {roll.rollerName || roll.sender}
-                      </span>
-                      <span
-                        className="text-[11px] text-slate-400 font-mono truncate"
-                        title={roll.formula || `${roll.count}${roll.diceType}`}
-                      >
-                        {roll.formula || `${roll.count}${roll.diceType}`}
-                      </span>
-                      {isGmOnly && (
-                        <span className="text-[9px] text-purple-300 font-semibold px-1 py-0.2 rounded bg-purple-950/80 border border-purple-700/70 shrink-0 inline-flex items-center gap-0.5">
-                          🔒 GM
-                        </span>
-                      )}
-                      {roll.visibility === 'self' && (
-                        <span className="text-[9px] text-slate-400 font-semibold px-1 py-0.2 rounded bg-slate-800 border border-slate-700 shrink-0">
-                          Self
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Bold amber/gold total / results */}
-                      <span className="font-mono font-bold text-amber-300 text-xs tabular-nums">
-                        {roll.displayMode === 'individual'
-                          ? `Results: ${
-                              hasInstances
-                                ? roll.instances!.map((i) => i.total).join(', ')
-                                : roll.rolls.join(', ')
-                            }`
-                          : `Total: ${roll.total}`}
-                      </span>
-
-                      {/* Compact RotateCcw re-roll icon button */}
-                      <button
-                        type="button"
-                        onClick={(e) => handleReroll(roll, e)}
-                        className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
-                        title="Reroll"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Body: Multi-Instance Rows or Pure Damage Breakdown */}
-                  {hasInstances ? (
-                    <div className="space-y-1 pt-0.5">
-                      {roll.instances!.map((inst) => (
-                        <div
-                          key={inst.index}
-                          className="flex items-center justify-between gap-1.5 py-1 px-1.5 rounded bg-slate-950/60 border border-slate-800/60 text-xs"
-                        >
-                          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                            <span className="text-slate-400 font-semibold text-[11px] shrink-0">
-                              Roll {inst.index}:
-                            </span>
-
-                            {/* Boxed d20 badge */}
-                            <span className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-slate-700 font-mono tabular-nums shrink-0 inline-flex items-center gap-1">
-                              <span>{inst.d20Chosen}</span>
-                              {inst.d20Discarded !== undefined && (
-                                <>
-                                  <span className="text-slate-600">,</span>
-                                  <span className="line-through text-slate-500 font-normal">
-                                    {inst.d20Discarded}
-                                  </span>
-                                </>
-                              )}
-                            </span>
-
-                            {/* Crit badge */}
-                            {inst.isCrit && (
-                              <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
-                                CRIT
-                              </span>
-                            )}
-
-                            {/* Fumble badge */}
-                            {inst.isFumble && (
-                              <span className="bg-rose-950 text-rose-400 border border-rose-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
-                                FUMBLE
-                              </span>
-                            )}
-
-                            {/* Rider dice notation */}
-                            {inst.riders.map((r, rIdx) => (
-                              <span key={rIdx} className="text-slate-300 font-mono text-[11px] shrink-0">
-                                + {r.count}{r.diceType}[{r.rolls.join(', ')}]
-                              </span>
-                            ))}
-
-                            {/* Modifier notation */}
-                            {inst.modifier !== 0 && (
-                              <span className="text-slate-400 font-mono text-[11px] shrink-0">
-                                {inst.modifier > 0
-                                  ? `+ ${inst.modifier}`
-                                  : `- ${Math.abs(inst.modifier)}`}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Instance subtotal: Bold right-aligned value in bright yellow/gold */}
-                          <span className="text-amber-300 font-bold font-mono text-xs tabular-nums shrink-0 ml-auto pl-1">
-                            = {inst.total}
-                          </span>
-                        </div>
-                      ))}
-
-                      {/* Sum Mode Footer */}
-                      {roll.displayMode === 'sum' && (
-                        <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
-                          <span>Combined Total:</span>
-                          <span className="font-mono tabular-nums text-sm">{roll.total}</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* Pure damage or legacy fallback */
-                    <div className="pt-0.5 space-y-1 text-[11px] font-mono">
-                      {roll.breakdown && roll.breakdown.length > 0 ? (
-                        roll.breakdown
-                          .filter((line) => !line.startsWith('Total:'))
-                          .map((line, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between text-slate-300 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/60"
-                            >
-                              <span>{line}</span>
-                            </div>
-                          ))
-                      ) : (
-                        <div className="text-slate-400">
-                          Rolls: [{roll.rolls.join(', ')}]
-                          {roll.modifier !== 0 &&
-                            ` (${roll.modifier > 0 ? `+${roll.modifier}` : roll.modifier})`}
-                        </div>
-                      )}
-
-                      {roll.displayMode === 'sum' && (
-                        <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
-                          <span>Combined Total:</span>
-                          <span className="font-mono tabular-nums text-sm">{roll.total}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                  roll={roll}
+                  onReroll={handleReroll}
+                  isDm={isDm}
+                  playerName={rollerName}
+                />
               );
             })
           )}
         </div>
       </div>
 
-      {/* 5. MODAL: ADD / EDIT MACRO */}
-      {isAddMacroOpen && (
-        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="w-full max-w-xs bg-slate-900 border border-slate-700 rounded-xl p-3.5 shadow-2xl space-y-2.5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-              <h4 className="text-xs font-bold text-slate-100 font-display flex items-center gap-1.5">
-                <Bookmark className="w-3.5 h-3.5 text-amber-400" />
-                <span>{editingMacro ? 'Edit Macro' : 'Add Custom Macro'}</span>
-              </h4>
-              <button
-                type="button"
-                onClick={() => setIsAddMacroOpen(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+      {/* 5. MODALS: ADD / EDIT MACRO */}
+      <AddCustomMacroModal
+        isOpen={isAddMacroOpen && !editingMacro}
+        onClose={() => setIsAddMacroOpen(false)}
+        initialFormula={formulaInput || '1d20+5'}
+        initialMode={advantageMode}
+        onSave={({ name, formula, advantageMode }) => {
+          const created = addCustomMacro(name, formula, advantageMode, 0);
+          setMacros((prev) => [...prev, created]);
+        }}
+      />
 
-            <form onSubmit={handleSaveMacro} className="space-y-2 text-xs">
-              <div>
-                <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-                  Macro Name *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Greatsword Attack, Sneak Attack"
-                  value={macroName}
-                  onChange={(e) => setMacroName(e.target.value)}
-                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400"
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-                  Formula *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 1d20+5, 2d20+1d8+5, 8d6"
-                  value={macroFormula}
-                  onChange={(e) => setMacroFormula(e.target.value)}
-                  className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-                    Roll Mode
-                  </label>
-                  <select
-                    value={macroMode}
-                    onChange={(e) => setMacroMode(e.target.value as any)}
-                    className="w-full px-1.5 py-1 rounded bg-slate-950 border border-slate-700 text-slate-200"
-                  >
-                    <option value="normal">Straight</option>
-                    <option value="advantage">Advantage</option>
-                    <option value="disadvantage">Disadvantage</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-                    Modifier
-                  </label>
-                  <input
-                    type="number"
-                    value={macroMod}
-                    onChange={(e) => setMacroMod(parseInt(e.target.value, 10) || 0)}
-                    className="w-full px-1.5 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-slate-200"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsAddMacroOpen(false)}
-                  className="px-2.5 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 shadow cursor-pointer"
-                >
-                  {editingMacro ? 'Save Changes' : 'Create Macro'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <EditCustomMacroModal
+        isOpen={isAddMacroOpen && Boolean(editingMacro)}
+        macro={editingMacro}
+        onClose={() => {
+          setIsAddMacroOpen(false);
+          setEditingMacro(null);
+        }}
+        onSave={({ id, name, formula, advantageMode }) => {
+          const updated = updateCustomMacro(id, {
+            name,
+            formula,
+            advantageMode,
+          });
+          setMacros(updated);
+        }}
+      />
     </div>
   );
 };

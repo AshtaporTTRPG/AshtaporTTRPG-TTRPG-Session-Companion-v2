@@ -11,6 +11,7 @@ import {
   Download,
   Upload,
   X,
+  Shield,
 } from 'lucide-react';
 import {
   NoteItem,
@@ -33,6 +34,7 @@ import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
 import { DmNotesVault } from '../DmNotesVault';
 import { CreateNoteModal } from './CreateNoteModal';
 import { NoteReaderView } from './NoteReaderView';
+import { sanitizeNotesList } from '../../utils/notesSanitizer';
 
 // Re-export for App.tsx and external consumers
 export type { BroadcastNotePayload, NotesScope } from '../../types/notes';
@@ -63,87 +65,8 @@ export const CATEGORY_ABBREVIATIONS: Record<string, string> = {
   Hook: 'Hook',
 };
 
-const DEFAULT_MY_NOTES: NoteItem[] = [
-  {
-    id: 'my-note-1',
-    title: 'Personal Objectives',
-    category: 'General',
-    content:
-      '• Track down the apothecary who sold the cursed draught.\n• Restock rations, sharpen daggers, prepare protection scrolls.\n• Intuitions: The hooded guide in the tavern seemed unusually familiar with the crypt.',
-    isPinned: true,
-    updatedAt: new Date(Date.now() - 3600000).toISOString(),
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: 'my-note-2',
-    title: 'Elara & Town Contacts',
-    category: 'NPC',
-    content:
-      '• Elara the Herbalist: Owed 20 GP for dried belladonna.\n• Captain Kenneth: Guard captain, fair-minded but under pressure from the magistrate.\n• Malakor the Blind: Mystic hermit in the marsh; warned of stone statues that walk at night.',
-    isPinned: false,
-    updatedAt: new Date(Date.now() - 7200000).toISOString(),
-    createdAt: new Date(Date.now() - 7200000).toISOString(),
-  },
-  {
-    id: 'my-note-3',
-    title: 'Purse & Magic Items',
-    category: 'Loot',
-    content:
-      '• My Purse: 45 GP, 12 SP\n• Valerius: +1 Longsword (attuned)\n• Elara: Wand of Magic Missiles (4 charges remaining)\n• Personal Bag: 50ft silk rope, 3 torches, pouch of crushed obsidian',
-    isPinned: false,
-    updatedAt: new Date(Date.now() - 10800000).toISOString(),
-    createdAt: new Date(Date.now() - 10800000).toISOString(),
-  },
-  {
-    id: 'my-note-4',
-    title: 'Purple Rune Clue',
-    category: 'Quest',
-    content:
-      '• Purple rune etched on the crypt lintel matches the abjuration sigil from the ruined temple.\n• Cipher snippet: "When the eclipse turns the obsidian spire red."',
-    isPinned: false,
-    updatedAt: new Date(Date.now() - 14400000).toISOString(),
-    createdAt: new Date(Date.now() - 14400000).toISOString(),
-  },
-];
-
-const DEFAULT_TABLE_NOTES: NoteItem[] = [
-  {
-    id: 'table-note-1',
-    title: 'Campaign Shared Objectives',
-    category: 'Quest',
-    content:
-      '• Primary Quest: Infiltrate the Sunken Catacombs beneath Ashtapor.\n• Active Bounty: Recover the stolen Relic of the Sun Father.\n• Investigate the disappearance of the merchant caravan along the south road.',
-    isPinned: true,
-    updatedAt: new Date(Date.now() - 3600000).toISOString(),
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-    authorRole: 'GM',
-    authorName: 'Game Master',
-  },
-  {
-    id: 'table-note-2',
-    title: 'Party Treasury & Shared Gear',
-    category: 'Loot',
-    content:
-      '• Party Treasury: 580 GP, 110 SP, 3 uncut amethyst gems (50 GP each)\n• Shared Cart: 4x Potion of Healing, 2x Antitoxin vials, 100ft hempen rope, heavy crowbar.\n• Rations: 18 days of party rations remaining.',
-    isPinned: false,
-    updatedAt: new Date(Date.now() - 7200000).toISOString(),
-    createdAt: new Date(Date.now() - 7200000).toISOString(),
-    authorRole: 'GM',
-    authorName: 'Game Master',
-  },
-  {
-    id: 'table-note-3',
-    title: 'The Brazen Anchor Tavern',
-    category: 'Location',
-    content:
-      '• 3rd floor suite reserved for 5 nights.\n• Local contacts: Barkeep Jonas (friendly), Guard Patrol (suspicious).\n• Cellar door has a sturdy iron padlock.',
-    isPinned: false,
-    updatedAt: new Date(Date.now() - 10800000).toISOString(),
-    createdAt: new Date(Date.now() - 10800000).toISOString(),
-    authorRole: 'GM',
-    authorName: 'Game Master',
-  },
-];
+const DEFAULT_MY_NOTES: NoteItem[] = [];
+const DEFAULT_TABLE_NOTES: NoteItem[] = [];
 
 const DEFAULT_DM_NOTES: DmSecretNote[] = [
   {
@@ -385,19 +308,23 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMaintenanceMenuOpen]);
 
+  // Mount guard to block table notes writes before room metadata resolves
+  const [isRoomReady, setIsRoomReady] = useState<boolean>(false);
+  const isRoomReadyRef = useRef<boolean>(false);
+
   // 2. "My Notes" State (Strictly Local)
   const [myNotes, setMyNotes] = useState<NoteItem[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_MY_NOTES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return migrateToNoteCards(parsed, DEFAULT_MY_NOTES);
+        return sanitizeNotesList(migrateToNoteCards(parsed, DEFAULT_MY_NOTES));
       }
 
       const legacySaved = localStorage.getItem(LOCAL_LEGACY_PLAYER_NOTES_KEY);
       if (legacySaved) {
         const parsed = JSON.parse(legacySaved);
-        const migrated = migrateToNoteCards(parsed, DEFAULT_MY_NOTES);
+        const migrated = sanitizeNotesList(migrateToNoteCards(parsed, DEFAULT_MY_NOTES));
         try {
           localStorage.setItem(LOCAL_MY_NOTES_KEY, JSON.stringify(migrated));
         } catch {}
@@ -415,10 +342,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       const cached = localStorage.getItem(LOCAL_TABLE_NOTES_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
-        return migrateToNoteCards(parsed, DEFAULT_TABLE_NOTES, {
+        return sanitizeNotesList(migrateToNoteCards(parsed, DEFAULT_TABLE_NOTES, {
           role: currentRole,
           name: authorName,
-        });
+        }));
       }
     } catch {}
     return DEFAULT_TABLE_NOTES;
@@ -431,10 +358,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       const saved = localStorage.getItem(LOCAL_DM_NOTES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return sanitizeNotesList(parsed);
+        }
       }
     } catch {}
-    return DEFAULT_DM_NOTES;
+    return sanitizeNotesList(DEFAULT_DM_NOTES);
   });
 
   // 5. Single Source of Truth for Broadcast State: derived in memory
@@ -629,19 +558,25 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     });
   };
 
-  // Sync Table Notes with OBR Room Metadata on Mount & Subscription + Mirror to Local Cache
+  // Sync Table Notes with OBR Room Metadata on Mount & Subscription + Mirror to Local Cache & Disaster Shield
   useEffect(() => {
-    if (!OBR.isReady) return;
+    if (!OBR.isReady) {
+      isRoomReadyRef.current = true;
+      setIsRoomReady(true);
+      return;
+    }
 
     OBR.room
       .getMetadata()
       .then((meta) => {
+        isRoomReadyRef.current = true;
+        setIsRoomReady(true);
         const remoteData = meta[OBR_TABLE_NOTES_KEY] ?? meta[OBR_LEGACY_TABLE_NOTES_KEY];
         if (remoteData !== undefined && remoteData !== null) {
-          const loaded = migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
+          const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
             role: currentRole,
             name: authorName,
-          });
+          }));
           setTableNotes(loaded);
 
           if (loadExpandedIdsFromStorage() === null) {
@@ -655,21 +590,27 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
 
           try {
             localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
+            localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
           } catch {}
         }
       })
-      .catch((err) => console.warn('Could not fetch table notes metadata:', err));
+      .catch((err) => {
+        console.warn('Could not fetch table notes metadata:', err);
+        isRoomReadyRef.current = true;
+        setIsRoomReady(true);
+      });
 
     const unsub = OBR.room.onMetadataChange((meta) => {
       const remoteData = meta[OBR_TABLE_NOTES_KEY];
       if (remoteData !== undefined && remoteData !== null) {
-        const loaded = migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
+        const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
           role: currentRole,
           name: authorName,
-        });
+        }));
         setTableNotes(loaded);
         try {
           localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
+          localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
         } catch {}
       }
     });
@@ -677,8 +618,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     return () => unsub();
   }, [currentRole, authorName]);
 
-  // Debounced Room Sync for Table Notes
+  // Debounced Room Sync for Table Notes with Mount Guard
   const triggerDebouncedTableSync = useCallback((notesToSync: NoteItem[]) => {
+    // Mount Guard: Never write before initial room metadata has resolved
+    if (OBR.isReady && !isRoomReadyRef.current) {
+      console.warn('Blocked table notes write: initial room metadata not yet resolved.');
+      return;
+    }
+
     if (tableDebounceTimerRef.current) {
       clearTimeout(tableDebounceTimerRef.current);
     }
@@ -686,6 +633,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     tableDebounceTimerRef.current = setTimeout(async () => {
       try {
         localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(notesToSync));
+        localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(notesToSync));
         if (OBR.isReady) {
           await OBR.room.setMetadata({
             [OBR_TABLE_NOTES_KEY]: notesToSync,
@@ -1045,6 +993,123 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     }
   };
 
+  // Disaster Backup Check
+  const disasterBackupNotes = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('ashtapor_table_notes_backup');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return sanitizeNotesList(migrateToNoteCards(parsed, [], {
+            role: currentRole,
+            name: authorName,
+          }));
+        }
+      }
+    } catch {}
+    return [];
+  }, [currentRole, authorName, isMaintenanceMenuOpen]);
+
+  const handleRestoreDisasterBackup = () => {
+    setIsMaintenanceMenuOpen(false);
+    if (disasterBackupNotes.length === 0) return;
+    setTableNotes(disasterBackupNotes);
+    try {
+      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(disasterBackupNotes));
+    } catch {}
+    triggerDebouncedTableSync(disasterBackupNotes);
+  };
+
+  // DM Note Transfer (Move & Copy Across Vaults)
+  const handleTransferNote = useCallback((
+    noteId: string,
+    action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my',
+    sourceVault: SubTabType = activeSubTab
+  ) => {
+    let sourceNote: NoteItem | DmSecretNote | undefined;
+    if (sourceVault === 'myNotes') sourceNote = myNotes.find((n) => n.id === noteId);
+    else if (sourceVault === 'tableNotes') sourceNote = tableNotes.find((n) => n.id === noteId);
+    else sourceNote = dmNotes.find((n) => n.id === noteId);
+
+    if (!sourceNote) return;
+
+    const newId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    if (action === 'copy_to_table') {
+      const copyItem: NoteItem = {
+        id: newId,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        authorRole: 'GM',
+        authorName,
+      };
+      handleSaveTableNote(copyItem);
+    } else if (action === 'move_to_table') {
+      const moveItem: NoteItem = {
+        id: newId,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        authorRole: 'GM',
+        authorName,
+      };
+      handleSaveTableNote(moveItem);
+      if (sourceVault === 'myNotes') handleDeleteMyNote(noteId);
+      else if (sourceVault === 'dmNotes') handleDeleteDmNote(noteId);
+    } else if (action === 'move_to_dm') {
+      const dmItem: DmSecretNote = {
+        id: `dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        isPinned: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      handleSaveDmNote(dmItem);
+      if (sourceVault === 'myNotes') handleDeleteMyNote(noteId);
+      else if (sourceVault === 'tableNotes') handleDeleteTableNote(noteId);
+    } else if (action === 'move_to_my') {
+      const myItem: NoteItem = {
+        id: newId,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        authorRole: currentRole,
+        authorName,
+      };
+      handleSaveMyNote(myItem);
+      if (sourceVault === 'dmNotes') handleDeleteDmNote(noteId);
+      else if (sourceVault === 'tableNotes') handleDeleteTableNote(noteId);
+    }
+  }, [
+    activeSubTab,
+    myNotes,
+    tableNotes,
+    dmNotes,
+    authorName,
+    currentRole,
+    handleSaveTableNote,
+    handleDeleteMyNote,
+    handleDeleteDmNote,
+    handleSaveDmNote,
+    handleDeleteTableNote,
+    handleSaveMyNote,
+  ]);
+
   // Open Create Modal (`+` button)
   const handleOpenCreateModal = () => {
     setEditingNote(null);
@@ -1145,6 +1210,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           note={activeReaderNote}
           onBack={() => setActiveReaderNoteId(null)}
           onEdit={() => handleOpenEditFromReader(activeReaderNote)}
+          isGM={isDm}
+          currentVault={activeSubTab}
+          onTransfer={(action) => handleTransferNote(activeReaderNote.id, action, activeSubTab)}
         />
       ) : (
         <>
@@ -1269,7 +1337,18 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
                 </button>
 
                 {isMaintenanceMenuOpen && (
-                  <div className="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
+                  <div className="absolute right-0 mt-1 w-52 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
+                    {disasterBackupNotes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleRestoreDisasterBackup}
+                        className="px-3 py-1.5 text-left text-emerald-300 hover:bg-slate-800 hover:text-emerald-200 flex items-center gap-2 transition cursor-pointer border-b border-slate-800/80"
+                        title="Restore shared table notes from local disaster mirror"
+                      >
+                        <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>🛡️ Restore Backup ({disasterBackupNotes.length})</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleExportJSON}
@@ -1352,6 +1431,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
+              isGM={isDm}
+              currentVault="myNotes"
+              onTransfer={(id, action) => handleTransferNote(id, action, 'myNotes')}
             />
           </div>
 
@@ -1377,6 +1459,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
+              isGM={isDm}
+              currentVault="tableNotes"
+              onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
             />
           </div>
 
@@ -1400,6 +1485,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
                 onExternalResetFilters={handleResetActiveFilters}
                 onExternalEditDmNote={handleOpenEditNote}
                 onOpenReader={handleOpenReader}
+                onTransfer={(id, action) => handleTransferNote(id, action, 'dmNotes')}
               />
             </div>
           )}

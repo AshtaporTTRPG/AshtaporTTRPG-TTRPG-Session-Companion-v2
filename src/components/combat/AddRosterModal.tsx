@@ -29,7 +29,11 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
   useEffect(() => {
     if (initialMember) {
       setName(initialMember.name);
-      setRole(initialMember.role);
+      if (!isDm && initialMember.role !== 'PC' && initialMember.role !== 'Ally') {
+        setRole('PC');
+      } else {
+        setRole(initialMember.role);
+      }
       setAc(initialMember.ac);
       setMaxHp(initialMember.maxHp);
       setInitMod(initialMember.initiativeMod);
@@ -40,13 +44,18 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
       setMaxHp(30);
       setInitMod(2);
     }
-  }, [initialMember, isOpen]);
+  }, [initialMember, isOpen, isDm]);
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    let validatedRole: RosterRole = role;
+    if (!isDm && role !== 'PC' && role !== 'Ally') {
+      validatedRole = 'PC';
+    }
 
     const uniqueId =
       initialMember?.id ||
@@ -57,7 +66,7 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
     const member: RosterMember = {
       id: uniqueId,
       name: name.trim(),
-      role,
+      role: validatedRole,
       ac: Number(ac) || 10,
       maxHp: Math.max(1, Number(maxHp) || 10),
       initiativeMod: Number(initMod) || 0,
@@ -67,7 +76,7 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
     onClose();
   };
 
-  const showAllRoles = isDm || isEditing;
+  const showAllRoles = Boolean(isDm);
 
   return (
     <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
@@ -105,7 +114,7 @@ export const AddRosterModal: React.FC<AddRosterModalProps> = ({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Valerius, Jack (Familiar), Bandit Chief"
+              placeholder="e.g. Jack (Familiar), Bandit Chief, Eldrin"
               className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
               required
               autoFocus

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Pin,
   Edit2,
@@ -10,8 +10,10 @@ import {
   Eye,
   EyeOff,
   Maximize2,
+  ArrowUpRight,
 } from 'lucide-react';
 import { NoteItem, NoteCategory } from '../../types/notes';
+import { copyToClipboard } from '../../utils/clipboard';
 
 export const CATEGORY_STYLES: Record<
   NoteCategory,
@@ -83,40 +85,59 @@ export interface NoteCardProps {
   note: NoteItem;
   isExpanded: boolean;
   isRevealed?: boolean;
+  isGM?: boolean;
+  currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
   onToggleExpand: (e?: React.MouseEvent) => void;
   onTogglePin?: () => void;
   onDelete: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onToggleReveal?: () => void;
   onOpenReader?: (id: string) => void;
+  onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my') => void;
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
   note,
   isExpanded,
   isRevealed = false,
+  isGM = false,
+  currentVault = 'myNotes',
   onToggleExpand,
   onTogglePin,
   onDelete,
   onEdit,
   onToggleReveal,
   onOpenReader,
+  onTransfer,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const transferRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isTransferOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (transferRef.current && !transferRef.current.contains(e.target as Node)) {
+        setIsTransferOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isTransferOpen]);
 
   const cat = (
     note.category && CATEGORY_STYLES[note.category] ? note.category : 'General'
   ) as NoteCategory;
   const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const textToCopy = `${note.title}\n[${cat}]\n\n${note.content}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy);
+    const ok = await copyToClipboard(textToCopy);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   let formattedDate = 'Recently';
@@ -241,6 +262,85 @@ export const NoteCard: React.FC<NoteCardProps> = ({
               <Copy className="w-3.5 h-3.5 text-slate-400 hover:text-amber-400" />
             )}
           </button>
+
+          {/* DM Transfer Action Menu (Visible strictly when isGM === true) */}
+          {isGM && onTransfer && (
+            <div className="relative" ref={transferRef}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsTransferOpen((prev) => !prev);
+                }}
+                className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer flex items-center gap-0.5"
+                title="Transfer note across vaults"
+                aria-label="Transfer note across vaults"
+              >
+                <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
+              </button>
+
+              {isTransferOpen && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-[11px] font-sans">
+                  {currentVault !== 'tableNotes' && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsTransferOpen(false);
+                        onTransfer(note.id, 'copy_to_table');
+                      }}
+                      className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>📋</span>
+                      <span>Copy to Table Notes</span>
+                    </button>
+                  )}
+                  {currentVault !== 'tableNotes' && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsTransferOpen(false);
+                        onTransfer(note.id, 'move_to_table');
+                      }}
+                      className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>➔</span>
+                      <span>Move to Table Notes</span>
+                    </button>
+                  )}
+                  {currentVault !== 'dmNotes' && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsTransferOpen(false);
+                        onTransfer(note.id, 'move_to_dm');
+                      }}
+                      className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>🔒</span>
+                      <span>Move to DM Notes</span>
+                    </button>
+                  )}
+                  {currentVault !== 'myNotes' && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsTransferOpen(false);
+                        onTransfer(note.id, 'move_to_my');
+                      }}
+                      className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>👤</span>
+                      <span>Move to My Notes</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Reader View Launch Trigger */}
           {onOpenReader && (

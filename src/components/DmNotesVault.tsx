@@ -16,6 +16,7 @@ import {
   Check,
   Pin,
   Maximize2,
+  ArrowUpRight,
 } from 'lucide-react';
 import {
   DmSecretNote,
@@ -25,6 +26,7 @@ import {
 } from '../types/notes';
 import { CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './notes/NoteCard';
 import { CreateNoteModal } from './notes/CreateNoteModal';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface DmNotesVaultProps {
   dmNotes: DmSecretNote[];
@@ -43,6 +45,7 @@ interface DmNotesVaultProps {
   onExternalResetFilters?: () => void;
   onExternalEditDmNote?: (note: DmSecretNote, e: React.MouseEvent) => void;
   onOpenReader?: (id: string) => void;
+  onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my') => void;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [
@@ -85,6 +88,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
   onExternalResetFilters,
   onExternalEditDmNote,
   onOpenReader,
+  onTransfer,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<string>('All');
@@ -99,6 +103,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<DmSecretNote | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [activeTransferId, setActiveTransferId] = useState<string | null>(null);
 
   const searchQuery =
     externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
@@ -203,12 +208,14 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
     setEditingNote(null);
   };
 
-  const handleCopy = (note: DmSecretNote, e: React.MouseEvent) => {
+  const handleCopy = async (note: DmSecretNote, e: React.MouseEvent) => {
     e.stopPropagation();
     const cat = note.category || 'General';
-    navigator.clipboard?.writeText(`${note.title}\n[${cat}]\n\n${note.content}`);
-    setCopiedId(note.id);
-    setTimeout(() => setCopiedId(null), 1500);
+    const ok = await copyToClipboard(`${note.title}\n[${cat}]\n\n${note.content}`);
+    if (ok) {
+      setCopiedId(note.id);
+      setTimeout(() => setCopiedId(null), 1500);
+    }
   };
 
   const categoryCounts = useMemo(() => {
@@ -509,6 +516,64 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                         <Copy className="w-3.5 h-3.5" />
                       )}
                     </button>
+
+                    {/* DM Transfer Action Menu */}
+                    {onTransfer && (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveTransferId((prev) => (prev === note.id ? null : note.id));
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer flex items-center gap-0.5"
+                          title="Transfer note across vaults"
+                        >
+                          <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
+                        </button>
+
+                        {activeTransferId === note.id && (
+                          <div className="absolute right-0 top-full mt-1 w-44 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-[11px] font-sans">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveTransferId(null);
+                                onTransfer(note.id, 'copy_to_table');
+                              }}
+                              className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              <span>📋</span>
+                              <span>Copy to Table Notes</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveTransferId(null);
+                                onTransfer(note.id, 'move_to_table');
+                              }}
+                              className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              <span>➔</span>
+                              <span>Move to Table Notes</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveTransferId(null);
+                                onTransfer(note.id, 'move_to_my');
+                              }}
+                              className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              <span>👤</span>
+                              <span>Move to My Notes</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Reader View Launch Trigger */}
                     {onOpenReader && (
