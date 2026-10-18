@@ -41,6 +41,7 @@ export interface NoteCardListProps {
   externalSelectedCategory?: string;
   onExternalResetFilters?: () => void;
   onExternalEditNote?: (note: NoteItem, e: React.MouseEvent) => void;
+  onOpenReader?: (id: string) => void;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [
@@ -87,6 +88,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   externalSelectedCategory,
   onExternalResetFilters,
   onExternalEditNote,
+  onOpenReader,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<string>('All');
@@ -527,6 +529,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               onTogglePin={() => onTogglePin(note.id)}
               onDelete={() => onDeleteNote(note.id)}
               onEdit={(e) => handleOpenEdit(note, e)}
+              onOpenReader={onOpenReader}
             />
           ))
         )}

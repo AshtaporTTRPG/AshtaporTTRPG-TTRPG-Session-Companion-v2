@@ -15,6 +15,7 @@ import {
   Copy,
   Check,
   Pin,
+  Maximize2,
 } from 'lucide-react';
 import {
   DmSecretNote,
@@ -41,6 +42,7 @@ interface DmNotesVaultProps {
   externalSelectedCategory?: string;
   onExternalResetFilters?: () => void;
   onExternalEditDmNote?: (note: DmSecretNote, e: React.MouseEvent) => void;
+  onOpenReader?: (id: string) => void;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [
@@ -82,6 +84,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
   externalSelectedCategory,
   onExternalResetFilters,
   onExternalEditDmNote,
+  onOpenReader,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<string>('All');
@@ -507,6 +510,22 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                       )}
                     </button>
 
+                    {/* Reader View Launch Trigger */}
+                    {onOpenReader && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenReader(note.id);
+                        }}
+                        aria-label="Open Full Reader View"
+                        title="Open Full Reader View"
+                        className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
                     {onTogglePinDmNote && (
                       <button
                         type="button"
@@ -553,13 +572,11 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                   </div>
                 </div>
 
-                {/* Expanded State: Full text area */}
+                {/* Expanded State: Full text area with decoupled click & text selection */}
                 {expanded && (
                   <div className="px-2.5 pb-2.5 pt-1 space-y-2 border-t border-slate-800/80">
                     <div
-                      onClick={(e) => handleOpenEdit(note, e)}
-                      title="Click to edit full note"
-                      className="text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/60 shadow-inner cursor-pointer hover:border-slate-700 transition"
+                      className="text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/60 shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200"
                     >
                       {note.content}
                     </div>

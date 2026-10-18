@@ -9,6 +9,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  Maximize2,
 } from 'lucide-react';
 import { NoteItem, NoteCategory } from '../../types/notes';
 
@@ -87,6 +88,7 @@ export interface NoteCardProps {
   onDelete: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onToggleReveal?: () => void;
+  onOpenReader?: (id: string) => void;
 }
 
 export const NoteCard: React.FC<NoteCardProps> = ({
@@ -98,6 +100,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onDelete,
   onEdit,
   onToggleReveal,
+  onOpenReader,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -239,6 +242,22 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             )}
           </button>
 
+          {/* Reader View Launch Trigger */}
+          {onOpenReader && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenReader(note.id);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+              title="Open Full Reader View"
+              aria-label="Open Full Reader View"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* Pin / Unpin Button */}
           {onTogglePin && (
             <button
@@ -259,7 +278,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             </button>
           )}
 
-          {/* Inline Edit Button (pencil) */}
+          {/* Inline Edit Button (pencil) - Isolated sole trigger for Edit Modal */}
           <button
             type="button"
             onClick={onEdit}
@@ -288,13 +307,11 @@ export const NoteCard: React.FC<NoteCardProps> = ({
         </div>
       </div>
 
-      {/* Expanded Content View */}
+      {/* Expanded Content View: Native Text Selection Decoupled from Edit Modal */}
       {isExpanded && (
         <div className="px-2.5 pb-2.5 pt-1 space-y-2 border-t border-slate-800/70">
           <div
-            onClick={onEdit}
-            title="Click to edit"
-            className="text-xs text-slate-300 font-sans leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 shadow-inner cursor-pointer hover:border-slate-700 transition"
+            className="text-xs text-slate-300 font-sans leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200"
           >
             {note.content}
           </div>

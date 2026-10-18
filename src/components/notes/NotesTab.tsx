@@ -32,6 +32,7 @@ import { ROOM_METADATA_KEY } from '../../utils/obrCombatSync';
 import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
 import { DmNotesVault } from '../DmNotesVault';
 import { CreateNoteModal } from './CreateNoteModal';
+import { NoteReaderView } from './NoteReaderView';
 
 // Re-export for App.tsx and external consumers
 export type { BroadcastNotePayload, NotesScope } from '../../types/notes';
@@ -342,11 +343,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   // 1. Active Sub-Tab State ('myNotes' | 'tableNotes' | 'dmNotes')
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('myNotes');
 
+  // Reader View State (In-place viewport takeover)
+  const [activeReaderNoteId, setActiveReaderNoteId] = useState<string | null>(null);
+
   // Author details
   const currentRole: 'GM' | 'PLAYER' = isDm ? 'GM' : 'PLAYER';
   const authorName = playerName || (isDm ? 'Game Master' : 'Player');
 
-  // Per-sub-tab Search & Category Filter state (retained across sub-tab switches)
+  // Per-sub-tab Search & Category Filter state (retained across sub-tab switches & reader returns)
   const [searchByTab, setSearchByTab] = useState<Record<SubTabType, string>>({
     myNotes: '',
     tableNotes: '',
@@ -460,6 +464,24 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   useEffect(() => {
     persistExpandedIdsToStorage(expandedNoteIds);
   }, [expandedNoteIds]);
+
+  // Derive active note for Reader View
+  const activeReaderNote = useMemo(() => {
+    if (!activeReaderNoteId) return null;
+    return (
+      myNotes.find((n) => n.id === activeReaderNoteId) ||
+      tableNotes.find((n) => n.id === activeReaderNoteId) ||
+      dmNotes.find((n) => n.id === activeReaderNoteId) ||
+      null
+    );
+  }, [activeReaderNoteId, myNotes, tableNotes, dmNotes]);
+
+  // Graceful fallback if active reader note is deleted
+  useEffect(() => {
+    if (activeReaderNoteId && !activeReaderNote) {
+      setActiveReaderNoteId(null);
+    }
+  }, [activeReaderNoteId, activeReaderNote]);
 
   // Safety: non-GMs must never access DM Notes
   useEffect(() => {
@@ -943,7 +965,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         : myNotes;
 
     const payload: NotesExportPayload = {
-      version: '2.0.19',
+      version: '2.0.21',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes: notesToExport,
@@ -1036,6 +1058,17 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     setIsCreateModalOpen(true);
   };
 
+  // Open Edit Modal directly from Reader View
+  const handleOpenEditFromReader = (note: NoteItem | DmSecretNote) => {
+    setEditingNote(note);
+    setIsCreateModalOpen(true);
+  };
+
+  // Open In-Place Reader View
+  const handleOpenReader = (id: string) => {
+    setActiveReaderNoteId(id);
+  };
+
   const handleSaveFromModal = (data: {
     title: string;
     category: NoteCategory;
@@ -1106,257 +1139,271 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         onChange={handleFileChange}
       />
 
-      {/* 1. COMPACT SUB-TAB NAVIGATION BAR (h-7 Segmented Pill Control) */}
-      <div className="h-7 shrink-0 flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
-        {/* My Notes Trigger */}
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('myNotes')}
-          className={
-            activeSubTab === 'myNotes'
-              ? 'text-xs font-bold bg-amber-500 text-slate-950 px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
-              : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
-          }
-          title="My Notes (Stored locally on your machine)"
-        >
-          <User className="w-3 h-3 mr-1 shrink-0" />
-          <span className="truncate">My Notes</span>
-          <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
-            {myNotes.length}
-          </span>
-        </button>
-
-        {/* Table Notes Trigger */}
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('tableNotes')}
-          className={
-            activeSubTab === 'tableNotes'
-              ? 'text-xs font-bold bg-amber-500 text-slate-950 px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
-              : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
-          }
-          title="Table Notes (Shared collaborative cards across the room)"
-        >
-          <Scroll className="w-3 h-3 mr-1 shrink-0" />
-          <span className="truncate">Table Notes</span>
-          <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
-            {tableNotes.length}
-          </span>
-        </button>
-
-        {/* DM Notes Trigger (GM Only) */}
-        {isDm && (
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('dmNotes')}
-            className={
-              activeSubTab === 'dmNotes'
-                ? 'text-xs font-bold bg-rose-600 text-white px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
-                : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
-            }
-            title="DM Notes Vault & Broadcast (GM Only)"
-          >
-            <Lock className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">DM Notes</span>
-            <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
-              {dmNotes.length}
-            </span>
-            {activeBroadcast && (
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-1 shrink-0" />
-            )}
-          </button>
-        )}
-      </div>
-
-      {/* 2. STREAMLINED UTILITY BAR & MAINTENANCE DROPDOWN (`⋮`) */}
-      <div className="shrink-0 flex items-center gap-1.5">
-        {/* Search Input (h-7 text-xs) */}
-        <div className="relative flex-1 min-w-0">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={activeSearchQuery}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search notes..."
-            className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
-          />
-          {activeSearchQuery && (
+      {/* CONDITIONAL IN-PLACE VIEWPORT TAKEOVER: READER VIEW */}
+      {activeReaderNoteId !== null && activeReaderNote ? (
+        <NoteReaderView
+          note={activeReaderNote}
+          onBack={() => setActiveReaderNoteId(null)}
+          onEdit={() => handleOpenEditFromReader(activeReaderNote)}
+        />
+      ) : (
+        <>
+          {/* 1. COMPACT SUB-TAB NAVIGATION BAR (h-7 Segmented Pill Control) */}
+          <div className="h-7 shrink-0 flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
+            {/* My Notes Trigger */}
             <button
               type="button"
-              onClick={() => handleSearchChange('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
-              title="Clear search"
+              onClick={() => setActiveSubTab('myNotes')}
+              className={
+                activeSubTab === 'myNotes'
+                  ? 'text-xs font-bold bg-amber-500 text-slate-950 px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+                  : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+              }
+              title="My Notes (Stored locally on your machine)"
             >
-              <X className="w-3.5 h-3.5" />
+              <User className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">My Notes</span>
+              <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
+                {myNotes.length}
+              </span>
             </button>
-          )}
-        </div>
 
-        {/* Compact Icon Utilities: Expand All, Collapse All, Maintenance Menu (`⋮`), + New Note */}
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            onClick={handleExpandAllActiveTab}
-            title="Expand All"
-            aria-label="Expand All"
-            className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-          >
-            <ChevronsUpDown className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCollapseAllActiveTab}
-            title="Collapse All"
-            aria-label="Collapse All"
-            className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-          >
-            <ChevronsDownUp className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Maintenance Dropdown (`⋮`) for JSON Export & JSON Import */}
-          <div className="relative" ref={maintenanceMenuRef}>
+            {/* Table Notes Trigger */}
             <button
               type="button"
-              onClick={() => setIsMaintenanceMenuOpen((prev) => !prev)}
-              title="Backup & Maintenance"
-              aria-label="Backup & Maintenance"
-              className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+              onClick={() => setActiveSubTab('tableNotes')}
+              className={
+                activeSubTab === 'tableNotes'
+                  ? 'text-xs font-bold bg-amber-500 text-slate-950 px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+                  : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+              }
+              title="Table Notes (Shared collaborative cards across the room)"
             >
-              <MoreVertical className="w-3.5 h-3.5" />
+              <Scroll className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">Table Notes</span>
+              <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
+                {tableNotes.length}
+              </span>
             </button>
 
-            {isMaintenanceMenuOpen && (
-              <div className="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
-                <button
-                  type="button"
-                  onClick={handleExportJSON}
-                  className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>⬇ Export JSON Backup</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleTriggerImport}
-                  className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span>⬆ Import JSON Backup</span>
-                </button>
-              </div>
+            {/* DM Notes Trigger (GM Only) */}
+            {isDm && (
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('dmNotes')}
+                className={
+                  activeSubTab === 'dmNotes'
+                    ? 'text-xs font-bold bg-rose-600 text-white px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+                    : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
+                }
+                title="DM Notes Vault & Broadcast (GM Only)"
+              >
+                <Lock className="w-3 h-3 mr-1 shrink-0" />
+                <span className="truncate">DM Notes</span>
+                <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
+                  {dmNotes.length}
+                </span>
+                {activeBroadcast && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-1 shrink-0" />
+                )}
+              </button>
             )}
           </div>
 
-          {/* Compact `+` New Note Icon Button */}
-          <button
-            type="button"
-            onClick={handleOpenCreateModal}
-            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-            title="Create New Note"
-          >
-            +
-          </button>
-        </div>
-      </div>
+          {/* 2. STREAMLINED UTILITY BAR & MAINTENANCE DROPDOWN (`⋮`) */}
+          <div className="shrink-0 flex items-center gap-1.5">
+            {/* Search Input (h-7 text-xs) */}
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={activeSearchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Search notes..."
+                className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
+              />
+              {activeSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => handleSearchChange('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
-      {/* 3. HIGH-DENSITY CATEGORY MICRO-PILLS STRIP (Zero Parentheses, 440px Interior Fit) */}
-      <div className="h-6 shrink-0 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5">
-        {visibleCategories.map((cat) => {
-          const isSelected = activeSelectedCategory === cat;
-          const count = categoryCounts[cat] || 0;
-          const abbr = CATEGORY_ABBREVIATIONS[cat] || cat;
-          const activeStyle =
-            CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
+            {/* Compact Icon Utilities: Expand All, Collapse All, Maintenance Menu (`⋮`), + New Note */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={handleExpandAllActiveTab}
+                title="Expand All"
+                aria-label="Expand All"
+                className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+              >
+                <ChevronsUpDown className="w-3.5 h-3.5" />
+              </button>
 
-          return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => handleSelectCategory(cat)}
-              className={
-                isSelected
-                  ? `px-1.5 py-0.5 text-[10px] font-bold rounded-full border transition-colors shrink-0 cursor-pointer text-slate-100 ${activeStyle}`
-                  : 'px-1.5 py-0.5 text-[10px] font-semibold rounded-full border transition-colors shrink-0 cursor-pointer bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
-              }
-              title={`Filter by ${cat} (${count})`}
-            >
-              {abbr} {count}
-            </button>
-          );
-        })}
-      </div>
+              <button
+                type="button"
+                onClick={handleCollapseAllActiveTab}
+                title="Collapse All"
+                aria-label="Collapse All"
+                className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+              >
+                <ChevronsDownUp className="w-3.5 h-3.5" />
+              </button>
 
-      {/* 4. SUB-TAB 1: "MY NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
-      <div className={activeSubTab === 'myNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-        <NoteCardList
-          notes={myNotes}
-          expandedIds={expandedNoteIds}
-          onToggleExpand={handleToggleExpandNote}
-          onExpandAll={handleExpandAllMyNotes}
-          onCollapseAll={handleCollapseAllMyNotes}
-          onSaveNote={handleSaveMyNote}
-          onDeleteNote={handleDeleteMyNote}
-          onTogglePin={handleTogglePinMyNote}
-          onImportNotes={handleImportMyNotes}
-          allowImportExport={true}
-          currentRole={currentRole}
-          currentAuthorName={authorName}
-          emptyMessage="No personal notes yet."
-          emptySubtitle="Click '+' above to create cards for quests, loot, NPCs, or scenes."
-          hideControls={true}
-          externalSearchQuery={searchByTab.myNotes}
-          externalSelectedCategory={categoryByTab.myNotes}
-          onExternalResetFilters={handleResetActiveFilters}
-          onExternalEditNote={handleOpenEditNote}
-        />
-      </div>
+              {/* Maintenance Dropdown (`⋮`) for JSON Export & JSON Import */}
+              <div className="relative" ref={maintenanceMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsMaintenanceMenuOpen((prev) => !prev)}
+                  title="Backup & Maintenance"
+                  aria-label="Backup & Maintenance"
+                  className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
 
-      {/* 5. SUB-TAB 2: "TABLE NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
-      <div className={activeSubTab === 'tableNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-        <NoteCardList
-          notes={tableNotes}
-          expandedIds={expandedNoteIds}
-          onToggleExpand={handleToggleExpandNote}
-          onExpandAll={handleExpandAllTableNotes}
-          onCollapseAll={handleCollapseAllTableNotes}
-          onSaveNote={handleSaveTableNote}
-          onDeleteNote={handleDeleteTableNote}
-          onTogglePin={handleTogglePinTableNote}
-          allowImportExport={false}
-          currentRole={currentRole}
-          currentAuthorName={authorName}
-          emptyMessage="No table notes shared yet."
-          emptySubtitle="Any player or DM can add shared quests, clues, or inventory."
-          hideControls={true}
-          externalSearchQuery={searchByTab.tableNotes}
-          externalSelectedCategory={categoryByTab.tableNotes}
-          onExternalResetFilters={handleResetActiveFilters}
-          onExternalEditNote={handleOpenEditNote}
-        />
-      </div>
+                {isMaintenanceMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
+                    <button
+                      type="button"
+                      onClick={handleExportJSON}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>⬇ Export JSON Backup</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTriggerImport}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>⬆ Import JSON Backup</span>
+                    </button>
+                  </div>
+                )}
+              </div>
 
-      {/* 6. SUB-TAB 3: "DM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
-      {isDm && (
-        <div className={activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-          <DmNotesVault
-            dmNotes={dmNotes}
-            activeBroadcast={activeBroadcast}
-            onSaveDmNote={handleSaveDmNote}
-            onDeleteDmNote={handleDeleteDmNote}
-            onToggleReveal={handleToggleRevealDmNote}
-            onTogglePinDmNote={handleTogglePinDmNote}
-            expandedIds={expandedNoteIds}
-            onToggleExpand={handleToggleExpandNote}
-            onExpandAll={handleExpandAllDmNotes}
-            onCollapseAll={handleCollapseAllDmNotes}
-            hideControls={true}
-            externalSearchQuery={searchByTab.dmNotes}
-            externalSelectedCategory={categoryByTab.dmNotes}
-            onExternalResetFilters={handleResetActiveFilters}
-            onExternalEditDmNote={handleOpenEditNote}
-          />
-        </div>
+              {/* Compact `+` New Note Icon Button */}
+              <button
+                type="button"
+                onClick={handleOpenCreateModal}
+                className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+                title="Create New Note"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {/* 3. HIGH-DENSITY CATEGORY MICRO-PILLS STRIP (Zero Parentheses, 440px Interior Fit) */}
+          <div className="h-6 shrink-0 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5">
+            {visibleCategories.map((cat) => {
+              const isSelected = activeSelectedCategory === cat;
+              const count = categoryCounts[cat] || 0;
+              const abbr = CATEGORY_ABBREVIATIONS[cat] || cat;
+              const activeStyle =
+                CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
+
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => handleSelectCategory(cat)}
+                  className={
+                    isSelected
+                      ? `px-1.5 py-0.5 text-[10px] font-bold rounded-full border transition-colors shrink-0 cursor-pointer text-slate-100 ${activeStyle}`
+                      : 'px-1.5 py-0.5 text-[10px] font-semibold rounded-full border transition-colors shrink-0 cursor-pointer bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
+                  }
+                  title={`Filter by ${cat} (${count})`}
+                >
+                  {abbr} {count}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 4. SUB-TAB 1: "MY NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
+          <div className={activeSubTab === 'myNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+            <NoteCardList
+              notes={myNotes}
+              expandedIds={expandedNoteIds}
+              onToggleExpand={handleToggleExpandNote}
+              onExpandAll={handleExpandAllMyNotes}
+              onCollapseAll={handleCollapseAllMyNotes}
+              onSaveNote={handleSaveMyNote}
+              onDeleteNote={handleDeleteMyNote}
+              onTogglePin={handleTogglePinMyNote}
+              onImportNotes={handleImportMyNotes}
+              allowImportExport={true}
+              currentRole={currentRole}
+              currentAuthorName={authorName}
+              emptyMessage="No personal notes yet."
+              emptySubtitle="Click '+' above to create cards for quests, loot, NPCs, or scenes."
+              hideControls={true}
+              externalSearchQuery={searchByTab.myNotes}
+              externalSelectedCategory={categoryByTab.myNotes}
+              onExternalResetFilters={handleResetActiveFilters}
+              onExternalEditNote={handleOpenEditNote}
+              onOpenReader={handleOpenReader}
+            />
+          </div>
+
+          {/* 5. SUB-TAB 2: "TABLE NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
+          <div className={activeSubTab === 'tableNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+            <NoteCardList
+              notes={tableNotes}
+              expandedIds={expandedNoteIds}
+              onToggleExpand={handleToggleExpandNote}
+              onExpandAll={handleExpandAllTableNotes}
+              onCollapseAll={handleCollapseAllTableNotes}
+              onSaveNote={handleSaveTableNote}
+              onDeleteNote={handleDeleteTableNote}
+              onTogglePin={handleTogglePinTableNote}
+              allowImportExport={false}
+              currentRole={currentRole}
+              currentAuthorName={authorName}
+              emptyMessage="No table notes shared yet."
+              emptySubtitle="Any player or DM can add shared quests, clues, or inventory."
+              hideControls={true}
+              externalSearchQuery={searchByTab.tableNotes}
+              externalSelectedCategory={categoryByTab.tableNotes}
+              onExternalResetFilters={handleResetActiveFilters}
+              onExternalEditNote={handleOpenEditNote}
+              onOpenReader={handleOpenReader}
+            />
+          </div>
+
+          {/* 6. SUB-TAB 3: "DM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
+          {isDm && (
+            <div className={activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+              <DmNotesVault
+                dmNotes={dmNotes}
+                activeBroadcast={activeBroadcast}
+                onSaveDmNote={handleSaveDmNote}
+                onDeleteDmNote={handleDeleteDmNote}
+                onToggleReveal={handleToggleRevealDmNote}
+                onTogglePinDmNote={handleTogglePinDmNote}
+                expandedIds={expandedNoteIds}
+                onToggleExpand={handleToggleExpandNote}
+                onExpandAll={handleExpandAllDmNotes}
+                onCollapseAll={handleCollapseAllDmNotes}
+                hideControls={true}
+                externalSearchQuery={searchByTab.dmNotes}
+                externalSelectedCategory={categoryByTab.dmNotes}
+                onExternalResetFilters={handleResetActiveFilters}
+                onExternalEditDmNote={handleOpenEditNote}
+                onOpenReader={handleOpenReader}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {/* 7. UNIFIED CREATE / EDIT NOTE MODAL (GM-Gated Scene & Hook Categories) */}
