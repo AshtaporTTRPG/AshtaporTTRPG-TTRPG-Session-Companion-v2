@@ -14,6 +14,7 @@ import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
 import { liveFeedSync } from './utils/liveFeedSync';
 import { ROOM_METADATA_KEY } from './utils/obrCombatSync';
+import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip';
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
 
@@ -22,6 +23,14 @@ export default function App() {
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isGM, setIsGM] = useState<boolean>(false);
   const [playerName, setPlayerName] = useState<string>('Adventurer');
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
+  const [hasSeenHelp, setHasSeenHelp] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ashtapor_help_seen') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [soundOn, setSoundOn] = useState<boolean>(() => {
     try {
       return isAudioEnabled();
@@ -160,6 +169,18 @@ export default function App() {
     setSoundOn(next);
   };
 
+  // Quick Help Guide Toggle Handler
+  const handleToggleHelp = () => {
+    const next = !isHelpOpen;
+    setIsHelpOpen(next);
+    if (!hasSeenHelp) {
+      setHasSeenHelp(true);
+      try {
+        localStorage.setItem('ashtapor_help_seen', 'true');
+      } catch {}
+    }
+  };
+
   // Window Pin Toggle Handler: saves preference and calls OBR.popover.setProperties
   const handleTogglePin = async () => {
     const nextPinned = !isPinned;
@@ -265,8 +286,23 @@ export default function App() {
             </span>
           </div>
 
-          {/* Right: Relocated Utility Controls (GM badge, Audio Toggle, Pin Button) */}
+          {/* Right: Relocated Utility Controls (Help Guide, GM badge, Audio Toggle, Pin Button) */}
           <div className="flex items-center gap-1 shrink-0">
+            {/* Quick Guide Trigger Button [ ? ] immediately adjacent to GM/PC badge */}
+            <button
+              type="button"
+              data-help-trigger="true"
+              onClick={handleToggleHelp}
+              className="relative w-6 h-6 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-400 border border-slate-700 flex items-center justify-center font-bold text-xs transition-colors shrink-0 cursor-pointer"
+              title="Quick Guide (Help)"
+              aria-label="Quick Guide (Help)"
+            >
+              ?
+              {!hasSeenHelp && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+              )}
+            </button>
+
             {/* Ultra-compact GM / PC Role Badge */}
             <div
               className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
@@ -391,6 +427,14 @@ export default function App() {
           </button>
         </nav>
       </header>
+
+      {/* Floating Contextual Help Guide Tooltip */}
+      <ContextualHelpTooltip
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+        activeAppTab={activeTab}
+        isGM={isGM}
+      />
 
       {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
