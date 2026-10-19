@@ -1020,10 +1020,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     triggerDebouncedTableSync(disasterBackupNotes);
   };
 
-  // DM Note Transfer (Move & Copy Across Vaults)
+  // Note Transfer (Move & Copy Across Vaults for Players & GM)
   const handleTransferNote = useCallback((
     noteId: string,
-    action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my',
+    action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm',
     sourceVault: SubTabType = activeSubTab
   ) => {
     let sourceNote: NoteItem | DmSecretNote | undefined;
@@ -1047,7 +1047,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         isPinned: false,
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
-        authorRole: 'GM',
+        authorRole: currentRole,
         authorName,
       };
       handleSaveTableNote(copyItem);
@@ -1060,12 +1060,25 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         isPinned: false,
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
-        authorRole: 'GM',
+        authorRole: currentRole,
         authorName,
       };
       handleSaveTableNote(moveItem);
       if (sourceVault === 'myNotes') handleDeleteMyNote(noteId);
       else if (sourceVault === 'dmNotes') handleDeleteDmNote(noteId);
+    } else if (action === 'copy_to_my') {
+      const copyMyItem: NoteItem = {
+        id: newId,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        authorRole: currentRole,
+        authorName,
+      };
+      handleSaveMyNote(copyMyItem);
     } else if (action === 'move_to_dm') {
       const dmItem: DmSecretNote = {
         id: `dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1210,6 +1223,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           note={activeReaderNote}
           onBack={() => setActiveReaderNoteId(null)}
           onEdit={() => handleOpenEditFromReader(activeReaderNote)}
+          onDelete={() => {
+            if (activeSubTab === 'myNotes') handleDeleteMyNote(activeReaderNote.id);
+            else if (activeSubTab === 'tableNotes') handleDeleteTableNote(activeReaderNote.id);
+            else handleDeleteDmNote(activeReaderNote.id);
+            setActiveReaderNoteId(null);
+          }}
           isGM={isDm}
           currentVault={activeSubTab}
           onTransfer={(action) => handleTransferNote(activeReaderNote.id, action, activeSubTab)}

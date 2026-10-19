@@ -50,6 +50,7 @@ import {
   Skull,
   Crown,
   Layers,
+  ArrowDownUp,
 } from 'lucide-react';
 import { CombatantRow } from './CombatantRow';
 import { AddCombatantModal, NewCombatantData } from './AddCombatantModal';
@@ -278,20 +279,24 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [round, setRound] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('ttrpg_combat_round');
-      return saved ? parseInt(saved, 10) : 1;
+      if (saved !== null) {
+        return parseInt(saved, 10);
+      }
+    } catch {}
+    return 0; // Default to 0 (Idle / Prep)
+  });
+
+  const [combatStatus, setCombatStatus] = useState<'idle' | 'active' | 'setup'>(() => {
+    try {
+      const saved = localStorage.getItem('ttrpg_combat_status');
+      if (saved === 'active') return 'active';
+      return 'idle';
     } catch {
-      return 1;
+      return 'idle';
     }
   });
 
-  const [combatStatus, setCombatStatus] = useState<'setup' | 'active'>(() => {
-    try {
-      const saved = localStorage.getItem('ttrpg_combat_status');
-      return saved === 'active' ? 'active' : 'setup';
-    } catch {
-      return 'setup';
-    }
-  });
+  const isCombatActive = round > 0 && combatStatus !== 'idle';
 
   // Audio Turn Chime Toggle (enabled by default)
   const [isTurnChimeEnabled, setIsTurnChimeEnabled] = useState<boolean>(() => {
@@ -414,6 +419,19 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
   // Turn alert toast
   const [playerTurnAlert, setPlayerTurnAlert] = useState<string | null>(null);
+
+  // Play combat start chime on transitioning from Idle (Round 0) to Active (Round 1+)
+  const prevRoundRef = useRef<number>(round);
+  useEffect(() => {
+    if (prevRoundRef.current === 0 && round >= 1 && combatStatus === 'active') {
+      if (isTurnChimeEnabled) {
+        playWebAudioTurnChime(true);
+      } else {
+        playTurnSound();
+      }
+    }
+    prevRoundRef.current = round;
+  }, [round, combatStatus, isTurnChimeEnabled]);
 
   // Listen for live feed sync
   useEffect(() => {
@@ -872,29 +890,28 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   };
 
-  // Start / Jump to Highest Initiative
+  // Start Encounter (GM Action)
   const handleStartCombat = async () => {
-    if (combatants.length === 0) {
-      setIsAddModalOpen(true);
-      return;
-    }
-    const sorted = getDeterministicSortedCombatants(combatants);
-    if (sorted.length === 0) {
-      setIsAddModalOpen(true);
-      return;
-    }
-    const first = sorted[0];
+    const strictSorted = sortInitiativeStrictDescending(combatants);
+    const first = strictSorted[0];
     const firstId = first ? first.id : null;
 
     const nextSeq = localTurnSeqRef.current + 1;
     localTurnSeqRef.current = nextSeq;
 
-    const strictSorted = sortInitiativeStrictDescending(combatants);
     setCombatants(strictSorted);
+    localCombatantsRef.current = strictSorted;
     setActiveTurnIndex(0);
     setActiveCombatantId(firstId);
     setRound(1);
     setCombatStatus('active');
+
+    try {
+      localStorage.setItem('ttrpg_combat_round', '1');
+      localStorage.setItem('ttrpg_combat_status', 'active');
+      localStorage.setItem('ttrpg_active_turn_index', '0');
+      if (firstId) localStorage.setItem('ttrpg_active_combatant_id', firstId);
+    } catch {}
 
     if (isTurnChimeEnabled) {
       playWebAudioTurnChime(true);
@@ -902,15 +919,37 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       playTurnSound();
     }
 
-    if (first) {
-      broadcastFeedLog(
-        `⚔️ Combat Started! Round 1 begins with ${first.name} (Initiative ${first.initiative}).`,
-        false
-      );
-    }
+    const logMsg = first
+      ? `⚔️ Combat Started! Round 1 begins with ${first.name} (Initiative ${Math.ceil(first.initiative)}).`
+      : '⚔️ Combat Started! Round 1 begins.';
+    await broadcastFeedLog(logMsg, false);
 
     await broadcastTurn(0, 1, firstId, nextSeq);
     await broadcastRoster(strictSorted);
+  };
+
+  // Rewind strictly to Round 1, Turn 1 (⏮) - Completely detached from AddCombatantModal
+  const handleRewindToTop = async () => {
+    const sorted = getDeterministicSortedCombatants(combatants);
+    const first = sorted[0];
+    const firstId = first ? first.id : null;
+
+    const nextSeq = localTurnSeqRef.current + 1;
+    localTurnSeqRef.current = nextSeq;
+
+    setActiveTurnIndex(0);
+    setActiveCombatantId(firstId);
+    setRound(1);
+    setCombatStatus('active');
+
+    try {
+      localStorage.setItem('ttrpg_combat_round', '1');
+      localStorage.setItem('ttrpg_combat_status', 'active');
+      localStorage.setItem('ttrpg_active_turn_index', '0');
+      if (firstId) localStorage.setItem('ttrpg_active_combatant_id', firstId);
+    } catch {}
+
+    await broadcastTurn(0, 1, firstId, nextSeq);
   };
 
   const handleSortInitiative = () => {
@@ -971,7 +1010,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         if (c.linkedPcId === combatantId) {
           return {
             ...c,
-            initiative: Number((newInit - 0.01).toFixed(2)),
+            initiative: Number((newInit - 0.001).toFixed(3)),
             updatedAt: Date.now(),
           };
         }
@@ -1075,8 +1114,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     localCombatantsRef.current = [];
     setActiveCombatantId(null);
     setActiveTurnIndex(0);
-    setRound(1);
-    setCombatStatus('setup');
+    setRound(0);
+    setCombatStatus('idle');
     setIsResetModalOpen(false);
     setConcentrationAlerts({});
     setCombatFeedItems([]);
@@ -1086,8 +1125,8 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       localStorage.setItem('ttrpg_combatants', JSON.stringify([]));
       localStorage.removeItem('ttrpg_active_combatant_id');
       localStorage.setItem('ttrpg_active_turn_index', '0');
-      localStorage.setItem('ttrpg_combat_round', '1');
-      localStorage.setItem('ttrpg_combat_status', 'setup');
+      localStorage.setItem('ttrpg_combat_round', '0');
+      localStorage.setItem('ttrpg_combat_status', 'idle');
     } catch {}
 
     liveFeedSync.clearFeed();
@@ -1104,7 +1143,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           [TURN_METADATA_KEY]: {
             encounterId: newEncounterId,
             currentTurnIndex: 0,
-            currentRound: 1,
+            currentRound: 0,
             activeCombatantId: null,
             turnSeq: 0,
           },
@@ -1722,7 +1761,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         if (c.linkedPcId === editingCombatantId) {
           return {
             ...c,
-            initiative: Number((editInit - 0.01).toFixed(2)),
+            initiative: Number((editInit - 0.001).toFixed(3)),
             updatedAt: Date.now(),
           };
         }
@@ -2141,36 +2180,49 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           </button>
 
           <span className="px-2 py-0.5 rounded bg-amber-950/50 text-amber-400 border border-amber-800/60 font-black text-xs shrink-0">
-            R{round}
+            {round > 0 ? `R${round}` : 'PREP'}
           </span>
 
           <span
             className="text-xs font-bold text-slate-200 truncate max-w-[100px] xs:max-w-[120px]"
-            title={`Active Turn: ${activeTurnName}`}
+            title={`Active Turn: ${round > 0 ? activeTurnName : 'Idle'}`}
           >
-            TURN: {activeTurnName || 'None'}
+            TURN: {round > 0 ? (activeTurnName || 'None') : 'Idle'}
           </span>
         </div>
 
-        {/* Right: Transport Controls Cluster (⏮, ◀, ▶, 🔊, ≡ / ▤) */}
+        {/* Right: Transport Controls Cluster (Sort in Idle / ⏮ in Active, ◀, ▶, 🔊, ≡ / ▤) */}
         <div className="flex items-center gap-1 shrink-0">
-          {/* Start / Rewind to Top (⏮) */}
-          <button
-            type="button"
-            onClick={handleStartCombat}
-            title="Start / Jump to Highest Initiative (Top of Order)"
-            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <SkipBack className="w-3.5 h-3.5" />
-          </button>
+          {!isCombatActive ? (
+            /* Idle State: Explicit Sort Button replacing ⏮ */
+            <button
+              type="button"
+              onClick={handleSortInitiative}
+              className="h-7 px-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700/80 rounded flex items-center gap-1 text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
+              title="Sort Initiative (Highest to Lowest)"
+            >
+              <ArrowDownUp className="w-3.5 h-3.5 text-amber-400" />
+              <span>Sort</span>
+            </button>
+          ) : (
+            /* Active State: Rewind strictly to Round 1, Turn 1 (⏮) */
+            <button
+              type="button"
+              onClick={handleRewindToTop}
+              title="Rewind to Round 1, Turn 1"
+              className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <SkipBack className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           {/* Previous Turn (◀) */}
           <button
             type="button"
             onClick={handlePrevTurn}
-            disabled={combatants.length === 0 || isTurnUpdating}
-            title="Previous Turn"
-            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center justify-center transition-colors disabled:opacity-40 cursor-pointer"
+            disabled={!isCombatActive || combatants.length === 0 || isTurnUpdating}
+            title={!isCombatActive ? 'Encounter is Idle' : 'Previous Turn'}
+            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center justify-center transition-colors disabled:opacity-30 cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -2179,9 +2231,9 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           <button
             type="button"
             onClick={handleNextTurn}
-            disabled={combatants.length === 0 || isTurnUpdating}
-            title="Next Turn"
-            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded flex items-center justify-center transition-colors disabled:opacity-40 cursor-pointer shadow-sm"
+            disabled={!isCombatActive || combatants.length === 0 || isTurnUpdating}
+            title={!isCombatActive ? 'Encounter is Idle' : 'Next Turn'}
+            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded flex items-center justify-center transition-colors disabled:opacity-30 cursor-pointer shadow-sm"
           >
             <ChevronRight className="w-4 h-4 stroke-[2.5]" />
           </button>
@@ -2220,6 +2272,35 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           </button>
         </div>
       </div>
+
+      {/* 1.5 ENCOUNTER LIFECYCLE ACTION BANNERS */}
+      {!isCombatActive && isDm && (
+        <div className="px-2 pt-2">
+          <button
+            type="button"
+            onClick={handleStartCombat}
+            className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs tracking-wider uppercase rounded-lg shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
+            title="Start Encounter and Begin Round 1"
+          >
+            <Swords className="w-4 h-4 fill-slate-950" />
+            <span>⚔️ START COMBAT / ROLL INITIATIVE</span>
+          </button>
+        </div>
+      )}
+
+      {isCombatActive && !isDm && (
+        <div className="px-2 pt-2">
+          <button
+            type="button"
+            onClick={() => setIsRosterOpen(true)}
+            className="w-full py-2 px-3 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 rounded-lg text-amber-300 font-bold text-xs flex items-center justify-center gap-2 animate-pulse shadow-md transition cursor-pointer"
+            title="Open Roster to Join Combat"
+          >
+            <Swords className="w-3.5 h-3.5" />
+            <span>⚔️ Combat has begun! Open Roster to Join Combat.</span>
+          </button>
+        </div>
+      )}
 
       {/* 2. INITIATIVE LIST CONTAINER (Reclaims vertical space with zero drawer obstruction) */}
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1 min-h-0">

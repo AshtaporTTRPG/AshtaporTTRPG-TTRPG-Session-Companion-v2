@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Volume2,
   VolumeX,
@@ -15,8 +15,6 @@ export interface HeaderProps {
   setActiveTab: (tab: ActiveTab) => void;
   isDm: boolean;
   playerName: string;
-  isPinned: boolean;
-  onTogglePin: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,8 +22,6 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   isDm,
   playerName,
-  isPinned,
-  onTogglePin,
 }) => {
   const [soundOn, setSoundOn] = useState(isAudioEnabled());
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -63,13 +59,13 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="font-bold text-[11px] font-display text-neutral-200 tracking-wide">
             Ashtapor
           </span>
-          <span className="text-[10px] text-neutral-500 font-mono truncate max-w-[120px]">
+          <span className="text-[10px] text-neutral-500 font-mono truncate max-w-[130px]">
             · {playerName}
           </span>
         </div>
 
-        {/* Right: Relocated Utility Controls (Help Guide, GM/PC badge, Audio Toggle, Pin Button) */}
-        <div className="flex items-center gap-1 shrink-0">
+        {/* Right: Relocated Utility Controls (Help Guide, GM/PC badge, Audio Toggle) - Reclaimed Pushpin Buffer */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {/* Quick Guide Trigger Button [ ? ] immediately adjacent to GM/PC badge */}
           <button
             type="button"
@@ -111,27 +107,10 @@ export const Header: React.FC<HeaderProps> = ({
             className="p-1 rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
           >
             {soundOn ? (
-              <Volume2 className="w-3 h-3 text-emerald-400" />
+              <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
             ) : (
-              <VolumeX className="w-3 h-3 text-neutral-500" />
+              <VolumeX className="w-3.5 h-3.5 text-neutral-500" />
             )}
-          </button>
-
-          {/* Window Pin Toggle Button (📌): Disables popover click-away in Owlbear */}
-          <button
-            type="button"
-            onClick={onTogglePin}
-            title={isPinned ? 'Window Pinned (Click-away disabled)' : 'Pin Window (Prevent auto-closing)'}
-            aria-label={isPinned ? 'Window Pinned (Click-away disabled)' : 'Pin Window (Prevent auto-closing)'}
-            className={`px-1 py-0.5 text-[11px] rounded border transition cursor-pointer flex items-center justify-center ${
-              isPinned
-                ? 'bg-amber-950/90 border-amber-500/80 text-amber-300 ring-1 ring-amber-400/50 shadow-sm'
-                : 'bg-transparent border-transparent text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
-            }`}
-          >
-            <span className={`leading-none ${isPinned ? 'scale-110 drop-shadow' : 'opacity-70'}`}>
-              📌
-            </span>
           </button>
         </div>
       </div>

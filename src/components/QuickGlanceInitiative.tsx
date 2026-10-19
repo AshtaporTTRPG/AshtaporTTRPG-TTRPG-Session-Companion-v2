@@ -89,7 +89,7 @@ export const QuickGlanceInitiative: React.FC<QuickGlanceInitiativeProps> = ({
                         : `${roleCfg.bg} ${roleCfg.text} border ${roleCfg.border}`
                     }`}
                   >
-                    {combatant.initiative}
+                    {Math.ceil(combatant.initiative)}
                   </div>
 
                   {/* Name and Role Label */}

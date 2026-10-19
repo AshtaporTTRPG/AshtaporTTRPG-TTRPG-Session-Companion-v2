@@ -89,7 +89,7 @@ export const AddCombatantModal: React.FC<AddCombatantModalProps> = ({
     setLinkedPcId(pcId);
     const pc = activePcs.find((p) => p.id === pcId);
     if (pc) {
-      const linkedVal = Number((pc.initiative - 0.01).toFixed(2));
+      const linkedVal = Number((pc.initiative - 0.001).toFixed(3));
       setInitiative(linkedVal);
     }
   };
@@ -103,7 +103,7 @@ export const AddCombatantModal: React.FC<AddCombatantModalProps> = ({
     if (type === 'ally' && initMode === 'link' && linkedPcId) {
       const pc = activePcs.find((p) => p.id === linkedPcId);
       if (pc) {
-        finalInitiative = Number((pc.initiative - 0.01).toFixed(2));
+        finalInitiative = Number((pc.initiative - 0.001).toFixed(3));
         linkedName = pc.name;
       }
     }
@@ -325,7 +325,7 @@ export const AddCombatantModal: React.FC<AddCombatantModalProps> = ({
                     >
                       {activePcs.map((pc) => (
                         <option key={pc.id} value={pc.id}>
-                          {pc.name} (Init {pc.initiative}) ➔ {Number((pc.initiative - 0.01).toFixed(2))}
+                          {pc.name} (Init {Math.ceil(pc.initiative)}) ➔ Act after {pc.name}
                         </option>
                       ))}
                     </select>
@@ -359,10 +359,11 @@ export const AddCombatantModal: React.FC<AddCombatantModalProps> = ({
               </div>
               <input
                 type="number"
-                step="0.01"
-                value={initiative}
+                step="any"
+                value={initMode === 'link' ? Math.ceil(initiative) : initiative}
                 onChange={(e) => setInitiative(parseFloat(e.target.value) || 0)}
-                className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-amber-300 text-center focus:outline-none focus:border-amber-400"
+                disabled={initMode === 'link'}
+                className="w-full px-2 py-1 text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-amber-300 text-center focus:outline-none focus:border-amber-400 disabled:opacity-80"
               />
             </div>
             <div>

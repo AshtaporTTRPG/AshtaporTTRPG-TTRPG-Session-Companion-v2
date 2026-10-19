@@ -26,6 +26,8 @@ import { AddRosterModal } from './AddRosterModal';
 import { EditRosterModal } from '../roster/EditRosterModal';
 import OBR from '@owlbear-rodeo/sdk';
 import { ROSTER_METADATA_KEY, RosterMetadataPayload } from '../../types/combat';
+import { executeDiceRoll } from '../../utils/dice';
+import { liveFeedSync } from '../../utils/liveFeedSync';
 
 export interface MyRosterDrawerProps {
   isOpen: boolean;
@@ -90,8 +92,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   // Selected PC link mapping for Allies in Roster
   const [linkedPcByMemberId, setLinkedPcByMemberId] = useState<Record<string, string>>({});
 
-  // Local loading state to dim buttons for 250ms on click
+  // Local loading and atomic join state
   const [loadingMemberId, setLoadingMemberId] = useState<string | null>(null);
+  const [joiningMemberIds, setJoiningMemberIds] = useState<Set<string>>(new Set());
+  const [inCombatMemberIds, setInCombatMemberIds] = useState<Set<string>>(new Set());
 
   const saveRoster = (updated: RosterMember[]) => {
     setRoster(updated);
@@ -206,12 +210,119 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     linkedPcId?: string,
     linkedPcName?: string
   ) => {
-    if (isSyncing || loadingMemberId) return;
+    if (isSyncing || joiningMemberIds.has(member.id)) return;
+    setJoiningMemberIds((prev) => new Set(prev).add(member.id));
     setLoadingMemberId(member.id);
+
     try {
+      if (OBR.isReady) {
+        // Step 1: Immediately fetch fresh, authoritative room metadata from Owlbear
+        const roomMeta = await OBR.room.getMetadata();
+        const rosterData = roomMeta['ashtapor/roster'] as any;
+        const currentCombatants: Combatant[] = Array.isArray(rosterData)
+          ? rosterData
+          : Array.isArray(rosterData?.combatants)
+          ? rosterData.combatants
+          : [];
+
+        // Calculate initiative
+        let finalInitiative = customInit;
+        if (finalInitiative === undefined) {
+          const rollResult = executeDiceRoll({
+            diceType: 'd20',
+            count: 1,
+            modifier: member.initiativeMod,
+            sender: playerName,
+            isDm,
+            rollType: 'Straight roll',
+            label: `Initiative (${member.name})`,
+          });
+          liveFeedSync.recordDiceRoll(rollResult, true);
+          finalInitiative = rollResult.total;
+        }
+
+        const memberType =
+          member.role === 'PC'
+            ? 'player'
+            : member.role === 'Ally'
+            ? 'ally'
+            : member.role === 'Monster'
+            ? 'monster'
+            : member.role === 'Boss'
+            ? 'boss'
+            : 'custom';
+
+        const existingIdx = currentCombatants.findIndex(
+          (c) =>
+            (c.rosterId && c.rosterId === member.id) ||
+            c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+        );
+
+        const uniqueId =
+          existingIdx !== -1
+            ? currentCombatants[existingIdx].id
+            : typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+        const newCombatant: Combatant = {
+          id: uniqueId,
+          rosterId: member.id,
+          name: member.name,
+          role: member.role === 'PC' ? 'Player' : member.role,
+          type: memberType,
+          ac: member.ac,
+          armorClass: member.ac,
+          hp: member.maxHp,
+          maxHp: member.maxHp,
+          hpCurrent: member.maxHp,
+          hpMax: member.maxHp,
+          tempHp: 0,
+          hpTemp: 0,
+          initiative: finalInitiative,
+          linkedPcId,
+          linkedPcName,
+          conditions: [],
+          hidden: false,
+          maskStats: isDm && (member.role === 'Monster' || member.role === 'Boss'),
+          isReserve: false,
+          sortOrder: currentCombatants.length,
+          updatedAt: Date.now(),
+        };
+
+        const updatedCombatants = existingIdx !== -1
+          ? currentCombatants.map((c, i) => (i === existingIdx ? newCombatant : c))
+          : [...currentCombatants, newCombatant];
+
+        updatedCombatants.sort((a, b) => {
+          if (b.initiative !== a.initiative) return b.initiative - a.initiative;
+          return a.id.localeCompare(b.id);
+        });
+
+        // Step 2: Append and write back to OBR.room.setMetadata
+        const metadataUpdate: Record<string, any> = {
+          'ashtapor/roster': Array.isArray(rosterData)
+            ? updatedCombatants
+            : {
+                ...(rosterData || {}),
+                combatants: updatedCombatants,
+              },
+        };
+        await OBR.room.setMetadata(metadataUpdate);
+      }
+
+      // Step 3: Local callback execution and optimistic state update
       await onJoinCombat(member, customInit, linkedPcId, linkedPcName);
+      setInCombatMemberIds((prev) => new Set(prev).add(member.id));
+    } catch (err) {
+      console.warn('Could not join combat atomically:', err);
     } finally {
       setTimeout(() => {
+        setJoiningMemberIds((prev) => {
+          const next = new Set(prev);
+          next.delete(member.id);
+          return next;
+        });
         setLoadingMemberId(null);
       }, 250);
     }
@@ -348,10 +459,12 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                 );
                 const isInCombat =
                   Boolean(activeCombatant) ||
+                  inCombatMemberIds.has(member.id) ||
                   activeCombatantNames.some(
                     (n) => n.toLowerCase().trim() === member.name.toLowerCase().trim()
                   );
 
+                const isJoining = joiningMemberIds.has(member.id);
                 const isCardLoading = isSyncing || loadingMemberId === member.id;
                 const isAlly = member.role === 'Ally';
 
@@ -444,7 +557,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                           <option value="">-- Roll Standard --</option>
                           {activePcs.map((pc) => (
                             <option key={pc.id} value={pc.id}>
-                              {pc.name} (Init {pc.initiative})
+                              {pc.name} (Init {Math.ceil(pc.initiative)})
                             </option>
                           ))}
                         </select>
@@ -465,18 +578,27 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                       )}
 
                       {isInCombat ? (
-                        <button
-                          type="button"
-                          onClick={() => handleExitCombatClick(member.id)}
-                          disabled={isCardLoading}
-                          className={`bg-rose-950/70 hover:bg-rose-900/90 text-rose-300 border border-rose-800/70 text-xs px-2.5 py-1 rounded font-semibold flex items-center gap-1 transition-colors cursor-pointer ml-auto ${
-                            isCardLoading ? 'opacity-40 cursor-wait' : ''
-                          }`}
-                          title={`Exit combat with ${member.name} (keeps character saved in My Roster)`}
-                        >
-                          <LogOut className="w-3.5 h-3.5" />
-                          <span>Exit Combat</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 ml-auto">
+                          <button
+                            type="button"
+                            disabled
+                            className="px-2 py-0.5 text-xs font-bold rounded bg-emerald-950/80 border border-emerald-600/70 text-emerald-300 flex items-center gap-1 cursor-default opacity-90 shadow-sm"
+                          >
+                            <span>✓ In Combat</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExitCombatClick(member.id)}
+                            disabled={isCardLoading || isJoining}
+                            className={`bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-700 text-xs px-2 py-0.5 rounded font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                              isCardLoading ? 'opacity-40 cursor-wait' : ''
+                            }`}
+                            title={`Exit combat with ${member.name} (keeps character saved in My Roster)`}
+                          >
+                            <LogOut className="w-3 h-3" />
+                            <span>Exit</span>
+                          </button>
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -486,25 +608,34 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                                 (p) => p.id === linkedPcByMemberId[member.id]
                               );
                               if (targetPc) {
-                                const linkedInit = Number((targetPc.initiative - 0.01).toFixed(2));
+                                const linkedInit = Number((targetPc.initiative - 0.001).toFixed(3));
                                 handleJoinCombatClick(member, linkedInit, targetPc.id, targetPc.name);
                                 return;
                               }
                             }
                             handleJoinCombatClick(member);
                           }}
-                          disabled={isCardLoading}
-                          className={`px-2.5 py-1 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 transition flex items-center gap-1 shadow-sm cursor-pointer ml-auto ${
-                            isCardLoading ? 'opacity-40 cursor-wait' : ''
+                          disabled={isJoining || isCardLoading}
+                          className={`px-2.5 py-1 text-xs font-bold rounded bg-amber-400 hover:bg-amber-300 text-slate-950 transition flex items-center gap-1 shadow-sm ml-auto ${
+                            isJoining
+                              ? 'pointer-events-none opacity-80 cursor-wait bg-amber-500/80'
+                              : isCardLoading
+                              ? 'opacity-40 cursor-wait'
+                              : 'cursor-pointer'
                           }`}
-                          title={
-                            isAlly && linkedPcByMemberId[member.id]
-                              ? 'Join combat linked to selected PC initiative (-0.01)'
-                              : 'Roll 1d20 + Init Mod and add character to combat with full HP'
-                          }
+                          title="Join combat with full HP"
                         >
-                          <Swords className="w-3.5 h-3.5" />
-                          <span>Join Combat</span>
+                          {isJoining ? (
+                            <>
+                              <span className="text-xs">⏳</span>
+                              <span>Joining...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Swords className="w-3.5 h-3.5" />
+                              <span>Join Combat</span>
+                            </>
+                          )}
                         </button>
                       )}
                     </div>

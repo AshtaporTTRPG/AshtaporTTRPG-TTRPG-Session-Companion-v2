@@ -40,13 +40,6 @@ export default function App() {
       return true;
     }
   });
-  const [isPinned, setIsPinned] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('ashtapor_pinned') === 'true';
-    } catch {
-      return false;
-    }
-  });
 
   // Table Broadcast Note State (revealed by GM to entire table)
   const [broadcastNote, setBroadcastNote] = useState<BroadcastNotePayload | null>(() => {
@@ -75,18 +68,6 @@ export default function App() {
         setIsGM(isGmRole);
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
-
-        // Read ashtapor_pinned from localStorage and apply the initial disableClickAway setting
-        const savedPinned = localStorage.getItem('ashtapor_pinned') === 'true';
-        setIsPinned(savedPinned);
-        try {
-          const popoverApi = (OBR as any).popover;
-          if (popoverApi && typeof popoverApi.setProperties === 'function') {
-            await popoverApi.setProperties({ disableClickAway: savedPinned });
-          }
-        } catch (popoverErr) {
-          console.warn('Could not set initial popover properties:', popoverErr);
-        }
 
         // Fetch initial broadcast note if any
         try {
@@ -182,24 +163,6 @@ export default function App() {
       try {
         localStorage.setItem('ashtapor_help_seen', 'true');
       } catch {}
-    }
-  };
-
-  // Window Pin Toggle Handler: saves preference and calls OBR.popover.setProperties
-  const handleTogglePin = async () => {
-    const nextPinned = !isPinned;
-    setIsPinned(nextPinned);
-    try {
-      localStorage.setItem('ashtapor_pinned', nextPinned ? 'true' : 'false');
-    } catch {}
-
-    try {
-      const popoverApi = (OBR as any).popover;
-      if (popoverApi && typeof popoverApi.setProperties === 'function') {
-        await popoverApi.setProperties({ disableClickAway: nextPinned });
-      }
-    } catch (err) {
-      console.warn('Could not set popover disableClickAway:', err);
     }
   };
 
@@ -333,27 +296,10 @@ export default function App() {
               className="p-1 rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
             >
               {soundOn ? (
-                <Volume2 className="w-3 h-3 text-emerald-400" />
+                <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
-                <VolumeX className="w-3 h-3 text-neutral-500" />
+                <VolumeX className="w-3.5 h-3.5 text-neutral-500" />
               )}
-            </button>
-
-            {/* Pin Toggle Button (📌): Disables popover click-away in Owlbear */}
-            <button
-              type="button"
-              onClick={handleTogglePin}
-              title={isPinned ? 'Window Pinned (Click-away disabled)' : 'Pin Window (Prevent auto-closing)'}
-              aria-label={isPinned ? 'Window Pinned (Click-away disabled)' : 'Pin Window (Prevent auto-closing)'}
-              className={`px-1 py-0.5 text-[11px] rounded border transition cursor-pointer flex items-center justify-center ${
-                isPinned
-                  ? 'bg-amber-950/90 border-amber-500/80 text-amber-300 ring-1 ring-amber-400/50 shadow-sm'
-                  : 'bg-transparent border-transparent text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
-              }`}
-            >
-              <span className={`leading-none ${isPinned ? 'scale-110 drop-shadow' : 'opacity-70'}`}>
-                📌
-              </span>
             </button>
           </div>
         </div>

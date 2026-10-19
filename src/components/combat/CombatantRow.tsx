@@ -476,15 +476,20 @@ const CombatantRowInner: React.FC<CombatantRowProps> = ({
       <div className="min-h-[38px] px-2 py-1 flex items-center justify-between gap-1.5">
         {/* Left: Initiative badge & role accent */}
         <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            onClick={() => canEdit && onRollInitiative?.(combatant.id)}
-            disabled={!canEdit}
-            title={canEdit ? 'Click to roll 1d20 Initiative' : `Initiative ${combatant.initiative}`}
-            className="w-7 h-7 font-black text-xs rounded-lg bg-neutral-800 text-amber-400 flex items-center justify-center tabular-nums border border-neutral-700 hover:border-amber-400 transition cursor-pointer shadow-inner disabled:cursor-default"
-          >
-            {combatant.initiative}
-          </button>
+          {(() => {
+            const displayInit = Math.ceil(combatant.initiative);
+            return (
+              <button
+                type="button"
+                onClick={() => canEdit && onRollInitiative?.(combatant.id)}
+                disabled={!canEdit}
+                title={canEdit ? 'Click to roll 1d20 Initiative' : `Initiative ${displayInit}`}
+                className="w-7 h-7 font-black text-xs rounded-lg bg-neutral-800 text-amber-400 flex items-center justify-center tabular-nums border border-neutral-700 hover:border-amber-400 transition cursor-pointer shadow-inner disabled:cursor-default"
+              >
+                {displayInit}
+              </button>
+            );
+          })()}
         </div>
 
         {/* Center: Combatant name, AC badge, Role pill, Health state pill */}

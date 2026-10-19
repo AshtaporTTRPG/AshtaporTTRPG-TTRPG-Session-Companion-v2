@@ -205,17 +205,16 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 </div>
                 <div className="bg-amber-950/20 border border-amber-500/20 rounded-lg p-2 space-y-1.5 text-[11px]">
                   <p>
-                    <strong className="text-amber-300 font-semibold">Transport Controls:</strong>{' '}
-                    <RotateCcw className="inline w-3 h-3 text-amber-400 align-text-bottom" /> rewinds to Round 1;{' '}
-                    <ChevronLeft className="inline w-3 h-3 text-amber-400 align-text-bottom" /> /{' '}
-                    <ChevronRight className="inline w-3 h-3 text-amber-400 align-text-bottom" /> advances turns with deterministic tie-breaking.
+                    <strong className="text-amber-300 font-semibold">Combat Lifecycle:</strong> In Prep (Idle), sort initiative or launch encounter with <strong className="text-amber-400">⚔️ Start Combat</strong>. In Active mode, cassette controls (<code className="text-amber-300 font-mono text-[10px]">⏮</code> Rewind to R1 T1, <code className="text-amber-300 font-mono text-[10px]">◀</code> Prev, <code className="text-amber-300 font-mono text-[10px]">▶</code> Next) drive turn flow.
+                  </p>
+                  <p>
+                    <strong className="text-amber-300 font-semibold">Linked Allies:</strong> Link allies to PCs for synchronized turns; displays clean integer initiative while strictly preserving order.
                   </p>
                   <p>
                     <strong className="text-amber-300 font-semibold">Hostile Masking:</strong> Hostile HP is automatically masked (<code className="text-amber-300 font-mono text-[10px]">???/???</code>) and monster healing is silenced in player feeds.
                   </p>
                   <p>
-                    <strong className="text-amber-300 font-semibold">Smart Reset:</strong>{' '}
-                    <RotateCcw className="inline w-3 h-3 text-rose-400 align-text-bottom" /> lets you clear hostiles only or trigger a complete encounter teardown.
+                    <strong className="text-amber-300 font-semibold">Smart Reset:</strong> Clear hostiles only or trigger a complete encounter teardown.
                   </p>
                 </div>
               </div>
@@ -236,10 +235,16 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                   <strong className="text-amber-300 font-semibold">Quick D20:</strong> Tap <code className="text-amber-300 font-mono text-[10px]">d20</code>, <code className="text-amber-300 font-mono text-[10px]">Adv</code>, or <code className="text-amber-300 font-mono text-[10px]">Dis</code> at the top for instant rolls. These are sandboxed and will not disturb staged dice below.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Visibility:</strong> Toggle <strong className="text-slate-100">Public</strong> (table-wide), <strong className="text-slate-100">GM Only</strong> (secret DM whisper), or <strong className="text-slate-100">Self</strong> (private test roll).
+                  <strong className="text-amber-300 font-semibold">Combined Roll Buttons:</strong> Use <strong className="text-amber-400">Roll (Sum)</strong> for combined totals, or <strong className="text-slate-200">Indiv</strong> for individual die result breakdowns.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Staging Tray:</strong> Combine polyhedrals (<code className="text-amber-300 font-mono text-[10px]">d4</code>–<code className="text-amber-300 font-mono text-[10px]">d100</code>), set flat modifiers with <code className="text-amber-300 font-mono text-[10px]">MOD [-] / [+]</code>, and toggle <strong className="text-slate-100">Sum / Indiv</strong>.
+                  <strong className="text-amber-300 font-semibold">Direct Formula Modifiers:</strong> Tap quick chips (<code className="text-amber-300 font-mono text-[10px]">+1</code> to <code className="text-amber-300 font-mono text-[10px]">+5</code>, <code className="text-rose-400 font-mono text-[10px]">-1</code>, <code className="text-rose-400 font-mono text-[10px]">-2</code>) to append directly into your formula.
+                </p>
+                <p>
+                  <strong className="text-amber-300 font-semibold">Math Calculator:</strong> Tap the calculator icon next to the formula input to compute complex modifiers and inject results with 1 tap.
+                </p>
+                <p>
+                  <strong className="text-amber-300 font-semibold">Visibility:</strong> Toggle <strong className="text-slate-100">Public</strong> (table-wide), <strong className="text-slate-100">GM Only</strong> (secret DM whisper), or <strong className="text-slate-100">Self</strong> (private test roll).
                 </p>
                 <p>
                   <strong className="text-amber-300 font-semibold">Macros:</strong> Save weapon attacks or complex spell expressions under <strong className="text-slate-100">+ Add Macro</strong> for 1-click rolling.
@@ -297,10 +302,10 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                   <strong className="text-amber-300 font-semibold">Sub-Tabs:</strong> <strong className="text-slate-100">My Notes</strong> is local and private; <strong className="text-slate-100">Table Notes</strong> syncs live across the whole party.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">
-                    Reader View (<Maximize2 className="inline w-3 h-3 text-amber-400 align-text-bottom" />):
-                  </strong>{' '}
-                  Maximizes long notes to full height (~720px) with clean line wrapping and native text selection.
+                  <strong className="text-amber-300 font-semibold">1-Tap Reader View (<Maximize2 className="inline w-3 h-3 text-amber-400 align-text-bottom" />):</strong> Tap directly from collapsed note headers to open full distraction-free reading mode.
+                </p>
+                <p>
+                  <strong className="text-amber-300 font-semibold">Note Transfers:</strong> Both players and GM can copy or move notes between My Notes and Table Notes seamlessly.
                 </p>
                 <p>
                   <strong className="text-amber-300 font-semibold">
@@ -334,7 +339,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
       {/* Footer Utility Strip */}
       <div className="p-2 border-t border-slate-800/80 bg-slate-950 text-[10px] text-slate-500 font-mono text-center select-none flex items-center justify-between">
-        <span>Ashtapor v2.0.22</span>
+        <span>Ashtapor v2.0.24</span>
         <span>Press Esc to close</span>
       </div>
     </div>

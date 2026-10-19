@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight } from 'lucide-react';
+import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2 } from 'lucide-react';
 import { NoteItem, DmSecretNote, NoteCategory } from '../../types/notes';
 import { CATEGORY_STYLES } from './NoteCard';
 import { copyToClipboard } from '../../utils/clipboard';
@@ -8,15 +8,17 @@ export interface NoteReaderViewProps {
   note: NoteItem | DmSecretNote;
   onBack: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
   isGM?: boolean;
   currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
-  onTransfer?: (action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my') => void;
+  onTransfer?: (action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
 }
 
 export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   note,
   onBack,
   onEdit,
+  onDelete,
   isGM = false,
   currentVault = 'myNotes',
   onTransfer,
@@ -92,11 +94,11 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   }, [note]);
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 p-3 select-text overflow-hidden rounded-xl border border-slate-800">
-      {/* Sticky Utility Header (34px) */}
-      <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-800 shrink-0">
-        {/* Left: Back Button & Category Pill */}
-        <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+    <div className="flex flex-col h-full bg-slate-950 p-2.5 select-text overflow-hidden rounded-xl border border-slate-800">
+      {/* Sticky Utility Header: [ ← Back ] | Title & Badge | [ 📋 Copy ] [ ↗ Transfer ] [ ✏️ Edit ] [ 🗑️ Delete ] */}
+      <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 shrink-0 gap-1.5">
+        {/* Left: Back Button & Title & Category Pill */}
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <button
             type="button"
             onClick={onBack}
@@ -110,28 +112,42 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
           >
             {cat}
           </span>
-          {/* Center / Title */}
           <h2
-            className="text-sm font-bold text-slate-100 truncate max-w-[200px] ml-2"
+            className="text-xs font-bold text-slate-100 truncate min-w-0 flex-1 ml-1"
             title={note.title}
           >
             {note.title}
           </h2>
         </div>
 
-        {/* Right Action Icons: Transfer, Copy All & Edit */}
+        {/* Right Action Icons: Copy, Transfer, Edit & Delete */}
         <div className="flex items-center gap-1 shrink-0">
-          {/* DM Transfer Action Menu (Visible strictly when isGM === true) */}
-          {isGM && onTransfer && (
+          {/* 1-Click Copy */}
+          <button
+            type="button"
+            onClick={handleCopyFullNote}
+            title={copied ? 'Copied to clipboard!' : 'Copy Full Note'}
+            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-900 border border-slate-800 rounded cursor-pointer transition flex items-center gap-1 text-xs"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Copy className="w-3.5 h-3.5 text-amber-400" />
+            )}
+            <span className="hidden xs:inline">{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+
+          {/* Transfer Menu for all users */}
+          {onTransfer && (
             <div className="relative" ref={transferRef}>
               <button
                 type="button"
                 onClick={() => setIsTransferOpen((prev) => !prev)}
                 title="Transfer note across vaults"
-                className="px-2 py-1 text-xs font-semibold rounded bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 hover:border-amber-400 transition cursor-pointer flex items-center gap-1"
+                className="px-2 py-1 text-xs font-semibold rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 border border-slate-800 transition cursor-pointer flex items-center gap-1"
               >
-                <ArrowUpRight className="w-3.5 h-3.5" />
-                <span>Transfer</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden xs:inline">Transfer</span>
               </button>
 
               {isTransferOpen && (
@@ -162,17 +178,17 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       <span>Move to Table Notes</span>
                     </button>
                   )}
-                  {currentVault !== 'dmNotes' && (
+                  {currentVault !== 'myNotes' && (
                     <button
                       type="button"
                       onClick={() => {
                         setIsTransferOpen(false);
-                        onTransfer('move_to_dm');
+                        onTransfer('copy_to_my');
                       }}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
                     >
-                      <span>🔒</span>
-                      <span>Move to DM Notes</span>
+                      <span>📋</span>
+                      <span>Copy to My Notes</span>
                     </button>
                   )}
                   {currentVault !== 'myNotes' && (
@@ -188,36 +204,55 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       <span>Move to My Notes</span>
                     </button>
                   )}
+                  {isGM && currentVault !== 'dmNotes' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTransferOpen(false);
+                        onTransfer('move_to_dm');
+                      }}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
+                    >
+                      <span>🔒</span>
+                      <span>Move to DM Notes</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={handleCopyFullNote}
-            title={copied ? 'Copied to clipboard!' : 'Copy Full Note'}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-900 rounded cursor-pointer transition"
-          >
-            {copied ? (
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <Copy className="w-3.5 h-3.5" />
-            )}
-          </button>
+          {/* Edit Note */}
           <button
             type="button"
             onClick={onEdit}
             title="Edit Note"
-            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-900 rounded cursor-pointer transition"
+            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-900 border border-slate-800 rounded cursor-pointer transition"
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
+
+          {/* Delete Note */}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Delete note "${note.title}"?`)) {
+                  onDelete();
+                  onBack();
+                }
+              }}
+              title="Delete Note"
+              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-900 border border-slate-800 rounded cursor-pointer transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Reading Text Body */}
-      <div className="flex-1 overflow-y-auto pr-1 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap font-sans selection:bg-amber-500/30 selection:text-amber-200">
+      <div className="flex-1 overflow-y-auto pr-1 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap font-sans selection:bg-amber-500/30 selection:text-amber-200 p-1">
         {note.content}
       </div>
 

@@ -1,11 +1,11 @@
 {
   "name": "Ashtapor Session Companion",
-  "version": "2.0.23",
+  "version": "2.0.24",
   "manifest_version": 1,
   "action": {
     "title": "Ashtapor Companion",
-    "icon": "https://ashtaporttrpg.github.io/AshtaporTTRPG-TTRPG-Session-Companion-v2/icon.svg?v=2.0.23",
-    "popover": "https://ashtaporttrpg.github.io/AshtaporTTRPG-TTRPG-Session-Companion-v2/index.html?v=2.0.23",
+    "icon": "https://ashtaporttrpg.github.io/AshtaporTTRPG-TTRPG-Session-Companion-v2/icon.svg?v=2.0.24",
+    "popover": "https://ashtaporttrpg.github.io/AshtaporTTRPG-TTRPG-Session-Companion-v2/index.html?v=2.0.24",
     "width": 480,
     "height": 820
   }

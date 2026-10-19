@@ -476,105 +476,8 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                     </span>
                   </div>
 
-                  {/* Header Actions */}
+                  {/* Collapsed Header Micro-Icons: 1-Tap Reader View + Pin */}
                   <div className="flex items-center gap-1 shrink-0 ml-1">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleReveal(note);
-                      }}
-                      aria-label={isRevealed ? 'Hide from Table' : 'Reveal to Table'}
-                      title={
-                        isRevealed
-                          ? 'Hide from Table (currently broadcasting to all player screens)'
-                          : 'Reveal to Table (broadcast this note to all player screens)'
-                      }
-                      className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
-                        isRevealed
-                          ? 'text-amber-400 bg-amber-950/70 border border-amber-500/80 ring-1 ring-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
-                          : 'text-slate-500 hover:text-amber-400 hover:bg-slate-800 border border-slate-800 hover:border-amber-400/40 ring-0 hover:ring-1 hover:ring-amber-400/30'
-                      }`}
-                    >
-                      {isRevealed ? (
-                        <Eye className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                      ) : (
-                        <EyeOff className="w-3.5 h-3.5 opacity-60 hover:opacity-100" />
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopy(note, e)}
-                      className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
-                      title={copiedId === note.id ? 'Copied to clipboard!' : 'Copy note to clipboard'}
-                      aria-label="Copy note to clipboard"
-                    >
-                      {copiedId === note.id ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-
-                    {/* DM Transfer Action Menu */}
-                    {onTransfer && (
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveTransferId((prev) => (prev === note.id ? null : note.id));
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer flex items-center gap-0.5"
-                          title="Transfer note across vaults"
-                        >
-                          <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
-                        </button>
-
-                        {activeTransferId === note.id && (
-                          <div className="absolute right-0 top-full mt-1 w-44 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-[11px] font-sans">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveTransferId(null);
-                                onTransfer(note.id, 'copy_to_table');
-                              }}
-                              className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
-                            >
-                              <span>📋</span>
-                              <span>Copy to Table Notes</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveTransferId(null);
-                                onTransfer(note.id, 'move_to_table');
-                              }}
-                              className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
-                            >
-                              <span>➔</span>
-                              <span>Move to Table Notes</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveTransferId(null);
-                                onTransfer(note.id, 'move_to_my');
-                              }}
-                              className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
-                            >
-                              <span>👤</span>
-                              <span>Move to My Notes</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     {/* Reader View Launch Trigger */}
                     {onOpenReader && (
                       <button
@@ -585,7 +488,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                         }}
                         aria-label="Open Full Reader View"
                         title="Open Full Reader View"
-                        className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                        className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
                       >
                         <Maximize2 className="w-3.5 h-3.5" />
                       </button>
@@ -609,37 +512,157 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                         <Pin className={`w-3.5 h-3.5 ${note.isPinned ? 'fill-amber-400' : ''}`} />
                       </button>
                     )}
-
-                    <button
-                      type="button"
-                      onClick={(e) => handleOpenEdit(note, e)}
-                      aria-label="Edit note"
-                      title="Edit note"
-                      className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`Delete secret note "${note.title}"?`)) {
-                          onDeleteDmNote(note.id);
-                        }
-                      }}
-                      aria-label="Delete note"
-                      title="Delete note"
-                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
 
-                {/* Expanded State: Full text area with decoupled click & text selection */}
+                {/* Expanded State: Action strip + full text area */}
                 {expanded && (
                   <div className="px-2.5 pb-2.5 pt-1 space-y-2 border-t border-slate-800/80">
+                    {/* Secondary Action Strip Toolbar: [ 📋 Copy ] [ ↗ Transfer ] [ ⛶ Full View ] [ 👁️ Broadcast ] [ ✏️ Edit ] [ 🗑️ Delete ] */}
+                    <div className="flex items-center justify-between gap-1 py-1 px-1 rounded-lg bg-slate-950/80 border border-slate-800/80 text-xs">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {/* Copy Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleCopy(note, e)}
+                          className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                          title={copiedId === note.id ? 'Copied!' : 'Copy note content'}
+                        >
+                          {copiedId === note.id ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-amber-400" />
+                          )}
+                          <span>{copiedId === note.id ? 'Copied' : 'Copy'}</span>
+                        </button>
+
+                        {/* Transfer Menu */}
+                        {onTransfer && (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveTransferId((prev) => (prev === note.id ? null : note.id));
+                              }}
+                              className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                              title="Transfer note across vaults"
+                            >
+                              <ArrowUpRight className="w-3 h-3 text-amber-400" />
+                              <span>Transfer</span>
+                            </button>
+
+                            {activeTransferId === note.id && (
+                              <div className="absolute left-0 top-full mt-1 w-44 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-[11px] font-sans">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveTransferId(null);
+                                    onTransfer(note.id, 'copy_to_table');
+                                  }}
+                                  className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                                >
+                                  <span>📋</span>
+                                  <span>Copy to Table Notes</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveTransferId(null);
+                                    onTransfer(note.id, 'move_to_table');
+                                  }}
+                                  className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                                >
+                                  <span>➔</span>
+                                  <span>Move to Table Notes</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveTransferId(null);
+                                    onTransfer(note.id, 'move_to_my');
+                                  }}
+                                  className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
+                                >
+                                  <span>👤</span>
+                                  <span>Move to My Notes</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Full View */}
+                        {onOpenReader && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenReader(note.id);
+                            }}
+                            className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                            title="Open Full Reader View"
+                          >
+                            <Maximize2 className="w-3 h-3 text-amber-400" />
+                            <span>Full View</span>
+                          </button>
+                        )}
+
+                        {/* Broadcast to Table */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleReveal(note);
+                          }}
+                          className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer border ${
+                            isRevealed
+                              ? 'bg-amber-950/80 border-amber-500/80 text-amber-300'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-300 border-slate-800'
+                          }`}
+                          title={isRevealed ? 'Hide from Table' : 'Broadcast to Table'}
+                        >
+                          {isRevealed ? (
+                            <Eye className="w-3 h-3 text-amber-400 animate-pulse" />
+                          ) : (
+                            <EyeOff className="w-3 h-3" />
+                          )}
+                          <span>{isRevealed ? 'Broadcasting' : 'Broadcast'}</span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* Edit Note */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenEdit(note, e)}
+                          aria-label="Edit note"
+                          title="Edit note"
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-300 border border-slate-800 transition cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Delete Note */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Delete secret note "${note.title}"?`)) {
+                              onDeleteDmNote(note.id);
+                            }
+                          }}
+                          aria-label="Delete note"
+                          title="Delete note"
+                          className="p-1 rounded bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-800 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                     <div
                       className="text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/60 shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200"
                     >

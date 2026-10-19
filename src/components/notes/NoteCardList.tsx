@@ -44,7 +44,7 @@ export interface NoteCardListProps {
   onOpenReader?: (id: string) => void;
   isGM?: boolean;
   currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
-  onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'move_to_dm' | 'move_to_my') => void;
+  onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [

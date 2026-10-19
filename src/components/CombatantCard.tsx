@@ -302,7 +302,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
               type="button"
               onClick={canEditCombatant ? handleOpenStatEditor : undefined}
               disabled={!canEditCombatant}
-              title={canEditCombatant ? 'Click to edit initiative and stats' : `Initiative: ${combatant.initiative}`}
+              title={canEditCombatant ? 'Click to edit initiative and stats' : `Initiative: ${Math.ceil(combatant.initiative)}`}
               className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-bold text-sm shadow-sm transition ${
                 canEditCombatant ? 'cursor-pointer hover:ring-2 hover:ring-amber-400' : 'cursor-default'
               } ${
@@ -311,7 +311,7 @@ export const CombatantCard: React.FC<CombatantCardProps> = ({
                   : 'bg-slate-800 text-slate-200 border border-slate-700'
               }`}
             >
-              {combatant.initiative}
+              {Math.ceil(combatant.initiative)}
             </button>
             {canEditCombatant && onRollInitiative && (
               <button

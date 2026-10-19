@@ -25,7 +25,6 @@ import {
 import {
   Dices,
   Sparkles,
-  Minus,
   Plus,
   RotateCcw,
   Edit2,
@@ -34,10 +33,12 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Calculator,
 } from 'lucide-react';
 import { AddCustomMacroModal } from './AddCustomMacroModal';
 import { EditCustomMacroModal } from './EditCustomMacroModal';
 import { RollFeedCard } from './RollFeedCard';
+import { MathCalculatorModal } from './MathCalculatorModal';
 
 export interface DiceTabProps {
   isDm: boolean;
@@ -151,7 +152,9 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     return () => unsub();
   }, []);
 
-  // Sync typed formula input with modifier stepper
+  const [isCalcOpen, setIsCalcOpen] = useState<boolean>(false);
+
+  // Sync typed formula input with modifier
   const handleFormulaInputChange = (text: string) => {
     setFormulaInput(text);
     const parsed = parseDiceFormula(text);
@@ -162,11 +165,50 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     }
   };
 
-  // STEP MODIFIER (Syncs with input formula)
-  const handleModifierStep = (delta: number) => {
-    const newMod = modifier + delta;
-    setModifier(newMod);
-    setFormulaInput((prev) => setFormulaModifier(prev, newMod));
+  // Quick modifier chip append / adjustment (e.g. 2d6 -> 2d6+3)
+  const handleQuickModifierChip = (delta: number) => {
+    setFormulaInput((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) {
+        const sign = delta > 0 ? `+${delta}` : `${delta}`;
+        setModifier(delta);
+        return sign;
+      }
+      const parsed = parseDiceFormula(trimmed);
+      if (parsed && parsed.pool && parsed.pool.length > 0) {
+        const newMod = parsed.modifier + delta;
+        setModifier(newMod);
+        return setFormulaModifier(trimmed, newMod);
+      }
+      const sign = delta > 0 ? `+${delta}` : `${delta}`;
+      const next = `${trimmed}${sign}`;
+      const reParsed = parseDiceFormula(next);
+      if (reParsed) setModifier(reParsed.modifier);
+      return next;
+    });
+  };
+
+  // Apply result from Math Calculator to formula
+  const handleApplyFromCalculator = (val: number) => {
+    setFormulaInput((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) {
+        const sign = val >= 0 ? `+${val}` : `${val}`;
+        setModifier(val);
+        return sign;
+      }
+      const parsed = parseDiceFormula(trimmed);
+      if (parsed && parsed.pool && parsed.pool.length > 0) {
+        const newMod = parsed.modifier + val;
+        setModifier(newMod);
+        return setFormulaModifier(trimmed, newMod);
+      }
+      const sign = val >= 0 ? `+${val}` : `${val}`;
+      const next = `${trimmed}${sign}`;
+      const reParsed = parseDiceFormula(next);
+      if (reParsed) setModifier(reParsed.modifier);
+      return next;
+    });
   };
 
   // CLEAR STAGED FORMULA & RESET MODIFIER
@@ -520,11 +562,11 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         </div>
       </div>
 
-      {/* 2. COMPACT CONTROLS AREA (Formula Bar + Two-Tier Staging & Modifier Toolstrips) */}
+      {/* 2. COMPACT CONTROLS AREA (Formula Bar + Combined Roll Buttons + Quick Modifiers + Polyhedrals) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
-        {/* Row 2: Formula Bar & Primary Roll Action */}
+        {/* Row 2: Formula Bar with Calculator & Combined Roll Buttons */}
         <div className="relative flex items-center h-9 w-full gap-1.5">
-          <div className="relative flex-1 h-full flex items-center">
+          <div className="relative flex-1 h-full flex items-center min-w-0">
             <input
               type="text"
               value={formulaInput}
@@ -532,36 +574,61 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  handleExecuteRoll();
+                  handleExecuteRoll(undefined, undefined, undefined, 'sum');
                 }
               }}
-              placeholder="e.g. 1d20+5, 2d20 + 1d8 + 5"
-              className="w-full h-9 px-2.5 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition pr-7 placeholder:text-slate-600"
+              placeholder="e.g. 1d20+5, 2d6+3, 8d6"
+              className="w-full h-9 px-2.5 pr-14 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition placeholder:text-slate-600"
             />
-            {formulaInput && (
+            <div className="absolute right-1 flex items-center gap-0.5">
+              {formulaInput && (
+                <button
+                  type="button"
+                  onClick={handleClearFormula}
+                  className="p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
+                  title="Clear expression & modifier"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handleClearFormula}
-                className="absolute right-1.5 p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
-                title="Clear expression, staged pool & modifier"
+                onClick={() => setIsCalcOpen(true)}
+                className="p-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition cursor-pointer"
+                title="Open Math Calculator"
+                aria-label="Open Math Calculator"
               >
-                <X className="w-3.5 h-3.5" />
+                <Calculator className="w-3.5 h-3.5" />
               </button>
-            )}
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => handleExecuteRoll()}
-            className="h-9 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-lg transition shadow cursor-pointer shrink-0 flex items-center gap-1 font-display tracking-wider uppercase"
-            title="Roll dice expression"
-          >
-            ROLL
-          </button>
+
+          {/* Combined Roll Buttons: [ 🎲 Roll (Sum) ] (wide primary) & [ 📊 Indiv ] (secondary) */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleExecuteRoll(undefined, undefined, undefined, 'sum')}
+              className="h-9 px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-lg transition shadow cursor-pointer flex items-center gap-1 font-display tracking-wider uppercase"
+              title="Roll and sum total"
+            >
+              <span>🎲</span>
+              <span>Roll (Sum)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExecuteRoll(undefined, undefined, undefined, 'individual')}
+              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 font-bold text-xs rounded-lg transition shadow cursor-pointer flex items-center gap-1 font-display tracking-wider uppercase"
+              title="Roll and show individual dice"
+            >
+              <span>📊</span>
+              <span>Indiv</span>
+            </button>
+          </div>
         </div>
 
-        {/* Row 3: Sub-Strip 1 (Polyhedrals + Result Mode) */}
-        <div className="flex items-center justify-between gap-1 h-7">
-          {/* Left: Polyhedral Chips without '+' prefix, d20 highlighted */}
+        {/* Row 3: Polyhedrals (Left) + D20 Roll Mode (Right) */}
+        <div className="flex items-center justify-between gap-1 h-6.5">
+          {/* Left: Polyhedral Chips */}
           <div className="flex items-center gap-1 shrink-0">
             {INTERACTIVE_DICE.map((die) => {
               const isD20 = die === 'd20';
@@ -583,67 +650,12 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
             })}
           </div>
 
-          {/* Right: Result Calculation Toggle [ Sum | Indiv ] */}
-          <div className="flex items-center p-0.5 bg-slate-950 border border-slate-800 rounded text-[10px] h-6 shrink-0">
-            <button
-              type="button"
-              onClick={() => setDisplayMode('sum')}
-              className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                displayMode === 'sum'
-                  ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Sum: Combine total of all roll instances"
-            >
-              Sum
-            </button>
-            <button
-              type="button"
-              onClick={() => setDisplayMode('individual')}
-              className={`h-full px-1.5 rounded font-semibold transition cursor-pointer ${
-                displayMode === 'individual'
-                  ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Indiv: Individual line item outputs without grand total"
-            >
-              Indiv
-            </button>
-          </div>
-        </div>
-
-        {/* Row 4: Sub-Strip 2 (Modifier Stepper + D20 Roll Mode) */}
-        <div className="flex items-center justify-between gap-1.5 h-7 mt-1.5">
-          {/* Left: Modifier Stepper (MOD label + [-] + [+5] + [+]) */}
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase select-none mr-0.5">MOD</span>
-            <button
-              type="button"
-              onClick={() => handleModifierStep(-1)}
-              className="w-6 h-6 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded flex items-center justify-center text-xs font-bold shrink-0 transition-colors cursor-pointer"
-              title="Decrease modifier (-1)"
-            >
-              <Minus className="w-3 h-3" />
-            </button>
-            <span className="min-w-[32px] text-center font-mono font-bold text-xs text-amber-400 tabular-nums select-none">
-              {formattedMod}
-            </span>
-            <button
-              type="button"
-              onClick={() => handleModifierStep(1)}
-              className="w-6 h-6 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded flex items-center justify-center text-xs font-bold shrink-0 transition-colors cursor-pointer"
-              title="Increase modifier (+1)"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
-
           {/* Right: D20 Roll Mode Segmented Control [ Adv | Straight | Dis ] */}
           <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 shrink-0">
             <button
               type="button"
               onClick={() => setAdvantageMode('advantage')}
-              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+              className={`px-1.5 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
                 advantageMode === 'advantage'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -655,7 +667,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
             <button
               type="button"
               onClick={() => setAdvantageMode('normal')}
-              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+              className={`px-1.5 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
                 advantageMode === 'normal'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -667,7 +679,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
             <button
               type="button"
               onClick={() => setAdvantageMode('disadvantage')}
-              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+              className={`px-1.5 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
                 advantageMode === 'disadvantage'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -677,6 +689,33 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
               Dis
             </button>
           </div>
+        </div>
+
+        {/* Row 4: Direct Formula Quick Modifier Chips (reclaims ~30px vertical space, replaces stepper) */}
+        <div className="flex items-center gap-1 h-6 pt-0.5 border-t border-slate-800/60 overflow-x-hidden flex-nowrap">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase select-none shrink-0 mr-0.5">
+            MODS:
+          </span>
+          {[1, 2, 3, 4, 5, -1, -2].map((modVal) => (
+            <button
+              key={modVal}
+              type="button"
+              onClick={() => handleQuickModifierChip(modVal)}
+              className={`h-5 px-1.5 text-[11px] font-mono font-bold rounded border transition-colors shrink-0 flex items-center justify-center cursor-pointer ${
+                modVal > 0
+                  ? 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-slate-700 hover:border-amber-400/60'
+                  : 'bg-slate-900 hover:bg-slate-800 text-rose-300 border-slate-700 hover:border-rose-400/60'
+              }`}
+              title={`Append ${modVal > 0 ? `+${modVal}` : modVal} to formula`}
+            >
+              {modVal > 0 ? `+${modVal}` : modVal}
+            </button>
+          ))}
+          {modifier !== 0 && (
+            <span className="ml-auto text-[10px] font-mono text-amber-400/80 shrink-0">
+              Active: {modifier > 0 ? `+${modifier}` : modifier}
+            </span>
+          )}
         </div>
       </div>
 
@@ -871,6 +910,13 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           });
           setMacros(updated);
         }}
+      />
+
+      {/* 6. INLINE MATH CALCULATOR OVERLAY */}
+      <MathCalculatorModal
+        isOpen={isCalcOpen}
+        onClose={() => setIsCalcOpen(false)}
+        onApply={handleApplyFromCalculator}
       />
     </div>
   );
