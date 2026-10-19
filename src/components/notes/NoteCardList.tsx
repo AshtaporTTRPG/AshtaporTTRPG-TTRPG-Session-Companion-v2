@@ -45,6 +45,8 @@ export interface NoteCardListProps {
   isGM?: boolean;
   currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
   onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
+  onBroadcastNote?: (note: NoteItem) => void;
+  activeBroadcastId?: string | null;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [
@@ -95,6 +97,8 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   isGM = currentRole === 'GM',
   currentVault = 'myNotes',
   onTransfer,
+  onBroadcastNote,
+  activeBroadcastId,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<string>('All');
@@ -531,6 +535,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               key={note.id}
               note={note}
               isExpanded={expandedIds.has(note.id)}
+              isRevealed={Boolean(activeBroadcastId && activeBroadcastId === note.id)}
               onToggleExpand={(e) => toggleExpand(note.id, e)}
               onTogglePin={() => onTogglePin(note.id)}
               onDelete={() => onDeleteNote(note.id)}
@@ -539,6 +544,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               isGM={isGM}
               currentVault={currentVault}
               onTransfer={onTransfer}
+              onBroadcastNote={onBroadcastNote}
             />
           ))
         )}

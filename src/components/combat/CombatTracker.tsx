@@ -570,9 +570,28 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     // 2. Process ashtapor/roster partitioned stream
-    const rosterPayload = metadata[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
-    if (rosterPayload) {
-      const incomingEpoch = rosterPayload.encounterId;
+    const rawRosterData = metadata[ROSTER_METADATA_KEY] ?? metadata['ashtapor/roster'];
+    if (rawRosterData !== undefined) {
+      // Authoritative reset check: empty array resets combat to blank slate
+      if (Array.isArray(rawRosterData) && rawRosterData.length === 0) {
+        setCombatants([]);
+        localCombatantsRef.current = [];
+        setActiveCombatantId(null);
+        setActiveTurnIndex(0);
+        setRound(0);
+        setCombatStatus('idle');
+        try {
+          localStorage.setItem('ttrpg_combatants', JSON.stringify([]));
+          localStorage.removeItem('ttrpg_active_combatant_id');
+          localStorage.setItem('ttrpg_active_turn_index', '0');
+          localStorage.setItem('ttrpg_combat_round', '0');
+          localStorage.setItem('ttrpg_combat_status', 'idle');
+        } catch {}
+        return;
+      }
+
+      const rosterPayload = rawRosterData as RosterMetadataPayload | Combatant[];
+      const incomingEpoch = (rosterPayload as RosterMetadataPayload)?.encounterId;
 
       if (incomingEpoch && incomingEpoch < encounterIdRef.current) {
         return;
@@ -588,7 +607,11 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       }
 
       const activeEpoch = incomingEpoch || encounterIdRef.current;
-      const rawList = Array.isArray(rosterPayload.combatants) ? rosterPayload.combatants : [];
+      const rawList = Array.isArray(rosterPayload)
+        ? rosterPayload
+        : Array.isArray(rosterPayload.combatants)
+        ? rosterPayload.combatants
+        : [];
 
       for (const [id, expiry] of deletionTombstones.current.entries()) {
         if (now > expiry) deletionTombstones.current.delete(id);
@@ -652,7 +675,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     // 4. Backwards compatibility fallback
-    if (!rosterPayload && !turnPayload) {
+    if (!rawRosterData && !turnPayload) {
       const legacyState = (metadata[ROOM_METADATA_KEY] || metadata[COMBAT_STATE_KEY]) as any;
       if (legacyState) {
         const incomingTurnIndex = legacyState.currentTurnIndex ?? legacyState.activeTurnIndex;
@@ -1082,10 +1105,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     if (OBR.isReady) {
       try {
         await OBR.room.setMetadata({
-          [ROSTER_METADATA_KEY]: {
-            encounterId: activeEncId,
-            combatants: sortedParty,
-          },
+          'ashtapor/roster': sortedParty,
           [TURN_METADATA_KEY]: {
             encounterId: activeEncId,
             currentTurnIndex: 0,
@@ -1136,10 +1156,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     if (OBR.isReady) {
       try {
         await OBR.room.setMetadata({
-          [ROSTER_METADATA_KEY]: {
-            encounterId: newEncounterId,
-            combatants: [],
-          },
+          'ashtapor/roster': [],
           [TURN_METADATA_KEY]: {
             encounterId: newEncounterId,
             currentTurnIndex: 0,

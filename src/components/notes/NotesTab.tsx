@@ -753,8 +753,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
   };
 
-  // Toggle reveal for DM note (derived from activeBroadcast single source of truth)
-  const handleToggleRevealDmNote = async (note: DmSecretNote) => {
+  // Toggle reveal for any note (derived from activeBroadcast single source of truth)
+  const handleToggleRevealDmNote = async (note: DmSecretNote | NoteItem) => {
     const isCurrentlyRevealed = activeBroadcast !== null && activeBroadcast.id === note.id;
 
     if (isCurrentlyRevealed) {
@@ -1453,6 +1453,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               isGM={isDm}
               currentVault="myNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'myNotes')}
+              onBroadcastNote={handleToggleRevealDmNote}
+              activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>
 
@@ -1481,6 +1483,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               isGM={isDm}
               currentVault="tableNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
+              onBroadcastNote={handleToggleRevealDmNote}
+              activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>
 

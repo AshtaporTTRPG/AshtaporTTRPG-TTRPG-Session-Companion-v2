@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Plus,
@@ -92,10 +92,58 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   // Selected PC link mapping for Allies in Roster
   const [linkedPcByMemberId, setLinkedPcByMemberId] = useState<Record<string, string>>({});
 
-  // Local loading and atomic join state
+  // Local loading, atomic join and authoritative exit state
   const [loadingMemberId, setLoadingMemberId] = useState<string | null>(null);
   const [joiningMemberIds, setJoiningMemberIds] = useState<Set<string>>(new Set());
   const [inCombatMemberIds, setInCombatMemberIds] = useState<Set<string>>(new Set());
+  const [exitingMemberIds, setExitingMemberIds] = useState<Set<string>>(new Set());
+  const [liveCombatantList, setLiveCombatantList] = useState<Combatant[]>([]);
+  const hasJustExited = useRef<Set<string>>(new Set());
+
+  // Subscribe to 'ashtapor/roster' room metadata changes to keep roster status in real-time sync across all clients.
+  // When the array is cleared or empty (encounter reset/clear), all roster cards immediately revert to "Not in battle".
+  useEffect(() => {
+    if (!OBR.isReady) return;
+
+    const handleRosterMetaUpdate = (meta: Record<string, any>) => {
+      const raw = meta['ashtapor/roster'] as any;
+      const combatantsList: Combatant[] = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.combatants)
+        ? raw.combatants
+        : [];
+
+      setLiveCombatantList(combatantsList);
+
+      if (combatantsList.length === 0) {
+        // Encounter was cleared/reset: immediately revert all roster cards
+        setInCombatMemberIds(new Set());
+        setJoiningMemberIds(new Set());
+        setExitingMemberIds(new Set());
+      } else {
+        const liveIds = new Set<string>();
+        roster.forEach((m) => {
+          const isLive = combatantsList.some(
+            (c) =>
+              (c.rosterId && c.rosterId === m.id) ||
+              c.id === m.id ||
+              c.name.toLowerCase().trim() === m.name.toLowerCase().trim()
+          );
+          if (isLive) {
+            liveIds.add(m.id);
+          }
+        });
+        setInCombatMemberIds(liveIds);
+      }
+    };
+
+    OBR.room.getMetadata().then(handleRosterMetaUpdate).catch(() => {});
+    const unsub = OBR.room.onMetadataChange((meta) => {
+      handleRosterMetaUpdate(meta);
+    });
+
+    return () => unsub();
+  }, [roster]);
 
   const saveRoster = (updated: RosterMember[]) => {
     setRoster(updated);
@@ -328,17 +376,60 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     }
   };
 
-  const handleExitCombatClick = async (memberId: string) => {
-    if (isSyncing || loadingMemberId) return;
-    setLoadingMemberId(memberId);
+  const handleExitCombatClick = async (member: RosterMember) => {
+    if (isSyncing || exitingMemberIds.has(member.id)) return;
+    setExitingMemberIds((prev) => new Set(prev).add(member.id));
+    setLoadingMemberId(member.id);
+
     try {
-      if (onExitCombat) {
-        await onExitCombat(memberId);
+      if (OBR.isReady) {
+        // Step 1: Immediately fetch fresh room metadata from Owlbear
+        const roomMeta = await OBR.room.getMetadata();
+        const rawRoster = roomMeta['ashtapor/roster'] as any;
+        const liveCombatants: Combatant[] = Array.isArray(rawRoster)
+          ? rawRoster
+          : Array.isArray(rawRoster?.combatants)
+          ? rawRoster.combatants
+          : [];
+
+        // Step 2: Remove the combatant by matching ID (or matching rosterId / name)
+        const updated = liveCombatants.filter(
+          (c) =>
+            c.id !== member.id &&
+            c.rosterId !== member.id &&
+            c.name.toLowerCase().trim() !== member.name.toLowerCase().trim()
+        );
+
+        // Step 3: Write the updated array back to Owlbear
+        await OBR.room.setMetadata({ 'ashtapor/roster': updated });
+        setLiveCombatantList(updated);
       }
+
+      // Step 4: Update local state immediately so the card switches back to 'Not in battle'
+      setInCombatMemberIds((prev) => {
+        const next = new Set(prev);
+        next.delete(member.id);
+        return next;
+      });
+      hasJustExited.current.add(member.id);
+      setTimeout(() => {
+        hasJustExited.current.delete(member.id);
+      }, 3000);
+
+      if (onExitCombat) {
+        await onExitCombat(member.id);
+      }
+    } catch (err) {
+      console.warn('Could not exit combat authoritatively:', err);
     } finally {
       setTimeout(() => {
+        setExitingMemberIds((prev) => {
+          const next = new Set(prev);
+          next.delete(member.id);
+          return next;
+        });
         setLoadingMemberId(null);
-      }, 250);
+      }, 200);
     }
   };
 
@@ -452,21 +543,34 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
           ) : (
             <div className="space-y-2">
               {roster.map((member) => {
+                const isExiting = exitingMemberIds.has(member.id);
+                const isJoining = joiningMemberIds.has(member.id);
+                const isCardLoading = isSyncing || loadingMemberId === member.id;
+                const isAlly = member.role === 'Ally';
+
                 const activeCombatant = activeCombatants.find(
                   (c) =>
                     (c.rosterId && c.rosterId === member.id) ||
+                    c.id === member.id ||
                     c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
                 );
-                const isInCombat =
+                const isLiveInRoom = liveCombatantList.some(
+                  (c) =>
+                    (c.rosterId && c.rosterId === member.id) ||
+                    c.id === member.id ||
+                    c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+                );
+                const isActiveProp =
                   Boolean(activeCombatant) ||
-                  inCombatMemberIds.has(member.id) ||
                   activeCombatantNames.some(
                     (n) => n.toLowerCase().trim() === member.name.toLowerCase().trim()
                   );
 
-                const isJoining = joiningMemberIds.has(member.id);
-                const isCardLoading = isSyncing || loadingMemberId === member.id;
-                const isAlly = member.role === 'Ally';
+                const isInCombat =
+                  !isExiting &&
+                  (inCombatMemberIds.has(member.id) ||
+                    isLiveInRoom ||
+                    (isActiveProp && !hasJustExited.current.has(member.id)));
 
                 return (
                   <div
@@ -588,15 +692,24 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleExitCombatClick(member.id)}
-                            disabled={isCardLoading || isJoining}
+                            onClick={() => handleExitCombatClick(member)}
+                            disabled={isCardLoading || isJoining || isExiting}
                             className={`bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-700 text-xs px-2 py-0.5 rounded font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
-                              isCardLoading ? 'opacity-40 cursor-wait' : ''
+                              isExiting ? 'opacity-70 cursor-wait' : isCardLoading ? 'opacity-40 cursor-wait' : ''
                             }`}
                             title={`Exit combat with ${member.name} (keeps character saved in My Roster)`}
                           >
-                            <LogOut className="w-3 h-3" />
-                            <span>Exit</span>
+                            {isExiting ? (
+                              <>
+                                <span className="text-xs">⏳</span>
+                                <span>Exiting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <LogOut className="w-3 h-3" />
+                                <span>Exit</span>
+                              </>
+                            )}
                           </button>
                         </div>
                       ) : (

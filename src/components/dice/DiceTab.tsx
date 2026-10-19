@@ -38,7 +38,7 @@ import {
 import { AddCustomMacroModal } from './AddCustomMacroModal';
 import { EditCustomMacroModal } from './EditCustomMacroModal';
 import { RollFeedCard } from './RollFeedCard';
-import { MathCalculatorModal } from './MathCalculatorModal';
+import { CalculatorModal } from './CalculatorModal';
 
 export interface DiceTabProps {
   isDm: boolean;
@@ -153,6 +153,14 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   }, []);
 
   const [isCalcOpen, setIsCalcOpen] = useState<boolean>(false);
+  const [rollFlash, setRollFlash] = useState<'sum' | 'indiv' | null>(null);
+
+  const triggerRollFlash = (mode: 'sum' | 'indiv') => {
+    setRollFlash(mode);
+    setTimeout(() => {
+      setRollFlash(null);
+    }, 180);
+  };
 
   // Sync typed formula input with modifier
   const handleFormulaInputChange = (text: string) => {
@@ -188,8 +196,9 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     });
   };
 
-  // Apply result from Math Calculator to formula
-  const handleApplyFromCalculator = (val: number) => {
+  // Apply result from Math Calculator directly to formula
+  const handleApplyFromCalculator = (valOrStr: string | number) => {
+    const val = typeof valOrStr === 'number' ? valOrStr : parseFloat(valOrStr) || 0;
     setFormulaInput((prev) => {
       const trimmed = prev.trim();
       if (!trimmed) {
@@ -564,7 +573,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
 
       {/* 2. COMPACT CONTROLS AREA (Formula Bar + Combined Roll Buttons + Quick Modifiers + Polyhedrals) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
-        {/* Row 2: Formula Bar with Calculator & Combined Roll Buttons */}
+        {/* Row 2: Formula Bar with Docked Calculator Anchor & Equalized Roll Buttons */}
         <div className="relative flex items-center h-9 w-full gap-1.5">
           <div className="relative flex-1 h-full flex items-center min-w-0">
             <input
@@ -575,6 +584,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   handleExecuteRoll(undefined, undefined, undefined, 'sum');
+                  triggerRollFlash('sum');
                 }
               }}
               placeholder="e.g. 1d20+5, 2d6+3, 8d6"
@@ -593,35 +603,56 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
               )}
               <button
                 type="button"
-                onClick={() => setIsCalcOpen(true)}
-                className="p-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition cursor-pointer"
-                title="Open Math Calculator"
-                aria-label="Open Math Calculator"
+                onClick={() => setIsCalcOpen((prev) => !prev)}
+                className={`p-1 rounded transition cursor-pointer ${
+                  isCalcOpen
+                    ? 'text-amber-400 bg-slate-800 ring-1 ring-amber-400/50'
+                    : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+                }`}
+                title="Open Quick Math Calculator"
+                aria-label="Open Quick Math Calculator"
               >
                 <Calculator className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* Unobstructed Docked Popover dropping directly beneath formula row */}
+            <CalculatorModal
+              isOpen={isCalcOpen}
+              onClose={() => setIsCalcOpen(false)}
+              onApply={handleApplyFromCalculator}
+            />
           </div>
 
-          {/* Combined Roll Buttons: [ 🎲 Roll (Sum) ] (wide primary) & [ 📊 Indiv ] (secondary) */}
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Equalized Roll Buttons: [ 🎲 ROLL SUM ] & [ 📊 ROLL INDIV ] */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={() => handleExecuteRoll(undefined, undefined, undefined, 'sum')}
-              className="h-9 px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-lg transition shadow cursor-pointer flex items-center gap-1 font-display tracking-wider uppercase"
+              onClick={() => {
+                handleExecuteRoll(undefined, undefined, undefined, 'sum');
+                triggerRollFlash('sum');
+              }}
+              className={`h-9 px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2 rounded-lg shadow-md active:scale-95 transition-transform flex items-center gap-1 cursor-pointer font-sans tracking-wide uppercase ${
+                rollFlash === 'sum' ? 'ring-2 ring-white brightness-125 scale-95' : ''
+              }`}
               title="Roll and sum total"
             >
               <span>🎲</span>
-              <span>Roll (Sum)</span>
+              <span>ROLL SUM</span>
             </button>
             <button
               type="button"
-              onClick={() => handleExecuteRoll(undefined, undefined, undefined, 'individual')}
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 font-bold text-xs rounded-lg transition shadow cursor-pointer flex items-center gap-1 font-display tracking-wider uppercase"
+              onClick={() => {
+                handleExecuteRoll(undefined, undefined, undefined, 'individual');
+                triggerRollFlash('indiv');
+              }}
+              className={`h-9 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg shadow-md border border-indigo-500/30 active:scale-95 transition-transform flex items-center gap-1 cursor-pointer font-sans tracking-wide uppercase ${
+                rollFlash === 'indiv' ? 'ring-2 ring-white brightness-125 scale-95' : ''
+              }`}
               title="Roll and show individual dice"
             >
               <span>📊</span>
-              <span>Indiv</span>
+              <span>ROLL INDIV</span>
             </button>
           </div>
         </div>
@@ -910,13 +941,6 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           });
           setMacros(updated);
         }}
-      />
-
-      {/* 6. INLINE MATH CALCULATOR OVERLAY */}
-      <MathCalculatorModal
-        isOpen={isCalcOpen}
-        onClose={() => setIsCalcOpen(false)}
-        onApply={handleApplyFromCalculator}
       />
     </div>
   );

@@ -476,8 +476,26 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                     </span>
                   </div>
 
-                  {/* Collapsed Header Micro-Icons: 1-Tap Reader View + Pin */}
+                  {/* Collapsed Header Micro-Icons: 1-Tap Broadcast + 1-Tap Reader View + Pin */}
                   <div className="flex items-center gap-1 shrink-0 ml-1">
+                    {/* Direct 1-Click Broadcast Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleReveal(note);
+                      }}
+                      title={isRevealed ? 'Hide from Table' : 'Broadcast Note to Table'}
+                      aria-label="Broadcast Note to Table"
+                      className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
+                        isRevealed
+                          ? 'text-amber-400 bg-amber-950/60 ring-1 ring-amber-400/60 shadow-sm'
+                          : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+                      }`}
+                    >
+                      <Radio className={`w-3.5 h-3.5 ${isRevealed ? 'animate-pulse text-amber-400' : ''}`} />
+                    </button>
+
                     {/* Reader View Launch Trigger */}
                     {onOpenReader && (
                       <button

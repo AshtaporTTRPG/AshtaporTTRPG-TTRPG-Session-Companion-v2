@@ -11,6 +11,7 @@ import {
   EyeOff,
   Maximize2,
   ArrowUpRight,
+  Radio,
 } from 'lucide-react';
 import { NoteItem, NoteCategory } from '../../types/notes';
 import { copyToClipboard } from '../../utils/clipboard';
@@ -92,6 +93,7 @@ export interface NoteCardProps {
   onDelete: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onToggleReveal?: () => void;
+  onBroadcastNote?: (note: NoteItem) => void;
   onOpenReader?: (id: string) => void;
   onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
 }
@@ -107,12 +109,21 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onDelete,
   onEdit,
   onToggleReveal,
+  onBroadcastNote,
   onOpenReader,
   onTransfer,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const transferRef = useRef<HTMLDivElement>(null);
+
+  const handleBroadcastNote = (targetNote: NoteItem) => {
+    if (onBroadcastNote) {
+      onBroadcastNote(targetNote);
+    } else if (onToggleReveal) {
+      onToggleReveal();
+    }
+  };
 
   useEffect(() => {
     if (!isTransferOpen) return;
@@ -218,8 +229,28 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           )}
         </div>
 
-        {/* Collapsed Right Micro-Icons: 1-Tap Reader View + Pin (other utilities moved to expanded toolbar) */}
+        {/* Collapsed Right Micro-Icons: 1-Tap Broadcast + 1-Tap Reader View + Pin */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
+          {/* Direct 1-Click Broadcast Button (GM only) */}
+          {isGM && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleBroadcastNote(note);
+              }}
+              title={isRevealed ? 'Hide from Table' : 'Broadcast Note to Table'}
+              aria-label="Broadcast Note to Table"
+              className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
+                isRevealed
+                  ? 'text-amber-400 bg-amber-950/60 ring-1 ring-amber-400/60 shadow-sm'
+                  : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+              }`}
+            >
+              <Radio className={`w-3.5 h-3.5 ${isRevealed ? 'animate-pulse text-amber-400' : ''}`} />
+            </button>
+          )}
+
           {/* Direct Full Reader View Button */}
           {onOpenReader && (
             <button
