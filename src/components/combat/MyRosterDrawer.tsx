@@ -116,10 +116,11 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
       setLiveCombatantList(combatantsList);
 
       if (combatantsList.length === 0) {
-        // Encounter was cleared/reset: immediately revert all roster cards
+        // Encounter was cleared/reset: immediately revert all roster cards to Not in battle
         setInCombatMemberIds(new Set());
         setJoiningMemberIds(new Set());
         setExitingMemberIds(new Set());
+        hasJustExited.current.clear();
       } else {
         const liveIds = new Set<string>();
         roster.forEach((m) => {
@@ -177,40 +178,41 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     try {
       if (OBR.isReady) {
         const meta = await OBR.room.getMetadata();
-        const rosterPayload = meta[ROSTER_METADATA_KEY] as RosterMetadataPayload | undefined;
+        const raw = meta['ashtapor/roster'] as any;
+        const currentCombatants: Combatant[] = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.combatants)
+          ? raw.combatants
+          : [];
 
-        if (rosterPayload && Array.isArray(rosterPayload.combatants)) {
-          let hasChange = false;
-          const updatedCombatants = rosterPayload.combatants.map((c) => {
-            if (
-              (c.rosterId && c.rosterId === member.id) ||
-              c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
-            ) {
-              hasChange = true;
-              const newMax = member.maxHp;
-              const newCur = Math.min(c.hpCurrent ?? c.hp ?? newMax, newMax);
-              return {
-                ...c,
-                ac: member.ac,
-                armorClass: member.ac,
-                maxHp: newMax,
-                hpMax: newMax,
-                hpCurrent: newCur,
-                hp: newCur,
-                updatedAt: Date.now(),
-              };
-            }
-            return c;
-          });
-
-          if (hasChange) {
-            await OBR.room.setMetadata({
-              [ROSTER_METADATA_KEY]: {
-                ...rosterPayload,
-                combatants: updatedCombatants,
-              },
-            });
+        let hasChange = false;
+        const updatedCombatants = currentCombatants.map((c) => {
+          if (
+            (c.rosterId && c.rosterId === member.id) ||
+            c.id === member.id ||
+            c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+          ) {
+            hasChange = true;
+            const newMax = member.maxHp;
+            const newCur = Math.min(c.hpCurrent ?? c.hp ?? newMax, newMax);
+            return {
+              ...c,
+              ac: member.ac,
+              armorClass: member.ac,
+              maxHp: newMax,
+              hpMax: newMax,
+              hpCurrent: newCur,
+              hp: newCur,
+              updatedAt: Date.now(),
+            };
           }
+          return c;
+        });
+
+        if (hasChange) {
+          await OBR.room.setMetadata({
+            'ashtapor/roster': updatedCombatants,
+          });
         }
       }
     } catch (obrErr) {
@@ -233,6 +235,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
     const activeMatch = activeCombatants.find(
       (c) =>
         (c.rosterId && c.rosterId === member.id) ||
+        c.id === member.id ||
         c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
     );
     const isActive =
@@ -303,6 +306,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
         const existingIdx = currentCombatants.findIndex(
           (c) =>
             (c.rosterId && c.rosterId === member.id) ||
+            c.id === member.id ||
             c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
         );
 
@@ -348,15 +352,10 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
         });
 
         // Step 2: Append and write back to OBR.room.setMetadata
-        const metadataUpdate: Record<string, any> = {
-          'ashtapor/roster': Array.isArray(rosterData)
-            ? updatedCombatants
-            : {
-                ...(rosterData || {}),
-                combatants: updatedCombatants,
-              },
-        };
-        await OBR.room.setMetadata(metadataUpdate);
+        await OBR.room.setMetadata({
+          'ashtapor/roster': updatedCombatants,
+        });
+        setLiveCombatantList(updatedCombatants);
       }
 
       // Step 3: Local callback execution and optimistic state update
@@ -383,7 +382,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
 
     try {
       if (OBR.isReady) {
-        // Step 1: Immediately fetch fresh room metadata from Owlbear
+        // Authoritative Exit Execution: Fetch fresh room metadata from Owlbear
         const roomMeta = await OBR.room.getMetadata();
         const rawRoster = roomMeta['ashtapor/roster'] as any;
         const liveCombatants: Combatant[] = Array.isArray(rawRoster)
@@ -392,7 +391,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
           ? rawRoster.combatants
           : [];
 
-        // Step 2: Remove the combatant by matching ID (or matching rosterId / name)
+        // Remove the combatant by matching ID, rosterId, or exact trimmed name
         const updated = liveCombatants.filter(
           (c) =>
             c.id !== member.id &&
@@ -400,12 +399,12 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
             c.name.toLowerCase().trim() !== member.name.toLowerCase().trim()
         );
 
-        // Step 3: Write the updated array back to Owlbear
+        // Write the authoritative updated array back to Owlbear
         await OBR.room.setMetadata({ 'ashtapor/roster': updated });
         setLiveCombatantList(updated);
       }
 
-      // Step 4: Update local state immediately so the card switches back to 'Not in battle'
+      // Immediately update local state so the card switches from [ ✓ In Combat ] [ ➔ Exit ] back to 'Not in battle'
       setInCombatMemberIds((prev) => {
         const next = new Set(prev);
         next.delete(member.id);
@@ -414,7 +413,7 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
       hasJustExited.current.add(member.id);
       setTimeout(() => {
         hasJustExited.current.delete(member.id);
-      }, 3000);
+      }, 4000);
 
       if (onExitCombat) {
         await onExitCombat(member.id);
@@ -548,29 +547,35 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
                 const isCardLoading = isSyncing || loadingMemberId === member.id;
                 const isAlly = member.role === 'Ally';
 
-                const activeCombatant = activeCombatants.find(
-                  (c) =>
-                    (c.rosterId && c.rosterId === member.id) ||
-                    c.id === member.id ||
-                    c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
-                );
+                // Real-time authoritative check against Owlbear room metadata
                 const isLiveInRoom = liveCombatantList.some(
                   (c) =>
                     (c.rosterId && c.rosterId === member.id) ||
                     c.id === member.id ||
                     c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
                 );
-                const isActiveProp =
-                  Boolean(activeCombatant) ||
+
+                const isActiveInProps =
+                  activeCombatants.some(
+                    (c) =>
+                      (c.rosterId && c.rosterId === member.id) ||
+                      c.id === member.id ||
+                      c.name.toLowerCase().trim() === member.name.toLowerCase().trim()
+                  ) ||
                   activeCombatantNames.some(
                     (n) => n.toLowerCase().trim() === member.name.toLowerCase().trim()
                   );
 
+                const hasExited = hasJustExited.current.has(member.id);
+
+                // Authoritative presence: If OBR is ready, liveCombatantList determines status.
+                // If liveCombatantList is empty, NO ONE is in combat (lock released).
                 const isInCombat =
                   !isExiting &&
-                  (inCombatMemberIds.has(member.id) ||
-                    isLiveInRoom ||
-                    (isActiveProp && !hasJustExited.current.has(member.id)));
+                  !hasExited &&
+                  (OBR.isReady
+                    ? isLiveInRoom
+                    : inCombatMemberIds.has(member.id) || isActiveInProps);
 
                 return (
                   <div

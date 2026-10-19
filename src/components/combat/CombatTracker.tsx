@@ -639,8 +639,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       for (const local of localCombatantsRef.current) {
         if (!mergedMap.has(local.id) && !deletionTombstones.current.has(local.id)) {
           const isRecentlyAdded = recentlyAddedIdsRef.current.has(local.id);
-          const isRecentLocal = local.updatedAt && now - local.updatedAt < 6000;
-          if ((isRecentlyAdded || isRecentLocal) && (!local.encounterId || local.encounterId === activeEpoch)) {
+          if (isRecentlyAdded && (!local.encounterId || local.encounterId === activeEpoch)) {
             mergedMap.set(local.id, local);
           }
         }
@@ -720,10 +719,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         encounterId: encounterIdRef.current,
       }));
       await OBR.room.setMetadata({
-        [ROSTER_METADATA_KEY]: {
-          encounterId: encounterIdRef.current,
-          combatants: tagged,
-        },
+        'ashtapor/roster': tagged,
       });
     } catch (e) {
       console.error('Failed to set partitioned ashtapor/roster metadata:', e);
@@ -2077,15 +2073,24 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       const targetCombatant = currentRoster.find(
         (c) =>
           (c.rosterId && c.rosterId === rosterMemberId) ||
+          c.id === rosterMemberId ||
           (targetName && c.name.toLowerCase().trim() === targetName)
       );
 
       if (!targetCombatant) return;
 
       const removedName = targetCombatant.name;
-      deletionTombstones.current.set(targetCombatant.id, Date.now() + 15000);
+      deletionTombstones.current.set(targetCombatant.id, Date.now() + 30000);
+      deletionTombstones.current.set(rosterMemberId, Date.now() + 30000);
+      recentlyAddedIdsRef.current.delete(targetCombatant.id);
+      recentlyAddedIdsRef.current.delete(rosterMemberId);
 
-      const remainingCombatants = currentRoster.filter((c) => c.id !== targetCombatant.id);
+      const remainingCombatants = currentRoster.filter(
+        (c) =>
+          c.id !== targetCombatant.id &&
+          c.rosterId !== rosterMemberId &&
+          c.id !== rosterMemberId
+      );
       const sortedRemaining = sortInitiativeStrictDescending(remainingCombatants);
 
       setCombatants(sortedRemaining);

@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   DiceRollResult,
@@ -14,7 +19,7 @@ import {
   addDieToFormula,
   setFormulaModifier,
   combineFormulaWithModifier,
-} from '../../utils/dice';
+} from './DiceEngine';
 import { liveFeedSync } from '../../utils/liveFeedSync';
 import {
   loadCustomMacros,
@@ -38,7 +43,7 @@ import {
 import { AddCustomMacroModal } from './AddCustomMacroModal';
 import { EditCustomMacroModal } from './EditCustomMacroModal';
 import { RollFeedCard } from './RollFeedCard';
-import { CalculatorModal } from './CalculatorModal';
+import { CalculatorDock } from './CalculatorDock';
 
 export interface DiceTabProps {
   isDm: boolean;
@@ -53,9 +58,11 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   // Input & Formula State
   const [formulaInput, setFormulaInput] = useState<string>('1d20+5');
   const [advantageMode, setAdvantageMode] = useState<'advantage' | 'normal' | 'disadvantage'>('normal');
-  const [displayMode, setDisplayMode] = useState<RollDisplayMode>('sum');
   const [modifier, setModifier] = useState<number>(5);
   const [visibility, setVisibility] = useState<RollVisibility>('public');
+
+  // Inline Docked Calculator State (collapsible, placed directly above Custom Macros)
+  const [isCalcOpen, setIsCalcOpen] = useState<boolean>(false);
 
   // Custom Macros State (collapsed by default to maximize roll feed space)
   const [macros, setMacros] = useState<CustomMacro[]>(() => loadCustomMacros());
@@ -97,6 +104,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           pairedRolls: item.rollDetails.pairedRolls,
           rawRolls: item.rollDetails.rawRolls,
           instances: item.rollDetails.instances,
+          macroName: item.rollDetails.macroName,
         });
       }
     }
@@ -144,6 +152,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
             pairedRolls: item.rollDetails.pairedRolls,
             rawRolls: item.rollDetails.rawRolls,
             instances: item.rollDetails.instances,
+            macroName: item.rollDetails.macroName,
           });
         }
       }
@@ -152,7 +161,6 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     return () => unsub();
   }, []);
 
-  const [isCalcOpen, setIsCalcOpen] = useState<boolean>(false);
   const [rollFlash, setRollFlash] = useState<'sum' | 'indiv' | null>(null);
 
   const triggerRollFlash = (mode: 'sum' | 'indiv') => {
@@ -171,29 +179,6 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     } else if (!text.trim()) {
       setModifier(0);
     }
-  };
-
-  // Quick modifier chip append / adjustment (e.g. 2d6 -> 2d6+3)
-  const handleQuickModifierChip = (delta: number) => {
-    setFormulaInput((prev) => {
-      const trimmed = prev.trim();
-      if (!trimmed) {
-        const sign = delta > 0 ? `+${delta}` : `${delta}`;
-        setModifier(delta);
-        return sign;
-      }
-      const parsed = parseDiceFormula(trimmed);
-      if (parsed && parsed.pool && parsed.pool.length > 0) {
-        const newMod = parsed.modifier + delta;
-        setModifier(newMod);
-        return setFormulaModifier(trimmed, newMod);
-      }
-      const sign = delta > 0 ? `+${delta}` : `${delta}`;
-      const next = `${trimmed}${sign}`;
-      const reParsed = parseDiceFormula(next);
-      if (reParsed) setModifier(reParsed.modifier);
-      return next;
-    });
   };
 
   // Apply result from Math Calculator directly to formula
@@ -231,21 +216,20 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     setFormulaInput((prev) => addDieToFormula(prev, die));
   };
 
-  // EXECUTE ROLL (Dispatches via liveFeedSync with multi-instance payload evaluation)
+  // EXECUTE ROLL (Normalized non-cloning tabletop evaluation)
   const handleExecuteRoll = (
+    mode: RollDisplayMode,
     customExpr?: string,
-    customMode?: 'normal' | 'advantage' | 'disadvantage',
-    customMod?: number,
-    customDisplay?: RollDisplayMode
+    customAdv?: 'normal' | 'advantage' | 'disadvantage',
+    customMod?: number
   ) => {
     const expr = (customExpr !== undefined ? customExpr : formulaInput).trim();
     if (!expr) return;
 
     const currentUserId = liveFeedSync.getPlayerId();
     const parsed = parseDiceFormula(expr);
-    const activeAdvMode = customMode !== undefined ? customMode : advantageMode;
+    const activeAdvMode = customAdv !== undefined ? customAdv : advantageMode;
     const finalMod = customMod !== undefined ? customMod : (parsed ? parsed.modifier : modifier);
-    const activeDisplay = customDisplay !== undefined ? customDisplay : displayMode;
 
     if (!parsed) {
       // Fallback: roll 1d20 with modifier
@@ -253,7 +237,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         diceType: 'd20',
         count: 1,
         advantageMode: activeAdvMode,
-        displayMode: activeDisplay,
+        displayMode: mode,
         modifier: finalMod,
         sender: rollerName,
         rollerName,
@@ -270,7 +254,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
       pool: parsed.pool,
       modifier: finalMod,
       advantageMode: activeAdvMode,
-      displayMode: activeDisplay,
+      displayMode: mode,
       sender: rollerName,
       rollerName,
       rollerId: currentUserId,
@@ -340,6 +324,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
       isDm,
       visibility: roll.visibility || 'public',
       label: roll.label,
+      macroName: roll.macroName,
     });
 
     liveFeedSync.recordDiceRoll(result, true);
@@ -366,20 +351,19 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     const parsedMacro = parseMacroFormula(expr);
 
     if (parsedMacro) {
-      const { count, sides, modifier, dieType } = parsedMacro;
+      const { count, sides, modifier: macroMod, dieType } = parsedMacro;
 
       if (activeAdvMode === 'advantage' || activeAdvMode === 'disadvantage') {
-        // Roll base die twice, pick winning face, and append formula modifier cleanly
         const valA = rollSingleDie(sides);
         const valB = rollSingleDie(sides);
         const isAdv = activeAdvMode === 'advantage';
         const winningFace = isAdv ? Math.max(valA, valB) : Math.min(valA, valB);
         const discardedFace = isAdv ? Math.min(valA, valB) : Math.max(valA, valB);
-        const total = winningFace + modifier;
+        const total = winningFace + macroMod;
         const isCrit = sides === 20 && winningFace === 20;
         const isFumble = sides === 20 && winningFace === 1;
 
-        const modStr = modifier !== 0 ? (modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`) : '';
+        const modStr = macroMod !== 0 ? (macroMod > 0 ? ` + ${macroMod}` : ` - ${Math.abs(macroMod)}`) : '';
         const breakdownLine = `${count}d${sides} (${isAdv ? 'Adv' : 'Dis'}): [${winningFace}, ~~${discardedFace}~~]${modStr} = ${total}`;
 
         const result: DiceRollResult = {
@@ -393,7 +377,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           rollType: 'Straight roll',
           diceType: dieType || 'd20',
           count: 1,
-          modifier,
+          modifier: macroMod,
           rolls: [winningFace],
           rawRolls: [valA, valB],
           pairedRolls: [
@@ -403,7 +387,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
               die2: valB,
               selected: winningFace,
               discarded: discardedFace,
-              modifier,
+              modifier: macroMod,
               totalWithModifier: total,
               lineItem: `[${winningFace}, ~~${discardedFace}~~]${modStr}`,
             },
@@ -423,11 +407,10 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         return;
       }
 
-      // Straight roll using standardized formula parsing
       const result = executeDiceRoll({
         diceType: dieType || 'd20',
         count,
-        modifier,
+        modifier: macroMod,
         advantageMode: 'normal',
         displayMode: 'sum',
         sender: rollerName,
@@ -443,7 +426,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
       return;
     }
 
-    // Fallback if multi-pool formula (e.g., 2d20+1d8+5)
+    // Fallback if multi-pool formula (e.g. 2d20+1d8+5)
     const parsed = parseDiceFormula(expr);
     const finalMacroModifier = parsed ? parsed.modifier : 0;
 
@@ -489,8 +472,6 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
     liveFeedSync.clearFeed();
     setRollHistory([]);
   };
-
-  const formattedMod = modifier > 0 ? `+${modifier}` : modifier < 0 ? `${modifier}` : '+0';
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[#0b0f17] select-none p-2 gap-2 text-slate-100">
@@ -571,9 +552,9 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         </div>
       </div>
 
-      {/* 2. COMPACT CONTROLS AREA (Formula Bar + Combined Roll Buttons + Quick Modifiers + Polyhedrals) */}
+      {/* 2. COMPACT CONTROLS AREA (Formula Bar + Equalized Roll Buttons + Polyhedrals) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
-        {/* Row 2: Formula Bar with Docked Calculator Anchor & Equalized Roll Buttons */}
+        {/* Row 2: Formula Bar with Calculator Toggle & Equalized Roll Buttons */}
         <div className="relative flex items-center h-9 w-full gap-1.5">
           <div className="relative flex-1 h-full flex items-center min-w-0">
             <input
@@ -583,11 +564,11 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  handleExecuteRoll(undefined, undefined, undefined, 'sum');
+                  handleExecuteRoll('sum');
                   triggerRollFlash('sum');
                 }
               }}
-              placeholder="e.g. 1d20+5, 2d6+3, 8d6"
+              placeholder="e.g. 1d20+5, 5d20+1d4+15, 8d6"
               className="w-full h-9 px-2.5 pr-14 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition placeholder:text-slate-600"
             />
             <div className="absolute right-1 flex items-center gap-0.5">
@@ -609,33 +590,26 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
                     ? 'text-amber-400 bg-slate-800 ring-1 ring-amber-400/50'
                     : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
                 }`}
-                title="Open Quick Math Calculator"
-                aria-label="Open Quick Math Calculator"
+                title="Toggle Quick Math Calculator"
+                aria-label="Toggle Quick Math Calculator"
               >
                 <Calculator className="w-3.5 h-3.5" />
               </button>
             </div>
-
-            {/* Unobstructed Docked Popover dropping directly beneath formula row */}
-            <CalculatorModal
-              isOpen={isCalcOpen}
-              onClose={() => setIsCalcOpen(false)}
-              onApply={handleApplyFromCalculator}
-            />
           </div>
 
-          {/* Equalized Roll Buttons: [ 🎲 ROLL SUM ] & [ 📊 ROLL INDIV ] */}
+          {/* Equalized Roll Action Triggers: [ 🎲 ROLL SUM ] & [ 📊 ROLL INDIV ] */}
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => {
-                handleExecuteRoll(undefined, undefined, undefined, 'sum');
+                handleExecuteRoll('sum');
                 triggerRollFlash('sum');
               }}
               className={`h-9 px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2 rounded-lg shadow-md active:scale-95 transition-transform flex items-center gap-1 cursor-pointer font-sans tracking-wide uppercase ${
                 rollFlash === 'sum' ? 'ring-2 ring-white brightness-125 scale-95' : ''
               }`}
-              title="Roll and sum total"
+              title="Roll sum: Evaluates all dice once and sums grand total (Skill Challenges & Damage Pools)"
             >
               <span>🎲</span>
               <span>ROLL SUM</span>
@@ -643,13 +617,13 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
             <button
               type="button"
               onClick={() => {
-                handleExecuteRoll(undefined, undefined, undefined, 'individual');
+                handleExecuteRoll('individual');
                 triggerRollFlash('indiv');
               }}
               className={`h-9 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg shadow-md border border-indigo-500/30 active:scale-95 transition-transform flex items-center gap-1 cursor-pointer font-sans tracking-wide uppercase ${
                 rollFlash === 'indiv' ? 'ring-2 ring-white brightness-125 scale-95' : ''
               }`}
-              title="Roll and show individual dice"
+              title="Roll individual: Attacks & checks (flat modifier applied to each d20 roll individually)"
             >
               <span>📊</span>
               <span>ROLL INDIV</span>
@@ -657,7 +631,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
           </div>
         </div>
 
-        {/* Row 3: Polyhedrals (Left) + D20 Roll Mode (Right) */}
+        {/* Row 3: Polyhedrals (Left) + D20 Roll Mode (Right: Adv | Straight | Dis) */}
         <div className="flex items-center justify-between gap-1 h-6.5">
           {/* Left: Polyhedral Chips */}
           <div className="flex items-center gap-1 shrink-0">
@@ -721,36 +695,18 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
             </button>
           </div>
         </div>
-
-        {/* Row 4: Direct Formula Quick Modifier Chips (reclaims ~30px vertical space, replaces stepper) */}
-        <div className="flex items-center gap-1 h-6 pt-0.5 border-t border-slate-800/60 overflow-x-hidden flex-nowrap">
-          <span className="text-[10px] font-semibold text-slate-400 uppercase select-none shrink-0 mr-0.5">
-            MODS:
-          </span>
-          {[1, 2, 3, 4, 5, -1, -2].map((modVal) => (
-            <button
-              key={modVal}
-              type="button"
-              onClick={() => handleQuickModifierChip(modVal)}
-              className={`h-5 px-1.5 text-[11px] font-mono font-bold rounded border transition-colors shrink-0 flex items-center justify-center cursor-pointer ${
-                modVal > 0
-                  ? 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-slate-700 hover:border-amber-400/60'
-                  : 'bg-slate-900 hover:bg-slate-800 text-rose-300 border-slate-700 hover:border-rose-400/60'
-              }`}
-              title={`Append ${modVal > 0 ? `+${modVal}` : modVal} to formula`}
-            >
-              {modVal > 0 ? `+${modVal}` : modVal}
-            </button>
-          ))}
-          {modifier !== 0 && (
-            <span className="ml-auto text-[10px] font-mono text-amber-400/80 shrink-0">
-              Active: {modifier > 0 ? `+${modifier}` : modifier}
-            </span>
-          )}
-        </div>
       </div>
 
-      {/* 3. CUSTOM MACROS DRAWER (Collapsed by default to maximize roll history) */}
+      {/* 3. INLINE DOCKED CALCULATOR (Docked directly above Custom Macros, zero screen blocking) */}
+      {isCalcOpen && (
+        <CalculatorDock
+          isOpen={isCalcOpen}
+          onClose={() => setIsCalcOpen(false)}
+          onApply={handleApplyFromCalculator}
+        />
+      )}
+
+      {/* 4. CUSTOM MACROS DRAWER (Collapsed by default to maximize roll history) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
         <div className="flex items-center justify-between">
           <button
@@ -832,7 +788,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         )}
       </div>
 
-      {/* 4. ROLL FEED (Expanded with maximized vertical space) */}
+      {/* 5. ROLL FEED (Expanded with maximized vertical space) */}
       <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-800/90 bg-slate-950/60 p-2 flex flex-col gap-2">
         {/* Roll Feed Header */}
         <div className="flex items-center justify-between pb-1 border-b border-slate-800/80 shrink-0">
@@ -914,7 +870,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         </div>
       </div>
 
-      {/* 5. MODALS: ADD / EDIT MACRO */}
+      {/* 6. MODALS: ADD / EDIT MACRO */}
       <AddCustomMacroModal
         isOpen={isAddMacroOpen && !editingMacro}
         onClose={() => setIsAddMacroOpen(false)}
