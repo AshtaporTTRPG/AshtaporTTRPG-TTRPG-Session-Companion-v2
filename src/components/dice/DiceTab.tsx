@@ -55,10 +55,10 @@ const INTERACTIVE_DICE: DieType[] = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd10
 export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   const rollerName = playerName?.trim() || (isDm ? 'Game Master' : 'Adventurer');
 
-  // Input & Formula State
-  const [formulaInput, setFormulaInput] = useState<string>('1d20+5');
+  // Input & Formula State - Clean-slate formula initialization (eliminates phantom 1d20)
+  const [formulaInput, setFormulaInput] = useState<string>('');
   const [advantageMode, setAdvantageMode] = useState<'advantage' | 'normal' | 'disadvantage'>('normal');
-  const [modifier, setModifier] = useState<number>(5);
+  const [modifier, setModifier] = useState<number>(0);
   const [visibility, setVisibility] = useState<RollVisibility>('public');
 
   // Inline Docked Calculator State (collapsible, placed directly above Custom Macros)

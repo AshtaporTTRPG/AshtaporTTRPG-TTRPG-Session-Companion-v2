@@ -388,15 +388,44 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const syncQueueRef = useRef<Array<() => Promise<void>>>([]);
 
-  // Inflight turn change lock
+  // Strict Initialization Mount Guard
+  const hasLoadedRoomRef = useRef<boolean>(false);
+
+  // Staging / Prep state: has the GM called for initiative?
+  const [initiativeCalled, setInitiativeCalled] = useState<boolean>(false);
+
+  // End Combat Confirmation Modal State
+  const [isEndCombatConfirmOpen, setIsEndCombatConfirmOpen] = useState<boolean>(false);
+
+  // Inflight turn change lock & debounced turn persistence
   const [isTurnUpdating, setIsTurnUpdating] = useState<boolean>(false);
   const lastTurnChangeTimeRef = useRef<number>(Date.now());
   const localTurnSeqRef = useRef<number>(0);
+  const debouncedTurnTimeoutRef = useRef<any>(null);
 
   const localCombatantsRef = useRef<Combatant[]>(combatants);
+  const liveCombatantsRef = useRef<Combatant[]>(combatants);
+  const liveRoundRef = useRef<number>(round);
+  const liveActiveIndexRef = useRef<number>(activeTurnIndex);
+  const liveActiveCombatantIdRef = useRef<string | null>(activeCombatantId);
+
   useEffect(() => {
     localCombatantsRef.current = combatants;
-  }, [combatants]);
+    liveCombatantsRef.current = combatants;
+    liveRoundRef.current = round;
+    liveActiveIndexRef.current = activeTurnIndex;
+    liveActiveCombatantIdRef.current = activeCombatantId;
+    window.dispatchEvent(
+      new CustomEvent('ashtapor-combat-snapshot', {
+        detail: {
+          combatants,
+          round,
+          activeIndex: activeTurnIndex,
+          activeCombatantId,
+        },
+      })
+    );
+  }, [combatants, round, activeTurnIndex, activeCombatantId]);
 
   // Action Menu Form States
   const [conditionInput, setConditionInput] = useState<string>('');
@@ -534,38 +563,22 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
   const handleIncomingMetadata = useCallback((metadata: Record<string, any>) => {
     const now = Date.now();
 
-    // 1. Process ashtapor/turn partitioned stream
+    // 1. Process ashtapor/turn partitioned stream (authoritative from GM, zero sequence rejection deadlocks)
     const turnPayload = metadata[TURN_METADATA_KEY] as TurnMetadataPayload | undefined;
     if (turnPayload) {
-      const incomingTurnSeq = typeof turnPayload.turnSeq === 'number' ? turnPayload.turnSeq : undefined;
-      // Stale Echo Inbound Filtering:
-      // If incoming.turnSeq <= localTurnSeqRef.current, DISCARD THE PACKET.
-      if (incomingTurnSeq !== undefined) {
-        if (incomingTurnSeq <= localTurnSeqRef.current) {
-          // DISCARD THE PACKET. Do not update local turn state.
-        } else {
-          localTurnSeqRef.current = incomingTurnSeq;
-          if (turnPayload.activeCombatantId !== undefined) {
-            setActiveCombatantId(turnPayload.activeCombatantId);
-          }
-          if (typeof turnPayload.currentRound === 'number') {
-            setRound(turnPayload.currentRound);
-          }
-          if (typeof turnPayload.currentTurnIndex === 'number') {
-            setActiveTurnIndex(turnPayload.currentTurnIndex);
-          }
-        }
+      if (turnPayload.activeCombatantId !== undefined) {
+        setActiveCombatantId(turnPayload.activeCombatantId);
+      }
+      if (typeof turnPayload.currentRound === 'number') {
+        setRound(turnPayload.currentRound);
+      }
+      if (typeof turnPayload.currentTurnIndex === 'number') {
+        setActiveTurnIndex(turnPayload.currentTurnIndex);
+      }
+      if ((turnPayload.currentRound ?? 0) > 0) {
+        setCombatStatus('active');
       } else {
-        // Fallback for legacy rooms without turnSeq
-        if (turnPayload.activeCombatantId !== undefined) {
-          setActiveCombatantId(turnPayload.activeCombatantId);
-        }
-        if (typeof turnPayload.currentRound === 'number') {
-          setRound(turnPayload.currentRound);
-        }
-        if (typeof turnPayload.currentTurnIndex === 'number') {
-          setActiveTurnIndex(turnPayload.currentTurnIndex);
-        }
+        setCombatStatus('idle');
       }
     }
 
@@ -691,15 +704,22 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
   }, []);
 
-  // Initial OBR room metadata fetch
+  // Initial OBR room metadata fetch - Strict Mount Guard
   useEffect(() => {
-    if (!OBR.isReady) return;
+    if (!OBR.isReady) {
+      hasLoadedRoomRef.current = true;
+      return;
+    }
     OBR.room
       .getMetadata()
       .then((meta) => {
         handleIncomingMetadata(meta);
+        hasLoadedRoomRef.current = true;
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error('Failed to get initial room metadata:', err);
+        hasLoadedRoomRef.current = true;
+      });
   }, [handleIncomingMetadata]);
 
   // Listen for OBR metadata changes
@@ -711,8 +731,116 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     return () => unsub();
   }, [handleIncomingMetadata]);
 
+  // Listen for raw WebSocket turn sync events from OBR and App.tsx
+  useEffect(() => {
+    const handleTurnSyncData = (data: any) => {
+      if (!data || typeof data.round !== 'number' || typeof data.activeIndex !== 'number') return;
+      setRound(data.round);
+      setActiveTurnIndex(data.activeIndex);
+      if (data.activeCombatantId !== undefined) {
+        setActiveCombatantId(data.activeCombatantId);
+      }
+      if (data.round > 0) {
+        setCombatStatus('active');
+      } else {
+        setCombatStatus('idle');
+      }
+    };
+
+    let unsubBroadcast: (() => void) | undefined;
+    const obrAny = OBR as any;
+    if (OBR.isReady && obrAny.broadcast) {
+      unsubBroadcast = obrAny.broadcast.onMessage('ashtapor/turn_sync', (event: any) => {
+        handleTurnSyncData(event.data);
+      });
+    }
+
+    const handleSyncWindow = (e: any) => {
+      handleTurnSyncData(e.detail);
+    };
+    window.addEventListener('ashtapor-turn-sync', handleSyncWindow);
+
+    return () => {
+      if (unsubBroadcast) unsubBroadcast();
+      window.removeEventListener('ashtapor-turn-sync', handleSyncWindow);
+    };
+  }, []);
+
+  // Listen for cold-start sync response, table alert, and combat ended
+  useEffect(() => {
+    const handleSyncResponseData = (data: any) => {
+      if (!data) return;
+      if (Array.isArray(data.combatants)) {
+        const sorted = sortInitiativeStrictDescending(data.combatants);
+        setCombatants(sorted);
+        localCombatantsRef.current = sorted;
+      }
+      if (typeof data.round === 'number') setRound(data.round);
+      if (typeof data.activeIndex === 'number') setActiveTurnIndex(data.activeIndex);
+      if (data.activeCombatantId !== undefined) setActiveCombatantId(data.activeCombatantId);
+      if ((data.round ?? 0) > 0) {
+        setCombatStatus('active');
+      }
+      hasLoadedRoomRef.current = true;
+    };
+
+    let unsubSyncResp: (() => void) | undefined;
+    const obrAny = OBR as any;
+    if (OBR.isReady && !isDm && obrAny.broadcast) {
+      unsubSyncResp = obrAny.broadcast.onMessage('ashtapor/sync_response', (event: any) => {
+        handleSyncResponseData(event.data);
+      });
+    }
+
+    const handleWindowSyncResp = (e: any) => {
+      handleSyncResponseData(e.detail);
+    };
+    window.addEventListener('ashtapor-sync-response', handleWindowSyncResp);
+
+    // Combat ended listener
+    const handleCombatEndedEvent = () => {
+      setRound(0);
+      setActiveTurnIndex(0);
+      setActiveCombatantId(null);
+      setCombatStatus('idle');
+      setInitiativeCalled(false);
+      setCombatants([]);
+      localCombatantsRef.current = [];
+    };
+    window.addEventListener('ashtapor-combat-ended', handleCombatEndedEvent);
+
+    let unsubCombatEnded: (() => void) | undefined;
+    if (OBR.isReady && obrAny.broadcast) {
+      unsubCombatEnded = obrAny.broadcast.onMessage('ashtapor/combat_ended', handleCombatEndedEvent);
+    }
+
+    // Table alert listener
+    const handleTableAlertEvent = (e: any) => {
+      if (e.detail?.type === 'ROLL_FOR_INITIATIVE') {
+        setInitiativeCalled(true);
+      }
+    };
+    window.addEventListener('ashtapor-table-alert', handleTableAlertEvent);
+
+    // Open roster listener
+    const handleOpenRosterEvent = () => {
+      setIsRosterOpen(true);
+    };
+    window.addEventListener('ashtapor-open-roster', handleOpenRosterEvent);
+
+    return () => {
+      if (unsubSyncResp) unsubSyncResp();
+      if (unsubCombatEnded) unsubCombatEnded();
+      window.removeEventListener('ashtapor-sync-response', handleWindowSyncResp);
+      window.removeEventListener('ashtapor-combat-ended', handleCombatEndedEvent);
+      window.removeEventListener('ashtapor-table-alert', handleTableAlertEvent);
+      window.removeEventListener('ashtapor-open-roster', handleOpenRosterEvent);
+    };
+  }, [isDm]);
+
   const broadcastRoster = async (updatedCombatants: Combatant[]) => {
-    if (!OBR.isReady) return;
+    if (!OBR.isReady || !hasLoadedRoomRef.current) return;
+    if (!isDm) return; // Player write restriction: broad array writes strictly reserved for GM
     try {
       const tagged = updatedCombatants.map((c) => ({
         ...c,
@@ -730,23 +858,46 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     updatedTurnIndex: number,
     updatedRound: number,
     updatedActiveCombatantId: string | null,
-    turnSeqToBroadcast?: number
+    _turnSeq?: number
   ) => {
-    if (!OBR.isReady) return;
-    const seq = turnSeqToBroadcast ?? localTurnSeqRef.current;
+    if (!hasLoadedRoomRef.current) return;
+    if (!isDm) return; // Sole authority is GM
+
+    // 1. Sub-30ms raw WebSocket turn sync broadcast via OBR.broadcast
     try {
-      await OBR.room.setMetadata({
-        [TURN_METADATA_KEY]: {
-          encounterId: encounterIdRef.current,
+      const obrAny = OBR as any;
+      if (OBR.isReady && obrAny.broadcast) {
+        obrAny.broadcast.sendMessage('ashtapor/turn_sync', {
+          round: updatedRound,
+          activeIndex: updatedTurnIndex,
           activeCombatantId: updatedActiveCombatantId,
-          currentRound: updatedRound,
-          currentTurnIndex: updatedTurnIndex,
-          turnSeq: seq,
-        },
-      });
-    } catch (e) {
-      console.error('Failed to set partitioned ashtapor/turn metadata:', e);
+          timestamp: Date.now(),
+        });
+      }
+    } catch (err) {
+      console.warn('Real-time turn sync broadcast failed:', err);
     }
+
+    // 2. Persistent Storage Channel: 400ms debounced write to OBR.room.setMetadata
+    if (debouncedTurnTimeoutRef.current) {
+      clearTimeout(debouncedTurnTimeoutRef.current);
+    }
+    debouncedTurnTimeoutRef.current = setTimeout(async () => {
+      try {
+        if (OBR.isReady) {
+          await OBR.room.setMetadata({
+            [TURN_METADATA_KEY]: {
+              encounterId: encounterIdRef.current,
+              activeCombatantId: updatedActiveCombatantId,
+              currentRound: updatedRound,
+              currentTurnIndex: updatedTurnIndex,
+            },
+          });
+        }
+      } catch (e) {
+        console.error('Failed to persist debounced ashtapor/turn metadata:', e);
+      }
+    }, 400);
   };
 
   const broadcastFeedLog = async (
@@ -854,7 +1005,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     }
 
     try {
-      await broadcastTurn(nextIndex, nextRound, nextActiveId, nextSeq);
+      await broadcastTurn(nextIndex, nextRound, nextActiveId);
     } finally {
       setIsTurnUpdating(false);
     }
@@ -893,30 +1044,38 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     const prevCombatant = sorted[prevIndex];
     const prevActiveId = prevCombatant ? prevCombatant.id : null;
 
-    // Monotonic turn sequence increment
-    const nextSeq = localTurnSeqRef.current + 1;
-    localTurnSeqRef.current = nextSeq;
-
     // Optimistically update local state
     setActiveCombatantId(prevActiveId);
     setActiveTurnIndex(prevIndex);
     setRound(prevRound);
 
     try {
-      await broadcastTurn(prevIndex, prevRound, prevActiveId, nextSeq);
+      await broadcastTurn(prevIndex, prevRound, prevActiveId);
     } finally {
       setIsTurnUpdating(false);
     }
   };
 
-  // Start Encounter (GM Action)
+  // Call for Initiative (GM Action in Staging / Prep Mode)
+  const handleCallForInitiative = async () => {
+    setInitiativeCalled(true);
+    const obrAny = OBR as any;
+    if (OBR.isReady && obrAny.broadcast) {
+      try {
+        obrAny.broadcast.sendMessage('ashtapor/table_alert', { type: 'ROLL_FOR_INITIATIVE' });
+      } catch (err) {
+        console.warn('Failed to broadcast table_alert:', err);
+      }
+    }
+    const alertMsg = '⚔️ DM called for Initiative! Check your Roster to join combat.';
+    await broadcastFeedLog(alertMsg, false);
+  };
+
+  // Start Encounter (GM Action) - Begins Round 1
   const handleStartCombat = async () => {
     const strictSorted = sortInitiativeStrictDescending(combatants);
     const first = strictSorted[0];
     const firstId = first ? first.id : null;
-
-    const nextSeq = localTurnSeqRef.current + 1;
-    localTurnSeqRef.current = nextSeq;
 
     setCombatants(strictSorted);
     localCombatantsRef.current = strictSorted;
@@ -924,6 +1083,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
     setActiveCombatantId(firstId);
     setRound(1);
     setCombatStatus('active');
+    setInitiativeCalled(false);
 
     try {
       localStorage.setItem('ttrpg_combat_round', '1');
@@ -943,18 +1103,15 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       : '⚔️ Combat Started! Round 1 begins.';
     await broadcastFeedLog(logMsg, false);
 
-    await broadcastTurn(0, 1, firstId, nextSeq);
+    await broadcastTurn(0, 1, firstId);
     await broadcastRoster(strictSorted);
   };
 
-  // Rewind strictly to Round 1, Turn 1 (⏮) - Completely detached from AddCombatantModal
+  // Rewind strictly to Round 1, Turn 1 (⏮)
   const handleRewindToTop = async () => {
     const sorted = getDeterministicSortedCombatants(combatants);
     const first = sorted[0];
     const firstId = first ? first.id : null;
-
-    const nextSeq = localTurnSeqRef.current + 1;
-    localTurnSeqRef.current = nextSeq;
 
     setActiveTurnIndex(0);
     setActiveCombatantId(firstId);
@@ -968,7 +1125,64 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
       if (firstId) localStorage.setItem('ttrpg_active_combatant_id', firstId);
     } catch {}
 
-    await broadcastTurn(0, 1, firstId, nextSeq);
+    await broadcastTurn(0, 1, firstId);
+  };
+
+  // Prominent End Combat & Roster Unlock Action (GM Action)
+  const handleEndCombat = async () => {
+    setIsEndCombatConfirmOpen(false);
+    const newEncounterId = `enc_${Date.now()}`;
+    encounterIdRef.current = newEncounterId;
+    setEncounterId(newEncounterId);
+    setRound(0);
+    setActiveTurnIndex(0);
+    setActiveCombatantId(null);
+    setCombatStatus('idle');
+    setInitiativeCalled(false);
+    setCombatants([]);
+    localCombatantsRef.current = [];
+    recentlyAddedIdsRef.current.clear();
+    deletionTombstones.current.clear();
+    setConcentrationAlerts({});
+    setCombatFeedItems([]);
+
+    try {
+      localStorage.setItem('ashtapor_encounter_id', newEncounterId);
+      localStorage.setItem('ttrpg_combatants', JSON.stringify([]));
+      localStorage.removeItem('ttrpg_active_combatant_id');
+      localStorage.setItem('ttrpg_active_turn_index', '0');
+      localStorage.setItem('ttrpg_combat_round', '0');
+      localStorage.setItem('ttrpg_combat_status', 'idle');
+    } catch {}
+
+    const endMsg = '⚔️ Combat ended. Roster locks released.';
+    liveFeedSync.recordCombatLog(endMsg, false);
+
+    if (OBR.isReady) {
+      try {
+        await OBR.room.setMetadata({
+          'ashtapor/roster': [],
+          [TURN_METADATA_KEY]: {
+            encounterId: newEncounterId,
+            currentTurnIndex: 0,
+            currentRound: 0,
+            activeCombatantId: null,
+          },
+        });
+        const obrAny = OBR as any;
+        if (obrAny.broadcast) {
+          obrAny.broadcast.sendMessage('ashtapor/combat_ended', { timestamp: Date.now() });
+          obrAny.broadcast.sendMessage('ashtapor/turn_sync', {
+            round: 0,
+            activeIndex: 0,
+            activeCombatantId: null,
+            timestamp: Date.now(),
+          });
+        }
+      } catch (e) {
+        console.error('Failed to end combat in room metadata:', e);
+      }
+    }
   };
 
   const handleSortInitiative = () => {
@@ -1173,6 +1387,16 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             ],
           },
         });
+        const obrAny = OBR as any;
+        if (obrAny.broadcast) {
+          obrAny.broadcast.sendMessage('ashtapor/combat_ended', { timestamp: Date.now() });
+          obrAny.broadcast.sendMessage('ashtapor/turn_sync', {
+            round: 0,
+            activeIndex: 0,
+            activeCombatantId: null,
+            timestamp: Date.now(),
+          });
+        }
       } catch (e) {
         console.error('Failed to reset encounter in OBR room:', e);
       }
@@ -2213,52 +2437,55 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           </span>
         </div>
 
-        {/* Right: Transport Controls Cluster (Sort in Idle / ⏮ in Active, ◀, ▶, 🔊, ≡ / ▤) */}
+        {/* Right: Transport Controls Cluster (Sort in Staging / ⏮, ◀, ▶ in Active, 🔊, ≡ / ▤) */}
         <div className="flex items-center gap-1 shrink-0">
           {!isCombatActive ? (
-            /* Idle State: Explicit Sort Button replacing ⏮ */
+            /* Staging / Prep Mode (Round 0): Explicit Sort Init Button replacing turn arrows */
             <button
               type="button"
               onClick={handleSortInitiative}
               className="h-7 px-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700/80 rounded flex items-center gap-1 text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
-              title="Sort Initiative (Highest to Lowest)"
+              title="Sort Staged Combatants (Highest to Lowest)"
             >
               <ArrowDownUp className="w-3.5 h-3.5 text-amber-400" />
-              <span>Sort</span>
+              <span>Sort Init</span>
             </button>
           ) : (
-            /* Active State: Rewind strictly to Round 1, Turn 1 (⏮) */
-            <button
-              type="button"
-              onClick={handleRewindToTop}
-              title="Rewind to Round 1, Turn 1"
-              className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <SkipBack className="w-3.5 h-3.5" />
-            </button>
+            /* Active Combat Mode (Round 1+): Cassette Transport Bar (⏮, ◀, ▶) */
+            <>
+              {/* Rewind strictly to Round 1, Turn 1 (⏮) */}
+              <button
+                type="button"
+                onClick={handleRewindToTop}
+                title="Rewind to Round 1, Turn 1"
+                className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <SkipBack className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Previous Turn (◀) */}
+              <button
+                type="button"
+                onClick={handlePrevTurn}
+                disabled={combatants.length === 0 || isTurnUpdating}
+                title="Previous Turn"
+                className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center justify-center transition-colors disabled:opacity-30 cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              {/* Next Turn (▶) */}
+              <button
+                type="button"
+                onClick={handleNextTurn}
+                disabled={combatants.length === 0 || isTurnUpdating}
+                title="Next Turn"
+                className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded flex items-center justify-center transition-colors disabled:opacity-30 cursor-pointer shadow-sm"
+              >
+                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+              </button>
+            </>
           )}
-
-          {/* Previous Turn (◀) */}
-          <button
-            type="button"
-            onClick={handlePrevTurn}
-            disabled={!isCombatActive || combatants.length === 0 || isTurnUpdating}
-            title={!isCombatActive ? 'Encounter is Idle' : 'Previous Turn'}
-            className="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center justify-center transition-colors disabled:opacity-30 cursor-pointer"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          {/* Next Turn (▶) */}
-          <button
-            type="button"
-            onClick={handleNextTurn}
-            disabled={!isCombatActive || combatants.length === 0 || isTurnUpdating}
-            title={!isCombatActive ? 'Encounter is Idle' : 'Next Turn'}
-            className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded flex items-center justify-center transition-colors disabled:opacity-30 cursor-pointer shadow-sm"
-          >
-            <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-          </button>
 
           {/* Audio Chime Toggle (🔊) */}
           <button
@@ -2297,15 +2524,51 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
 
       {/* 1.5 ENCOUNTER LIFECYCLE ACTION BANNERS */}
       {!isCombatActive && isDm && (
+        <div className="px-2 pt-2 flex items-center gap-2">
+          {!initiativeCalled ? (
+            <button
+              type="button"
+              onClick={handleCallForInitiative}
+              className="flex-1 py-2 px-3 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs tracking-wider uppercase rounded-lg shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
+              title="Alert all players to roll initiative"
+            >
+              <Swords className="w-4 h-4 fill-slate-950" />
+              <span>⚔️ ROLL FOR INITIATIVE</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleStartCombat}
+              className="flex-1 py-2 px-3 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 hover:from-emerald-400 hover:to-emerald-300 text-slate-950 font-black text-xs tracking-wider uppercase rounded-lg shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
+              title="Start Encounter and Begin Round 1"
+            >
+              <ChevronRight className="w-4 h-4 stroke-[3]" />
+              <span>▶ START ROUND 1</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleSortInitiative}
+            className="py-2 px-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer shrink-0"
+            title="Sort Initiative (Highest to Lowest)"
+          >
+            <ArrowDownUp className="w-3.5 h-3.5" />
+            <span>⇅ Sort Init</span>
+          </button>
+        </div>
+      )}
+
+      {!isCombatActive && !isDm && initiativeCalled && (
         <div className="px-2 pt-2">
           <button
             type="button"
-            onClick={handleStartCombat}
-            className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs tracking-wider uppercase rounded-lg shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
-            title="Start Encounter and Begin Round 1"
+            onClick={() => setIsRosterOpen(true)}
+            className="w-full py-2 px-3 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 rounded-lg text-amber-300 font-bold text-xs flex items-center justify-center gap-2 animate-pulse shadow-md transition cursor-pointer"
+            title="Open Roster to Join Combat"
           >
-            <Swords className="w-4 h-4 fill-slate-950" />
-            <span>⚔️ START COMBAT / ROLL INITIATIVE</span>
+            <Swords className="w-3.5 h-3.5" />
+            <span>⚔️ DM called for Initiative! Open Roster to join.</span>
           </button>
         </div>
       )}
@@ -2421,17 +2684,29 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
           <ChevronUp className={`w-3.5 h-3.5 transition-transform duration-200 ${isFeedOpen ? 'rotate-180' : ''}`} />
         </button>
 
-        {/* Reset Encounter (🔄) */}
+        {/* Reset / End Combat Action Button */}
         {isDm && (
-          <button
-            type="button"
-            onClick={() => setIsResetModalOpen(true)}
-            disabled={combatants.length === 0}
-            title="Reset / Clear Combat"
-            className="w-8 h-8 bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-800 rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer disabled:opacity-30"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
+          isCombatActive ? (
+            <button
+              type="button"
+              onClick={() => setIsEndCombatConfirmOpen(true)}
+              title="End Encounter & Release Roster Locks"
+              className="h-8 px-2.5 bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors shrink-0 shadow-sm cursor-pointer"
+            >
+              <span>🛑</span>
+              <span className="hidden xs:inline">End Combat</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsResetModalOpen(true)}
+              disabled={combatants.length === 0}
+              title="Reset / Clear Staged Combatants"
+              className="w-8 h-8 bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-800 rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer disabled:opacity-30"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )
         )}
       </div>
 
@@ -2478,6 +2753,43 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         combatants={combatants}
         encounterId={encounterId}
       />
+
+      {/* END COMBAT CONFIRMATION MODAL */}
+      {isEndCombatConfirmOpen && (
+        <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
+          <div className="w-full max-w-xs bg-slate-900 border border-rose-600/70 rounded-2xl p-4 shadow-2xl space-y-3.5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 text-base">
+                🛑
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-slate-100 font-display">End Combat</h3>
+                <p className="text-[10px] text-slate-400 font-mono">Release roster locks</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-200 leading-relaxed">
+              End encounter and clear combatants?
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsEndCombatConfirmOpen(false)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleEndCombat}
+                className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 text-white shadow-md transition cursor-pointer flex items-center gap-1.5"
+              >
+                <span>🛑</span>
+                <span>End Combat</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: COMBATANT ACTION / CONDITION POPUP */}
       {actionMenuCombatantId && (() => {

@@ -103,47 +103,71 @@ export const MyRosterDrawer: React.FC<MyRosterDrawerProps> = ({
   // Subscribe to 'ashtapor/roster' room metadata changes to keep roster status in real-time sync across all clients.
   // When the array is cleared or empty (encounter reset/clear), all roster cards immediately revert to "Not in battle".
   useEffect(() => {
-    if (!OBR.isReady) return;
-
-    const handleRosterMetaUpdate = (meta: Record<string, any>) => {
-      const raw = meta['ashtapor/roster'] as any;
-      const combatantsList: Combatant[] = Array.isArray(raw)
-        ? raw
-        : Array.isArray(raw?.combatants)
-        ? raw.combatants
-        : [];
-
-      setLiveCombatantList(combatantsList);
-
-      if (combatantsList.length === 0) {
-        // Encounter was cleared/reset: immediately revert all roster cards to Not in battle
-        setInCombatMemberIds(new Set());
-        setJoiningMemberIds(new Set());
-        setExitingMemberIds(new Set());
-        hasJustExited.current.clear();
-      } else {
-        const liveIds = new Set<string>();
-        roster.forEach((m) => {
-          const isLive = combatantsList.some(
-            (c) =>
-              (c.rosterId && c.rosterId === m.id) ||
-              c.id === m.id ||
-              c.name.toLowerCase().trim() === m.name.toLowerCase().trim()
-          );
-          if (isLive) {
-            liveIds.add(m.id);
-          }
-        });
-        setInCombatMemberIds(liveIds);
-      }
+    const handleResetAllToNotInBattle = () => {
+      setLiveCombatantList([]);
+      setInCombatMemberIds(new Set());
+      setJoiningMemberIds(new Set());
+      setExitingMemberIds(new Set());
+      hasJustExited.current.clear();
     };
 
-    OBR.room.getMetadata().then(handleRosterMetaUpdate).catch(() => {});
-    const unsub = OBR.room.onMetadataChange((meta) => {
-      handleRosterMetaUpdate(meta);
-    });
+    if (OBR.isReady) {
+      const handleRosterMetaUpdate = (meta: Record<string, any>) => {
+        const raw = meta['ashtapor/roster'] as any;
+        const combatantsList: Combatant[] = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.combatants)
+          ? raw.combatants
+          : [];
 
-    return () => unsub();
+        setLiveCombatantList(combatantsList);
+
+        if (combatantsList.length === 0) {
+          // Encounter was cleared/reset: immediately revert all roster cards to Not in battle
+          handleResetAllToNotInBattle();
+        } else {
+          const liveIds = new Set<string>();
+          roster.forEach((m) => {
+            const isLive = combatantsList.some(
+              (c) =>
+                (c.rosterId && c.rosterId === m.id) ||
+                c.id === m.id ||
+                c.name.toLowerCase().trim() === m.name.toLowerCase().trim()
+            );
+            if (isLive) {
+              liveIds.add(m.id);
+            }
+          });
+          setInCombatMemberIds(liveIds);
+        }
+      };
+
+      OBR.room.getMetadata().then(handleRosterMetaUpdate).catch(() => {});
+      const unsubMeta = OBR.room.onMetadataChange((meta) => {
+        handleRosterMetaUpdate(meta);
+      });
+
+      // Immediate WebSocket combat_ended listener
+      const obrAny = OBR as any;
+      const unsubCombatEnded = obrAny.broadcast?.onMessage
+        ? obrAny.broadcast.onMessage('ashtapor/combat_ended', () => {
+            handleResetAllToNotInBattle();
+          })
+        : undefined;
+
+      window.addEventListener('ashtapor-combat-ended', handleResetAllToNotInBattle);
+
+      return () => {
+        unsubMeta();
+        if (typeof unsubCombatEnded === 'function') unsubCombatEnded();
+        window.removeEventListener('ashtapor-combat-ended', handleResetAllToNotInBattle);
+      };
+    } else {
+      window.addEventListener('ashtapor-combat-ended', handleResetAllToNotInBattle);
+      return () => {
+        window.removeEventListener('ashtapor-combat-ended', handleResetAllToNotInBattle);
+      };
+    }
   }, [roster]);
 
   const saveRoster = (updated: RosterMember[]) => {

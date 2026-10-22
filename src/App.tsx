@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
 import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X, Copy, Check } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from './utils/audio';
@@ -52,6 +52,38 @@ export default function App() {
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
+  // Table-wide Alert State (e.g. DM Called for Initiative)
+  const [tableAlert, setTableAlert] = useState<string | null>(null);
+
+  const isGmRef = useRef<boolean>(isGM);
+  useEffect(() => {
+    isGmRef.current = isGM;
+  }, [isGM]);
+
+  // Live combat state snapshot ref for replying to player sync requests
+  const liveCombatSnapshotRef = useRef<{
+    combatants: any[];
+    round: number;
+    activeIndex: number;
+    activeCombatantId: string | null;
+  }>({
+    combatants: [],
+    round: 0,
+    activeIndex: 0,
+    activeCombatantId: null,
+  });
+
+  // Track live snapshot updates dispatched from CombatTracker
+  useEffect(() => {
+    const handleSnapshot = (e: any) => {
+      if (e.detail) {
+        liveCombatSnapshotRef.current = e.detail;
+      }
+    };
+    window.addEventListener('ashtapor-combat-snapshot', handleSnapshot);
+    return () => window.removeEventListener('ashtapor-combat-snapshot', handleSnapshot);
+  }, []);
+
   // Initialize OBR Lifecycle, boot sanitizer, and read initial pin preference
   useEffect(() => {
     runBootSanitizerOnce();
@@ -66,6 +98,7 @@ export default function App() {
         } catch {}
 
         setIsGM(isGmRole);
+        isGmRef.current = isGmRole;
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
 
@@ -89,6 +122,7 @@ export default function App() {
     const fallbackTimer = setTimeout(() => {
       if (!OBR.isAvailable) {
         setIsGM(true);
+        isGmRef.current = true;
         setPlayerName('GM (Standalone)');
         liveFeedSync.setIdentity('GM (Standalone)', true);
         setIsReady(true);
@@ -97,6 +131,101 @@ export default function App() {
 
     return () => clearTimeout(fallbackTimer);
   }, []);
+
+  // Static root broadcast listener for turn sync, table alerts, and cold-start handshake
+  useEffect(() => {
+    if (!isReady || !OBR.isReady) return;
+    const obrAny = OBR as any;
+    if (!obrAny.broadcast) return;
+
+    // 1. Sub-30ms Raw WebSocket Turn Sync Listener
+    const unsubTurnSync = obrAny.broadcast.onMessage('ashtapor/turn_sync', (event: any) => {
+      const data = event.data as any;
+      if (data && typeof data.round === 'number' && typeof data.activeIndex === 'number') {
+        window.dispatchEvent(new CustomEvent('ashtapor-turn-sync', { detail: data }));
+      }
+    });
+
+    // 2. Table Alert Listener ("Call for Initiative")
+    const unsubTableAlert = obrAny.broadcast.onMessage('ashtapor/table_alert', (event: any) => {
+      const data = event.data as any;
+      if (data && data.type === 'ROLL_FOR_INITIATIVE') {
+        if (!isGmRef.current) {
+          setTableAlert('⚔️ DM called for Initiative! Open Roster to join.');
+        }
+        window.dispatchEvent(new CustomEvent('ashtapor-table-alert', { detail: data }));
+      }
+    });
+
+    // 3. Combat Ended Listener (immediately clears locks and table alerts)
+    const unsubCombatEnded = obrAny.broadcast.onMessage('ashtapor/combat_ended', (event: any) => {
+      setTableAlert(null);
+      window.dispatchEvent(new CustomEvent('ashtapor-combat-ended', { detail: event.data }));
+    });
+
+    // 4. Cold-Start Sync Handshake
+    // GM client catches sync requests from newly mounted players and replies immediately in <50ms
+    const unsubSyncReq = obrAny.broadcast.onMessage('ashtapor/sync_request', async (event: any) => {
+      if (!isGmRef.current) return;
+      const data = event.data as any;
+      try {
+        let snapshot = liveCombatSnapshotRef.current;
+        // If snapshot is empty, fallback to reading room metadata
+        if (!snapshot.combatants || snapshot.combatants.length === 0) {
+          const roomMeta = await OBR.room.getMetadata();
+          const rawRoster = roomMeta['ashtapor/roster'] as any;
+          const combatantsList = Array.isArray(rawRoster)
+            ? rawRoster
+            : Array.isArray(rawRoster?.combatants)
+            ? rawRoster.combatants
+            : [];
+          const rawTurn = roomMeta['ashtapor/turn'] as any;
+          snapshot = {
+            combatants: combatantsList,
+            round: rawTurn?.currentRound ?? rawTurn?.round ?? 0,
+            activeIndex: rawTurn?.currentTurnIndex ?? rawTurn?.activeIndex ?? 0,
+            activeCombatantId: rawTurn?.activeCombatantId ?? null,
+          };
+        }
+
+        obrAny.broadcast.sendMessage('ashtapor/sync_response', {
+          targetId: data?.senderId,
+          combatants: snapshot.combatants,
+          round: snapshot.round,
+          activeIndex: snapshot.activeIndex,
+          activeCombatantId: snapshot.activeCombatantId,
+        });
+      } catch (err) {
+        console.warn('Error replying to sync_request:', err);
+      }
+    });
+
+    // Player client catches sync response from GM and hydrates state in <50ms
+    const unsubSyncResp = obrAny.broadcast.onMessage('ashtapor/sync_response', (event: any) => {
+      if (isGmRef.current) return;
+      const data = event.data as any;
+      if (data) {
+        window.dispatchEvent(new CustomEvent('ashtapor-sync-response', { detail: data }));
+      }
+    });
+
+    // Send cold-start request if player
+    if (!isGmRef.current) {
+      OBR.player.getId().then((myId) => {
+        obrAny.broadcast.sendMessage('ashtapor/sync_request', { senderId: myId });
+      }).catch(() => {
+        obrAny.broadcast.sendMessage('ashtapor/sync_request', { senderId: 'player' });
+      });
+    }
+
+    return () => {
+      if (typeof unsubTurnSync === 'function') unsubTurnSync();
+      if (typeof unsubTableAlert === 'function') unsubTableAlert();
+      if (typeof unsubCombatEnded === 'function') unsubCombatEnded();
+      if (typeof unsubSyncReq === 'function') unsubSyncReq();
+      if (typeof unsubSyncResp === 'function') unsubSyncResp();
+    };
+  }, [isReady]);
 
   // Listen for native OBR player identity and role updates
   useEffect(() => {
@@ -377,6 +506,37 @@ export default function App() {
           </button>
         </nav>
       </header>
+
+      {/* 1.5 TABLE ALERT BANNER (e.g. DM Called for Initiative) */}
+      {tableAlert && !isGM && (
+        <div className="bg-amber-500/20 border-b border-amber-500/50 px-2.5 py-1.5 flex items-center justify-between text-xs text-amber-200 animate-pulse z-30 shrink-0">
+          <div className="flex items-center gap-1.5 font-bold truncate">
+            <span>⚔️</span>
+            <span className="truncate">{tableAlert}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('combat');
+                setTableAlert(null);
+                window.dispatchEvent(new CustomEvent('ashtapor-open-roster'));
+              }}
+              className="px-2 py-0.5 rounded bg-amber-400 text-neutral-950 font-bold text-[11px] hover:bg-amber-300 transition cursor-pointer"
+            >
+              Open Roster
+            </button>
+            <button
+              type="button"
+              onClick={() => setTableAlert(null)}
+              className="p-0.5 text-amber-400/80 hover:text-amber-200 transition cursor-pointer"
+              title="Dismiss alert"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Floating Contextual Help Guide Tooltip */}
       <ContextualHelpTooltip

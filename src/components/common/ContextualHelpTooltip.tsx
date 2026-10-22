@@ -18,6 +18,7 @@ import {
   Swords,
   Ruler,
   FileText,
+  Radio,
 } from 'lucide-react';
 
 export type HelpTab = 'combat' | 'dice' | 'range' | 'notes';
@@ -165,33 +166,33 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             <div className="space-y-2">
               <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400/90 flex items-center gap-1">
                 <Swords className="w-3 h-3 text-amber-400" />
-                Combat Mechanics
+                Combat Lifecycle & Mechanics
               </div>
 
               <div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 space-y-1.5 text-[11px]">
                 <p>
-                  <strong className="text-amber-300 font-semibold">Join Combat:</strong> Save your PC in{' '}
-                  <Users className="inline w-3 h-3 text-amber-400 align-text-bottom" /> <strong>Roster</strong> and tap{' '}
-                  <strong className="text-slate-100">Join Combat</strong> to roll initiative automatically.
+                  <strong className="text-amber-300 font-semibold">Staging (Round 0):</strong> Before combat begins, players join from <Users className="inline w-3 h-3 text-amber-400 align-text-bottom" /> <strong>Roster</strong>. Turn progression is locked while the party rolls initiative.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Active Turn:</strong> The current turn glows gold; a notification chime sounds when your turn begins.
+                  <strong className="text-amber-300 font-semibold">DM Initiative Alert:</strong> When the GM calls for initiative, a pulsing amber banner alerts all players: <em>"⚔️ DM called for Initiative! Open Roster to join."</em> Tap to open Roster and join with 1 tap.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">1-Tap Health:</strong> In compact mode, click HP numbers (<code className="text-amber-300 font-mono text-[10px] px-1 py-0.5 rounded bg-slate-800">30/30</code>) directly to log damage/healing without expanding the card.
+                  <strong className="text-amber-300 font-semibold">Active Combat (Round 1+):</strong> GM initiates Round 1. Turns advance in sub-30ms raw WebSocket sync. The active combatant glows gold and plays an audible turn chime.
+                </p>
+                <p>
+                  <strong className="text-amber-300 font-semibold">1-Tap Health:</strong> In compact rows, click HP numbers (<code className="text-amber-300 font-mono text-[10px] px-1 py-0.5 rounded bg-slate-800">30/30</code>) directly to log damage/healing without expanding the row.
                 </p>
                 <p>
                   <strong className="text-amber-300 font-semibold">
-                    Expand (<ChevronDown className="inline w-3 h-3 text-slate-400 align-text-bottom" />):
+                    Row Expand (<ChevronDown className="inline w-3 h-3 text-slate-400 align-text-bottom" />):
                   </strong>{' '}
                   Access <code className="text-amber-300 font-mono text-[10px]">-5/-1/+1/+5</code> quick tallies, Temp HP, and condition tags.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Death Saves:</strong> Pop up at 0 HP. Clicks sync live to the table and clear automatically upon healing.
+                  <strong className="text-amber-300 font-semibold">Death Saves:</strong> Pop up automatically at 0 HP for PCs. Pips sync live across table and reset when healed.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Table Feed:</strong> Tap{' '}
-                  <MessageSquare className="inline w-3 h-3 text-amber-400 align-text-bottom" /> <strong>Feed</strong> at the bottom to view real-time logs.
+                  <strong className="text-amber-300 font-semibold">End Combat (Roster Unlock):</strong> When the GM ends the encounter with <code className="text-rose-400 font-semibold font-mono text-[10px]">🛑 End Combat</code>, all character locks are immediately released back to <em>"Not in battle"</em>.
                 </p>
               </div>
             </div>
@@ -205,16 +206,16 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 </div>
                 <div className="bg-amber-950/20 border border-amber-500/20 rounded-lg p-2 space-y-1.5 text-[11px]">
                   <p>
-                    <strong className="text-amber-300 font-semibold">Combat Lifecycle:</strong> In Prep (Idle), sort initiative or launch encounter with <strong className="text-amber-400">⚔️ Start Combat</strong>. In Active mode, cassette controls (<code className="text-amber-300 font-mono text-[10px]">⏮</code> Rewind to R1 T1, <code className="text-amber-300 font-mono text-[10px]">◀</code> Prev, <code className="text-amber-300 font-mono text-[10px]">▶</code> Next) drive turn flow.
+                    <strong className="text-amber-300 font-semibold">Staging Workflow:</strong> Click <strong className="text-amber-400">⚔️ Roll for Initiative</strong> to broadcast table alerts. Click <strong className="text-amber-400">⇅ Sort Init</strong> to sort descending. Click <strong className="text-emerald-400">▶ Start Round 1</strong> to begin.
                   </p>
                   <p>
-                    <strong className="text-amber-300 font-semibold">Linked Allies:</strong> Link allies to PCs for synchronized turns; displays clean integer initiative while strictly preserving order.
+                    <strong className="text-amber-300 font-semibold">Cassette Transport:</strong> <code className="text-amber-300 font-mono text-[10px]">⏮</code> Rewinds strictly to Round 1, Turn 1. <code className="text-amber-300 font-mono text-[10px]">◀</code> Prev Turn, <code className="text-amber-300 font-mono text-[10px]">▶</code> Next Turn advances turns with instant sub-30ms WebSocket delivery.
                   </p>
                   <p>
-                    <strong className="text-amber-300 font-semibold">Hostile Masking:</strong> Hostile HP is automatically masked (<code className="text-amber-300 font-mono text-[10px]">???/???</code>) and monster healing is silenced in player feeds.
+                    <strong className="text-amber-300 font-semibold">🛑 End Combat:</strong> Prompts confirmation, resets turns to 0, clears the active tracker, and instantly unlocks player rosters.
                   </p>
                   <p>
-                    <strong className="text-amber-300 font-semibold">Smart Reset:</strong> Clear hostiles only or trigger a complete encounter teardown.
+                    <strong className="text-amber-300 font-semibold">Hostile Masking:</strong> Monster HP is automatically masked (<code className="text-amber-300 font-mono text-[10px]">???/???</code>) for player terminals.
                   </p>
                 </div>
               </div>
@@ -227,27 +228,47 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             <div className="space-y-2">
               <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400/90 flex items-center gap-1">
                 <Dices className="w-3 h-3 text-amber-400" />
-                Dice Mechanics
+                Dice Engine: Roll Sum vs Roll Indiv
               </div>
 
-              <div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 space-y-1.5 text-[11px]">
+              <div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 space-y-2 text-[11px]">
+                <div className="p-2 rounded-lg bg-amber-950/30 border border-amber-500/40 space-y-1">
+                  <strong className="text-amber-300 font-bold block">[ 🎲 ROLL SUM ] (Grand Totals):</strong>
+                  <p className="text-slate-300">
+                    Evaluates all dice and modifiers into <strong>one single combined total</strong>.
+                  </p>
+                  <p className="text-slate-400">
+                    • <strong>Skill Challenges:</strong> Party pooled efforts (e.g. <code className="text-amber-300 font-mono text-[10px]">5d20 + 1d4 + 15</code> vs DC 100/120).
+                  </p>
+                  <p className="text-slate-400">
+                    • <strong>AoE & Spells:</strong> Fireball (<code className="text-amber-300 font-mono text-[10px]">8d6</code>), weapon damage (<code className="text-amber-300 font-mono text-[10px]">2d6 + 3</code>), or mass healing pools.
+                  </p>
+                </div>
+
+                <div className="p-2 rounded-lg bg-indigo-950/30 border border-indigo-500/40 space-y-1">
+                  <strong className="text-indigo-300 font-bold block">[ 📊 ROLL INDIV ] (Separate Batches):</strong>
+                  <p className="text-slate-300">
+                    Rolls separate instances without summing them together.
+                  </p>
+                  <p className="text-slate-400">
+                    • <strong>Multi-attacks & Mobs:</strong> <code className="text-indigo-300 font-mono text-[10px]">5d20 + 4</code> rolls 5 distinct goblin attacks, applying <code className="text-indigo-300 font-mono text-[10px]">+4</code> to each attack individually.
+                  </p>
+                  <p className="text-slate-400">
+                    • <strong>Adv / Dis on Batches:</strong> When <code className="text-amber-300 font-mono text-[10px]">Adv</code> is selected with <code className="text-indigo-300 font-mono text-[10px]">3d20 + 5</code>, each individual attack rolls 2d20, takes the higher face, and applies +5.
+                  </p>
+                  <p className="text-slate-400">
+                    • <strong>Contested Checks & Stats:</strong> Ability score generation (<code className="text-indigo-300 font-mono text-[10px]">4d6</code>) or simultaneous perception checks.
+                  </p>
+                </div>
+
                 <p>
-                  <strong className="text-amber-300 font-semibold">Quick D20:</strong> Tap <code className="text-amber-300 font-mono text-[10px]">d20</code>, <code className="text-amber-300 font-mono text-[10px]">Adv</code>, or <code className="text-amber-300 font-mono text-[10px]">Dis</code> at the top for instant rolls. These are sandboxed and will not disturb staged dice below.
+                  <strong className="text-amber-300 font-semibold">Quick D20:</strong> Tap <code className="text-amber-300 font-mono text-[10px]">d20</code>, <code className="text-amber-300 font-mono text-[10px]">Adv</code>, or <code className="text-amber-300 font-mono text-[10px]">Dis</code> at the top for instant sandboxed rolls without modifying your staged formula.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Combined Roll Buttons:</strong> Use <strong className="text-amber-400">Roll (Sum)</strong> for combined totals, or <strong className="text-slate-200">Indiv</strong> for individual die result breakdowns.
+                  <strong className="text-amber-300 font-semibold">Clean-Slate Formula Bar:</strong> Click die chips (<code className="text-amber-300 font-mono text-[10px]">d6</code>, <code className="text-amber-300 font-mono text-[10px]">d8</code>) to stage clean expressions (<code className="text-amber-300 font-mono text-[10px]">2d6</code>, <code className="text-amber-300 font-mono text-[10px]">8d6 + 4</code>) with zero phantom d20 injection.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Direct Formula Modifiers:</strong> Tap quick chips (<code className="text-amber-300 font-mono text-[10px]">+1</code> to <code className="text-amber-300 font-mono text-[10px]">+5</code>, <code className="text-rose-400 font-mono text-[10px]">-1</code>, <code className="text-rose-400 font-mono text-[10px]">-2</code>) to append directly into your formula.
-                </p>
-                <p>
-                  <strong className="text-amber-300 font-semibold">Math Calculator:</strong> Tap the calculator icon next to the formula input to compute complex modifiers and inject results with 1 tap.
-                </p>
-                <p>
-                  <strong className="text-amber-300 font-semibold">Visibility:</strong> Toggle <strong className="text-slate-100">Public</strong> (table-wide), <strong className="text-slate-100">GM Only</strong> (secret DM whisper), or <strong className="text-slate-100">Self</strong> (private test roll).
-                </p>
-                <p>
-                  <strong className="text-amber-300 font-semibold">Macros:</strong> Save weapon attacks or complex spell expressions under <strong className="text-slate-100">+ Add Macro</strong> for 1-click rolling.
+                  <strong className="text-amber-300 font-semibold">Docked Calculator:</strong> Tap the calculator icon to compute complex modifiers and inject directly with <em>➔ Apply</em>.
                 </p>
               </div>
             </div>
@@ -261,7 +282,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 </div>
                 <div className="bg-amber-950/20 border border-amber-500/20 rounded-lg p-2 space-y-1.5 text-[11px]">
                   <p>
-                    <strong className="text-amber-300 font-semibold">Secret Crits:</strong> <strong className="text-amber-200">GM Only</strong> rolls bypass public room metadata and remain completely hidden from player roll feeds.
+                    <strong className="text-amber-300 font-semibold">Secret Rolls:</strong> <strong className="text-amber-200">GM Only</strong> rolls bypass public room metadata and remain strictly hidden from player roll feeds.
                   </p>
                 </div>
               </div>
@@ -294,24 +315,21 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             <div className="space-y-2">
               <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400/90 flex items-center gap-1">
                 <FileText className="w-3 h-3 text-amber-400" />
-                Note Taking & Vault
+                Note Taking & Scoped Vaults
               </div>
 
               <div className="bg-slate-900/60 border border-slate-800/80 rounded-lg p-2 space-y-1.5 text-[11px]">
                 <p>
-                  <strong className="text-amber-300 font-semibold">Sub-Tabs:</strong> <strong className="text-slate-100">My Notes</strong> is local and private; <strong className="text-slate-100">Table Notes</strong> syncs live across the whole party.
+                  <strong className="text-amber-300 font-semibold">Scoped Vaults:</strong> <strong className="text-slate-100">My Notes</strong> is local and private; <strong className="text-slate-100">Table Notes</strong> syncs live across the whole party; <strong className="text-rose-400">DM Notes</strong> is GM-encrypted prep storage.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">1-Tap Reader View (<Maximize2 className="inline w-3 h-3 text-amber-400 align-text-bottom" />):</strong> Tap directly from collapsed note headers to open full distraction-free reading mode.
+                  <strong className="text-amber-300 font-semibold">Gated Table Broadcast:</strong> Table-wide broadcasting is an exclusive GM feature located strictly in the <strong className="text-amber-400">DM Notes</strong> tab. Clicking the broadcast radio icon (<Radio className="inline w-3 h-3 text-amber-400 align-text-bottom" />) reveals a popup on all players' screens with 1-click clipboard copy.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">Note Transfers:</strong> Both players and GM can copy or move notes between My Notes and Table Notes seamlessly.
+                  <strong className="text-amber-300 font-semibold">1-Tap Reader View (<Maximize2 className="inline w-3 h-3 text-amber-400 align-text-bottom" />):</strong> Tap directly from collapsed note headers to open full distraction-free reading mode with word counts.
                 </p>
                 <p>
-                  <strong className="text-amber-300 font-semibold">
-                    Editing (<Pencil className="inline w-3 h-3 text-slate-400 align-text-bottom" />):
-                  </strong>{' '}
-                  Click the pencil icon to edit; clicking note text highlights it for copying rather than opening the editor.
+                  <strong className="text-amber-300 font-semibold">Note Transfers:</strong> Move or copy notes between My Notes and Table Notes seamlessly via the card action strip.
                 </p>
               </div>
             </div>
@@ -325,10 +343,10 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 </div>
                 <div className="bg-amber-950/20 border border-amber-500/20 rounded-lg p-2 space-y-1.5 text-[11px]">
                   <p>
-                    <strong className="text-amber-300 font-semibold">DM Notes Vault:</strong> Encrypted, private GM prep storage.
+                    <strong className="text-amber-300 font-semibold">Story Categories:</strong> Access to <span className="text-indigo-400 font-semibold">Scene</span> (indigo) and <span className="text-fuchsia-400 font-semibold">Hook</span> (fuchsia) categories for adventure prep.
                   </p>
                   <p>
-                    <strong className="text-amber-300 font-semibold">Story Categories:</strong> Access to <span className="text-indigo-400 font-semibold">Scene</span> (indigo) and <span className="text-fuchsia-400 font-semibold">Hook</span> (fuchsia) categories for adventure prep.
+                    <strong className="text-amber-300 font-semibold">Broadcast Teardown:</strong> 1-click <em>Stop Revealing & Close</em> clears the broadcast from all player screens immediately.
                   </p>
                 </div>
               </div>
@@ -339,7 +357,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
       {/* Footer Utility Strip */}
       <div className="p-2 border-t border-slate-800/80 bg-slate-950 text-[10px] text-slate-500 font-mono text-center select-none flex items-center justify-between">
-        <span>Ashtapor v2.0.24</span>
+        <span>Ashtapor v2.0.28</span>
         <span>Press Esc to close</span>
       </div>
     </div>

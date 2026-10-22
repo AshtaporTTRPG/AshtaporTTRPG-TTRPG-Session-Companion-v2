@@ -559,7 +559,7 @@ export function parseDiceFormula(formula: string): {
     count: totalCount,
     diceType: primaryDie,
     modifier,
-    pool: pool.length > 0 ? pool : [{ diceType: 'd20', count: 1 }],
+    pool,
   };
 }
 
@@ -570,11 +570,11 @@ export function addDieToFormula(currentFormula: string, die: DieType): string {
   }
 
   const parsed = parseDiceFormula(cleaned);
-  if (!parsed || !parsed.pool || parsed.pool.length === 0) {
+  if (!parsed) {
     return `1${die}`;
   }
 
-  const pool = parsed.pool.map((p) => ({ ...p }));
+  const pool = (parsed.pool || []).map((p) => ({ ...p }));
   const existing = pool.find((p) => p.diceType === die);
   if (existing) {
     existing.count += 1;

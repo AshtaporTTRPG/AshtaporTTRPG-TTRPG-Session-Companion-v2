@@ -87,6 +87,7 @@ export interface NoteCardProps {
   isExpanded: boolean;
   isRevealed?: boolean;
   isGM?: boolean;
+  activeSubTab?: 'my' | 'table' | 'dm';
   currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
   onToggleExpand: (e?: React.MouseEvent) => void;
   onTogglePin?: () => void;
@@ -103,6 +104,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   isExpanded,
   isRevealed = false,
   isGM = false,
+  activeSubTab,
   currentVault = 'myNotes',
   onToggleExpand,
   onTogglePin,
@@ -231,23 +233,18 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
         {/* Collapsed Right Micro-Icons: 1-Tap Broadcast + 1-Tap Reader View + Pin */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
-          {/* Direct 1-Click Broadcast Button (GM only) */}
-          {isGM && (
+          {/* Direct 1-Click Broadcast Button (Strictly GM only on DM Notes) */}
+          {isGM && (activeSubTab === 'dm' || currentVault === 'dmNotes') && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 handleBroadcastNote(note);
               }}
-              title={isRevealed ? 'Hide from Table' : 'Broadcast Note to Table'}
-              aria-label="Broadcast Note to Table"
-              className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
-                isRevealed
-                  ? 'text-amber-400 bg-amber-950/60 ring-1 ring-amber-400/60 shadow-sm'
-                  : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
-              }`}
+              title="Broadcast Note to Table"
+              className="p-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition-colors"
             >
-              <Radio className={`w-3.5 h-3.5 ${isRevealed ? 'animate-pulse text-amber-400' : ''}`} />
+              <Radio className="w-3.5 h-3.5" />
             </button>
           )}
 
@@ -415,8 +412,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </button>
               )}
 
-              {/* Broadcast Reveal Toggle (GM only) */}
-              {onToggleReveal && (
+              {/* Broadcast Reveal Toggle (Strictly GM only on DM Notes) */}
+              {isGM && (activeSubTab === 'dm' || currentVault === 'dmNotes') && onToggleReveal && (
                 <button
                   type="button"
                   onClick={(e) => {
