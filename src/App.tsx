@@ -9,13 +9,12 @@ import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X, Copy, Check } f
 import { isAudioEnabled, toggleAudio } from './utils/audio';
 import { copyToClipboard } from './utils/clipboard';
 import { runBootSanitizerOnce } from './utils/notesSanitizer';
-import { CombatTracker } from './components/combat/CombatTracker';
+import { WhiteboardTracker } from './types/WhiteboardTracker';
 import { DiceChamber } from './components/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
 import { liveFeedSync } from './utils/liveFeedSync';
-import { ROOM_METADATA_KEY } from './utils/obrCombatSync';
 import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip';
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
@@ -301,7 +300,6 @@ export default function App() {
       if (OBR.isReady) {
         await OBR.room.setMetadata({
           [OBR_BROADCAST_NOTE_KEY]: undefined,
-          [ROOM_METADATA_KEY]: { activeBroadcast: null } as any,
         });
       }
       try {
@@ -548,8 +546,8 @@ export default function App() {
 
       {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
-        <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
-          <CombatTracker isDm={isGM} playerName={playerName} />
+     <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
+          <WhiteboardTracker />
         </div>
         <div className={activeTab === 'dice' ? 'flex flex-col h-full' : 'hidden'}>
           <DiceChamber isDm={isGM} playerName={playerName} />
