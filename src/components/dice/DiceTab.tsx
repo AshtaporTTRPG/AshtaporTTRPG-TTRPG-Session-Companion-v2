@@ -43,7 +43,7 @@ import {
 import { AddCustomMacroModal } from './AddCustomMacroModal';
 import { EditCustomMacroModal } from './EditCustomMacroModal';
 import { RollFeedCard } from './RollFeedCard';
-import { CalculatorDock } from './CalculatorDock';
+import { CalculatorDock, CalcViewMode } from './CalculatorDock';
 
 export interface DiceTabProps {
   isDm: boolean;
@@ -62,7 +62,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   const [visibility, setVisibility] = useState<RollVisibility>('public');
 
   // Inline Docked Calculator State (collapsible, placed directly above Custom Macros)
-  const [isCalcOpen, setIsCalcOpen] = useState<boolean>(false);
+  const [calcMode, setCalcMode] = useState<CalcViewMode>('closed');
 
   // Custom Macros State (collapsed by default to maximize roll feed space)
   const [macros, setMacros] = useState<CustomMacro[]>(() => loadCustomMacros());
@@ -474,7 +474,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[#0b0f17] select-none p-2 gap-2 text-slate-100">
+    <div className="flex flex-col h-full overflow-y-auto min-h-0 pr-1 select-text scrollbar-thin scrollbar-thumb-slate-800 bg-[#0b0f17] p-2 gap-2 text-slate-100">
       {/* 1. ROW 1: QUICK D20 MICRO-LABEL & SANDBOXED ACTIONS + VISIBILITY SELECTOR */}
       <div className="flex items-center justify-between gap-1.5 shrink-0 px-0.5">
         {/* Left: Quick D20 Section */}
@@ -584,13 +584,13 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
               )}
               <button
                 type="button"
-                onClick={() => setIsCalcOpen((prev) => !prev)}
+                onClick={() => setCalcMode((prev) => (prev === 'closed' ? 'expanded' : 'closed'))}
                 className={`p-1 rounded transition cursor-pointer ${
-                  isCalcOpen
+                  calcMode !== 'closed'
                     ? 'text-amber-400 bg-slate-800 ring-1 ring-amber-400/50'
                     : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
                 }`}
-                title="Toggle Quick Math Calculator"
+                title={calcMode === 'closed' ? 'Open Quick Math Calculator' : 'Close Quick Math Calculator'}
                 aria-label="Toggle Quick Math Calculator"
               >
                 <Calculator className="w-3.5 h-3.5" />
@@ -697,11 +697,13 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         </div>
       </div>
 
-      {/* 3. INLINE DOCKED CALCULATOR (Docked directly above Custom Macros, zero screen blocking) */}
-      {isCalcOpen && (
+      {/* 3. INLINE DOCKED CALCULATOR (Compact ~185px keypad or 32px minimized strip, zero screen blocking) */}
+      {calcMode !== 'closed' && (
         <CalculatorDock
-          isOpen={isCalcOpen}
-          onClose={() => setIsCalcOpen(false)}
+          viewMode={calcMode}
+          onChangeViewMode={setCalcMode}
+          isOpen={true}
+          onClose={() => setCalcMode('closed')}
           onApply={handleApplyFromCalculator}
         />
       )}
@@ -788,8 +790,8 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         )}
       </div>
 
-      {/* 5. ROLL FEED (Expanded with maximized vertical space) */}
-      <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-800/90 bg-slate-950/60 p-2 flex flex-col gap-2">
+      {/* 5. ROLL FEED (Expanded with maximized vertical space, unlocked scrolling) */}
+      <div className="flex-1 min-h-[220px] rounded-xl border border-slate-800/90 bg-slate-950/60 p-2 flex flex-col gap-2">
         {/* Roll Feed Header */}
         <div className="flex items-center justify-between pb-1 border-b border-slate-800/80 shrink-0">
           <div className="flex items-center gap-1.5">
@@ -811,7 +813,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
         </div>
 
         {/* Scrollable Feed Container */}
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+        <div className="flex-1 min-h-[160px] overflow-y-auto space-y-2 pr-1">
           {rollHistory.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-4 text-slate-500">
               <p className="text-xs">No recent rolls.</p>
