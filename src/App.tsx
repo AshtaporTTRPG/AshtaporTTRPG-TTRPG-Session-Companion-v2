@@ -244,20 +244,17 @@ export default function App() {
 
   // Listen for remote OBR Broadcast Note updates
   useEffect(() => {
-    if (!isReady || !OBR.isReady) return;
-
+    if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
-      const broadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
-      if (broadcast && broadcast.title) {
-        setBroadcastNote(broadcast);
-        setDismissedBroadcastId((prev) => (prev === broadcast.id ? prev : null));
-      } else {
-        setBroadcastNote(null);
+      const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
+      setBroadcastNote(live || null);
+      if (!live) {
         setDismissedBroadcastId(null);
       }
     });
-
-    return () => unsub();
+    return () => {
+      if (unsub) unsub();
+    };
   }, [isReady]);
 
   // Standalone event listener fallback for local browser testing
@@ -540,14 +537,12 @@ export default function App() {
       <ContextualHelpTooltip
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
-        activeAppTab={activeTab}
-        isGM={isGM}
       />
 
       {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
      <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
-          <WhiteboardTracker />
+          <WhiteboardTracker isGM={isGM} />
         </div>
         <div className={activeTab === 'dice' ? 'flex flex-col h-full' : 'hidden'}>
           <DiceChamber isDm={isGM} playerName={playerName} />

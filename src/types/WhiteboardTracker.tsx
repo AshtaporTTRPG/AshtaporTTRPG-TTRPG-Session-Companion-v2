@@ -23,9 +23,12 @@ const DEFAULT_STATE: WhiteboardState = {
 
 const QUICK_CONDITIONS = ['Concentrating', 'Prone', 'Poisoned', 'Bless', 'Bane'];
 
-export const WhiteboardTracker: React.FC = () => {
+interface WhiteboardTrackerProps {
+  isGM?: boolean;
+}
+
+export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = false }) => {
   const [board, setBoard] = useState<WhiteboardState>(DEFAULT_STATE);
-  const [isGM, setIsGM] = useState<boolean>(true); // Defaults to true in standalone preview
   const hasLoadedRoomRef = useRef<boolean>(false);
 
   // New Combatant Input State
@@ -37,59 +40,64 @@ export const WhiteboardTracker: React.FC = () => {
   const [activeTagId, setActiveTagId] = useState<string | null>(null);
   const [customTag, setCustomTag] = useState('');
 
-  // 1. Initial Mount & Safe OBR Sync
+  // 1. Initial Mount & Live Room Sync with Safe OBR Readiness & Mount Guard
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
+    if (typeof OBR === 'undefined') return;
 
-    const init = async () => {
+    let unsub: (() => void) | undefined;
+
+    const attach = async () => {
       try {
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          const role = await OBR.player.getRole();
-          setIsGM(role === 'GM');
+        if (!OBR.isReady) return;
 
-          const meta = await OBR.room.getMetadata();
-          const existing = meta[WHITEBOARD_KEY] as WhiteboardState | undefined;
-          
-          if (existing && Array.isArray(existing.combatants)) {
-            setBoard(existing);
-          }
-
-          unsubscribe = OBR.room.onMetadataChange((meta) => {
-            const live = meta[WHITEBOARD_KEY] as WhiteboardState | undefined;
-            if (live && Array.isArray(live.combatants)) {
-              setBoard(live);
-            } else if (!live && hasLoadedRoomRef.current) {
-              setBoard(DEFAULT_STATE);
-            }
-          });
+        // Fetch initial room metadata before allowing outgoing writes
+        const meta = await OBR.room.getMetadata();
+        const existing = meta[WHITEBOARD_KEY] as WhiteboardState | undefined;
+        if (existing && Array.isArray(existing.combatants)) {
+          setBoard(existing);
         }
+        hasLoadedRoomRef.current = true;
+
+        // Subscribe to live metadata changes
+        unsub = OBR.room.onMetadataChange((incomingMeta) => {
+          const live = incomingMeta[WHITEBOARD_KEY] as WhiteboardState | undefined;
+          if (live && Array.isArray(live.combatants)) {
+            setBoard(live);
+          }
+        });
       } catch (err) {
-        console.warn('Running outside Owlbear Rodeo environment. Using local state.', err);
-      } finally {
+        console.warn('Could not initialize whiteboard room sync:', err);
         hasLoadedRoomRef.current = true;
       }
     };
 
-    init();
+    if (OBR.isReady) {
+      attach();
+    } else {
+      OBR.onReady(() => {
+        attach();
+      });
+    }
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsub) unsub();
     };
   }, []);
 
-  // 2. Room Metadata Writer (Safe fallback for preview)
+  // 2. Direct Network Writer (Protected by Mount Guard)
   const commitBoard = async (newState: WhiteboardState) => {
     setBoard(newState);
     try {
-      if (typeof OBR !== 'undefined' && OBR.isReady && hasLoadedRoomRef.current) {
+      if (typeof OBR !== 'undefined' && OBR.isReady) {
+        if (!hasLoadedRoomRef.current) return;
         await OBR.room.setMetadata({ [WHITEBOARD_KEY]: newState });
       }
     } catch (err) {
-      console.warn('Could not save to Owlbear metadata:', err);
+      console.error('Failed to commit whiteboard metadata:', err);
     }
   };
 
-  // 3. Controls: Turn Progression & Sorting
+  // 3. GM Controls: Turn Progression & Sorting
   const handleSort = () => {
     const sorted = [...board.combatants].sort((a, b) => b.initiative - a.initiative);
     commitBoard({ ...board, combatants: sorted });
@@ -105,6 +113,7 @@ export const WhiteboardTracker: React.FC = () => {
       nextRound += 1;
     }
 
+    // Skip downed combatants if active ones exist
     const activeCount = board.combatants.filter(c => !c.isDowned).length;
     if (activeCount > 0) {
       let attempts = 0;
@@ -238,15 +247,19 @@ export const WhiteboardTracker: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1">
-          <button
-            onClick={handleSort}
-            title="Sort descending by Initiative"
-            className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700 active:scale-95"
-          >
-            <ArrowUpDown className="w-3.5 h-3.5" />
-            <span>Sort</span>
-          </button>
+          {/* SORT BUTTON: VISIBLE EXCLUSIVELY TO GM */}
+          {isGM && (
+            <button
+              onClick={handleSort}
+              title="Sort descending by Initiative"
+              className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700 active:scale-95"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5" />
+              <span>Sort</span>
+            </button>
+          )}
 
+          {/* TURN NAVIGATION: VISIBLE EXCLUSIVELY TO GM */}
           {isGM && (
             <div className="flex items-center gap-0.5 ml-1 border-l border-slate-700 pl-1">
               <button
@@ -397,16 +410,13 @@ export const WhiteboardTracker: React.FC = () => {
                       + Tag
                     </button>
 
-                    {/* Tag Quick-Picker Dropdown with Click-Outside Backdrop */}
+                    {/* Popover Opens DOWNWARD with Backdrop */}
                     {activeTagId === c.id && (
                       <>
-                        {/* Invisible Fullscreen Backdrop to catch clicks outside */}
                         <div
                           className="fixed inset-0 z-20"
                           onClick={() => setActiveTagId(null)}
                         />
-
-                        {/* Popover Opens DOWNWARD (top-full mt-1) */}
                         <div className="absolute left-0 top-full mt-1 z-30 w-48 p-2 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl space-y-1.5">
                           <div className="flex flex-wrap gap-1">
                             {QUICK_CONDITIONS.map((qTag) => (
@@ -447,6 +457,7 @@ export const WhiteboardTracker: React.FC = () => {
                       </>
                     )}
                   </div>
+
                   {/* Freeform Scratchpad Note */}
                   <input
                     type="text"

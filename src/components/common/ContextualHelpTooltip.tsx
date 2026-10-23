@@ -4,6 +4,8 @@ import { X, HelpCircle } from 'lucide-react';
 interface ContextualHelpTooltipProps {
   isOpen: boolean;
   onClose: () => void;
+  activeAppTab?: any;
+  isGM?: boolean;
 }
 
 export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
