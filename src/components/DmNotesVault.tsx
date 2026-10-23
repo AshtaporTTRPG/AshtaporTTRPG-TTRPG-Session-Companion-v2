@@ -23,10 +23,13 @@ import {
   BroadcastNotePayload,
   NoteCategory,
   NOTE_CATEGORIES,
+  NOTE_THEME_CONFIG,
+  NoteTheme,
 } from '../types/notes';
 import { CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './notes/NoteCard';
 import { CreateNoteModal } from './notes/CreateNoteModal';
 import { copyToClipboard } from '../utils/clipboard';
+import { renderMarkdown } from '../utils/markdownRenderer';
 
 interface DmNotesVaultProps {
   dmNotes: DmSecretNote[];
@@ -180,6 +183,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
     category: NoteCategory;
     content: string;
     isPinned: boolean;
+    theme?: NoteTheme;
   }) => {
     if (editingNote) {
       const updated: DmSecretNote = {
@@ -188,6 +192,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
         category: data.category,
         content: data.content,
         isPinned: data.isPinned,
+        theme: data.theme,
         updatedAt: Date.now(),
       };
       onSaveDmNote(updated);
@@ -198,6 +203,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
         category: data.category,
         content: data.content,
         isPinned: data.isPinned,
+        theme: data.theme,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -284,7 +290,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setInternalSearchQuery(e.target.value)}
-                placeholder="Search secret notes..."
+                placeholder="Search secret GM notes..."
                 className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
               />
               {searchQuery && (
@@ -381,7 +387,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
         </div>
       )}
 
-      {/* DM Note Card List */}
+      {/* GM Note Card List */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
         {filteredNotes.length === 0 ? (
           <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
@@ -389,7 +395,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
             <p className="text-xs font-medium text-slate-400">
               {searchQuery || selectedCategory !== 'All'
                 ? 'No matching secret notes found.'
-                : 'No secret DM notes yet.'}
+                : 'No secret GM notes yet.'}
             </p>
             <p className="text-[11px] text-slate-500">
               Click "+" above to write scenes, plot hooks, encounter tactics, or riddles.
@@ -419,6 +425,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
               note.category && CATEGORY_STYLES[note.category] ? note.category : 'General'
             ) as NoteCategory;
             const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
+            const themeCfg = note.theme ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate : NOTE_THEME_CONFIG.slate;
 
             const timeStr = new Date(note.updatedAt || note.createdAt).toLocaleDateString([], {
               month: 'short',
@@ -437,7 +444,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                     ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
                     : note.isPinned
                     ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-400/30'
-                    : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                    : themeCfg.cardClasses
                 }`}
               >
                 {/* Card Header Row */}
@@ -682,9 +689,9 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                       </div>
                     </div>
                     <div
-                      className="text-xs text-slate-300 font-mono leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/60 shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200"
+                      className={`text-xs leading-relaxed max-h-48 overflow-y-auto p-2.5 rounded-lg border shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}
                     >
-                      {note.content}
+                      {renderMarkdown(note.content)}
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono px-0.5">

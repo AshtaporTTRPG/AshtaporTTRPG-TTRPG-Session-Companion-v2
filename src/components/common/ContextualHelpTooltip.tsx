@@ -45,7 +45,13 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </p>
             <ul className="list-disc pl-4 space-y-1 text-slate-300">
               <li>
-                <strong>Adding Entries:</strong> Enter initiative, character name, and select a color swatch at the bottom strip. Anyone at the table can add combatants.
+                <strong>Adding Entries (GM Only):</strong> Click the <strong>+</strong> button in the top header cassette bar to expand a compact creation strip. Enter initiative, name, choose a color dot, and confirm.
+              </li>
+              <li>
+                <strong>Player Editing Rules:</strong> Players can edit character names and notes (buffered scratchpad saving on blur or Enter) and toggle condition tags, but cannot add, sort, duplicate, or delete combatants.
+              </li>
+              <li>
+                <strong>GM Controls:</strong> Only the GM can add entries, step through turns (<strong>Next</strong> / <strong>Prev</strong>), rewind to Round 1, sort by initiative (<strong>Sort ⇅</strong>), duplicate combatants, or drag cards (⠿) to manually adjust order.
               </li>
               <li>
                 <strong>Color Markers:</strong> Click any circular swatch to pick any color on the wheel to identify players, monsters, or allies.
@@ -55,9 +61,6 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
               </li>
               <li>
                 <strong>Downed (💀):</strong> Mark defeated combatants to dim their tile. The turn tracker will automatically skip over them during battle.
-              </li>
-              <li>
-                <strong>GM Controls:</strong> Only the GM can step through turns (<strong>Next</strong> / <strong>Prev</strong>), rewind to Round 1, or drag cards (⠿) to manually adjust order.
               </li>
             </ul>
           </section>
@@ -94,13 +97,13 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </h3>
             <ul className="list-disc pl-4 space-y-1 text-slate-300">
               <li>
-                <strong>My Notes:</strong> Your private scratchpad.
+                <strong>My Notes:</strong> Your private scratchpad stored locally on your device.
               </li>
               <li>
                 <strong>Table Notes:</strong> Shared scratchpad that everyone in the room can see and edit collaboratively.
               </li>
               <li>
-                <strong>DM Notes (GM Only):</strong> Secret campaign notes. Click the radio broadcast icon on any note card to project boxed flavor text or clues directly onto all player screens.
+                <strong>GM Notes (GM Only):</strong> Secret campaign notes with 5 Handout Themes (Slate, Parchment, Tablet, Scroll, Journal) and mini markdown helper toolbar. Click the radio broadcast icon on any note card to project boxed flavor text or clues directly onto all player screens.
               </li>
             </ul>
           </section>

@@ -9,11 +9,13 @@ import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X, Copy, Check } f
 import { isAudioEnabled, toggleAudio } from './utils/audio';
 import { copyToClipboard } from './utils/clipboard';
 import { runBootSanitizerOnce } from './utils/notesSanitizer';
-import { WhiteboardTracker } from './types/WhiteboardTracker';
+import { WhiteboardTracker } from './components/combat/WhiteboardTracker';
 import { DiceChamber } from './components/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
+import { NOTE_THEME_CONFIG } from './types/notes';
+import { renderMarkdown } from './utils/markdownRenderer';
 import { liveFeedSync } from './utils/liveFeedSync';
 import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip';
 
@@ -150,7 +152,7 @@ export default function App() {
       const data = event.data as any;
       if (data && data.type === 'ROLL_FOR_INITIATIVE') {
         if (!isGmRef.current) {
-          setTableAlert('⚔️ DM called for Initiative! Open Roster to join.');
+          setTableAlert('⚔️ GM called for Initiative! Open Roster to join.');
         }
         window.dispatchEvent(new CustomEvent('ashtapor-table-alert', { detail: data }));
       }
@@ -294,7 +296,7 @@ export default function App() {
   // Stop broadcasting note (GM Action) - 1-Click Broadcast Teardown
   const handleStopRevealing = async () => {
     try {
-      if (OBR.isReady) {
+      if (typeof OBR !== 'undefined' && OBR.isReady) {
         await OBR.room.setMetadata({
           [OBR_BROADCAST_NOTE_KEY]: undefined,
         });
@@ -494,7 +496,7 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Scoped 3-tier Notes: My Notes, Table Notes, DM Notes"
+            title="Scoped 3-tier Notes: My Notes, Table Notes, GM Notes"
           >
             <span className="text-xs leading-none select-none">📝</span>
             <span className="truncate">Notes</span>
@@ -502,7 +504,7 @@ export default function App() {
         </nav>
       </header>
 
-      {/* 1.5 TABLE ALERT BANNER (e.g. DM Called for Initiative) */}
+      {/* 1.5 TABLE ALERT BANNER (e.g. GM Called for Initiative) */}
       {tableAlert && !isGM && (
         <div className="bg-amber-500/20 border-b border-amber-500/50 px-2.5 py-1.5 flex items-center justify-between text-xs text-amber-200 animate-pulse z-30 shrink-0">
           <div className="flex items-center gap-1.5 font-bold truncate">
@@ -541,120 +543,126 @@ export default function App() {
 
       {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
-     <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
+        <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
           <WhiteboardTracker isGM={isGM} />
         </div>
         <div className={activeTab === 'dice' ? 'flex flex-col h-full' : 'hidden'}>
-          <DiceChamber isDm={isGM} playerName={playerName} />
+          <DiceChamber isGM={isGM} playerName={playerName} />
         </div>
         <div className={activeTab === 'range' || (activeTab as string) === 'geometry' ? 'flex flex-col h-full' : 'hidden'}>
           <RangeTab />
         </div>
         <div className={activeTab === 'grimoire' ? 'flex flex-col h-full' : 'hidden'}>
-          <Grimoire isDm={isGM} />
+          <Grimoire isGM={isGM} />
         </div>
         <div className={activeTab === 'notes' ? 'flex flex-col h-full' : 'hidden'}>
-          <NotesTab isDm={isGM} playerName={playerName} />
+          <NotesTab isGM={isGM} playerName={playerName} />
         </div>
       </main>
 
-      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY (ALL CONNECTED CLIENTS) */}
-      {shouldShowBroadcastModal && (
-        <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
-          <div className="w-full max-w-sm bg-neutral-900 border-2 border-amber-500/80 rounded-2xl p-4 shadow-2xl space-y-3 ring-1 ring-amber-400/40">
-            {/* Broadcast Banner Header */}
-            <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-                  <Radio className="w-4 h-4 animate-pulse" />
+      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY (ALL CONNECTED CLIENTS WITH HANDOUT THEME SUPPORT) */}
+      {shouldShowBroadcastModal && (() => {
+        const themeCfg = broadcastNote.theme
+          ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
+          : NOTE_THEME_CONFIG.slate;
+
+        return (
+          <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
+            <div className={`w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3 border-2 ring-1 ring-amber-400/40 ${themeCfg.cardClasses}`}>
+              {/* Broadcast Banner Header */}
+              <div className="flex items-center justify-between pb-2 border-b border-inherit/30">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                    <Radio className="w-4 h-4 animate-pulse" />
+                  </div>
+                  <div className="truncate">
+                    <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider block">
+                      Table Broadcast
+                    </span>
+                    <h3 className="text-xs font-bold truncate">
+                      {broadcastNote.title}
+                    </h3>
+                  </div>
                 </div>
-                <div className="truncate">
-                  <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider block">
-                    Table Broadcast
-                  </span>
-                  <h3 className="text-xs font-bold text-neutral-100 font-display truncate">
-                    {broadcastNote.title}
-                  </h3>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const text = `${broadcastNote.title}\n\n${broadcastNote.content}`;
+                      const ok = await copyToClipboard(text);
+                      if (ok) {
+                        setBroadcastCopied(true);
+                        setTimeout(() => setBroadcastCopied(false), 1500);
+                      }
+                    }}
+                    className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                      broadcastCopied
+                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                        : 'bg-black/30 hover:bg-black/50 text-inherit border-white/20 hover:border-amber-400/50'
+                    }`}
+                    title="Copy message to clipboard"
+                  >
+                    {broadcastCopied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Copy Message</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
+                    className="opacity-70 hover:opacity-100 p-1 rounded-md hover:bg-white/10 transition cursor-pointer"
+                    title={isGM ? "Stop Revealing & Close" : "Dismiss"}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    const text = `${broadcastNote.title}\n\n${broadcastNote.content}`;
-                    const ok = await copyToClipboard(text);
-                    if (ok) {
-                      setBroadcastCopied(true);
-                      setTimeout(() => setBroadcastCopied(false), 1500);
-                    }
-                  }}
-                  className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-                    broadcastCopied
-                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
-                      : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-neutral-700 hover:border-amber-400/50'
-                  }`}
-                  title="Copy message to clipboard"
-                >
-                  {broadcastCopied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Copied!</span>
-                    </>
+              {/* Note Text Content with Lightweight Markdown Rendering */}
+              <div className={`p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
+                {renderMarkdown(broadcastNote.content)}
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
+                <span className="text-[10px] opacity-60 font-mono">
+                  Revealed by Game Master (GM)
+                </span>
+
+                <div className="flex items-center gap-2">
+                  {isGM ? (
+                    <button
+                      type="button"
+                      onClick={handleStopRevealing}
+                      className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    >
+                      <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
+                    </button>
                   ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Copy Message</span>
-                    </>
+                    <button
+                      type="button"
+                      onClick={() => setDismissedBroadcastId(broadcastNote.id)}
+                      className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
+                    >
+                      Dismiss / Close
+                    </button>
                   )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
-                  className="text-neutral-400 hover:text-neutral-200 p-1 rounded-md hover:bg-neutral-800 transition cursor-pointer"
-                  title={isGM ? "Stop Revealing & Close" : "Dismiss"}
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Note Text Content */}
-            <div className="p-3 rounded-xl bg-neutral-950/90 border border-neutral-800 text-xs text-neutral-200 font-sans leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200">
-              {broadcastNote.content}
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80">
-              <span className="text-[10px] text-neutral-500 font-mono">
-                Revealed by Game Master
-              </span>
-
-              <div className="flex items-center gap-2">
-                {isGM ? (
-                  <button
-                    type="button"
-                    onClick={handleStopRevealing}
-                    className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer"
-                  >
-                    <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setDismissedBroadcastId(broadcastNote.id)}
-                    className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
-                  >
-                    Dismiss / Close
-                  </button>
-                )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

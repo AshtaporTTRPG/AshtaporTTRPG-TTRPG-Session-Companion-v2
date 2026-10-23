@@ -100,7 +100,7 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     details: [
       'Trigger A: Reduced to 0 HP directly by a Critical Hit.',
       'Trigger B: Taking single-source damage exceeding total maximum HP in one blow.',
-      'Resolution: The DM rolls on the Ashtapor Lingering Injury table (e.g., limp, internal bleeding, scar, severed tendon, cracked ribs).',
+      'Resolution: The GM rolls on the Ashtapor Lingering Injury table (e.g., limp, internal bleeding, scar, severed tendon, cracked ribs).',
       'Healing: Requires targeted magical healing (Lesser/Greater Restoration, Regenerate) or extended downtime rest and medical treatment.',
     ],
   },
@@ -233,11 +233,11 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     actionType: 'special',
     keywords: ['resurrection', 'ritual', 'death', 'soul', 'dc', 'spellcasting', 'secret'],
     summary:
-      'Base DC = 8 + previous deaths. Up to 3 allies make secret checks to DM (Success = -1 DC, Nat 20 = -3 DC). Caster makes final check.',
+      'Base DC = 8 + previous deaths. Up to 3 allies make secret checks to GM (Success = -1 DC, Nat 20 = -3 DC). Caster makes final check.',
     details: [
       'Soul Willingness: The soul must be free and willing to return.',
       'Base DC: Begins at DC 8 + (number of times the creature has previously died).',
-      'Allied Contributions: Up to 3 allies offer heartfelt prayers, sacrifices, relics, or memories to anchor the soul. Each makes a relevant check secretly to the DM:',
+      'Allied Contributions: Up to 3 allies offer heartfelt prayers, sacrifices, relics, or memories to anchor the soul. Each makes a relevant check secretly to the GM:',
       '• Standard Success: -1 to final DC',
       '• Natural 20 Critical: -3 to final DC',
       '• Standard Failure: +1 to final DC',
@@ -293,8 +293,8 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     summary:
       'Contested group rolls at Initiative 20 (Fate Roll: 1d20 Ally vs 1d20 Enemy) and Initiative 10 (Execution Roll).',
     details: [
-      'Initiative 20 — Fate Roll: DM and Player roll contested 1d20 for the high-level battlefield morale and environmental favor.',
-      'Initiative 10 — Execution Roll: DM and Player roll contested 1d20 for unit cohesion, tactics, and commander discipline.',
+      'Initiative 20 — Fate Roll: GM and Player roll contested 1d20 for the high-level battlefield morale and environmental favor.',
+      'Initiative 10 — Execution Roll: GM and Player roll contested 1d20 for unit cohesion, tactics, and commander discipline.',
       'Decisive Advance: Win both Init 20 and Init 10 rolls. Friendly forces punch through enemy lines or capture key objectives.',
       'Stalemate: Win one roll and lose one roll. Chaotic clash, heavy casualties on both sides, lines remain contested.',
       'Decisive Setback: Lose both Init 20 and Init 10 rolls. Friendly lines buckle, forced retreat, or flank collapsed.',
@@ -302,11 +302,13 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
   },
 ];
 
-interface GrimoireProps {
+export interface GrimoireProps {
+  isGM?: boolean;
   isDm?: boolean;
 }
 
-export const Grimoire: React.FC<GrimoireProps> = ({ isDm }) => {
+export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
+  const isGameMaster = isGM !== undefined ? isGM : (isDm ?? false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [openRuleIds, setOpenRuleIds] = useState<Set<string>>(() => new Set(['healing-potions', 'flanking']));

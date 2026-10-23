@@ -11,12 +11,14 @@ import {
   Trash2,
 } from 'lucide-react';
 
-interface LiveCombatFeedProps {
-  isDm: boolean;
+export interface LiveCombatFeedProps {
+  isGM?: boolean;
+  isDm?: boolean;
   playerName?: string;
 }
 
-export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName }) => {
+export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isGM, isDm = false, playerName }) => {
+  const isGameMaster = isGM !== undefined ? isGM : isDm;
   const currentUserName = playerName || liveFeedSync.getPlayerName();
   const [feedItems, setFeedItems] = useState<UnifiedFeedItem[]>(() => liveFeedSync.getFeed());
   const [chatInput, setChatInput] = useState('');
@@ -179,7 +181,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
                     <div className="flex items-center gap-2 text-purple-300">
                       <Dices className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                       <span className="font-medium text-slate-200">
-                        {rollerName} made a secret roll to the DM 🔒
+                        {rollerName} made a secret roll to the GM 🔒
                       </span>
                     </div>
                     <span className="text-[10px] text-slate-500 font-mono shrink-0">{time}</span>
@@ -219,7 +221,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
                       <span>{rollerName}</span>
                       {evt.isDm && (
                         <span className="text-[9px] text-amber-400 font-semibold px-1 py-0.2 rounded bg-amber-950/70 border border-amber-800/60">
-                          DM
+                          GM
                         </span>
                       )}
                       {isGmOnly && (
@@ -554,7 +556,7 @@ export const LiveCombatFeed: React.FC<LiveCombatFeedProps> = ({ isDm, playerName
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-300 flex items-center gap-1">
                     {evt.sender}
-                    {evt.isDm && <span className="text-[9px] text-amber-400 font-semibold">(DM)</span>}
+                    {evt.isDm && <span className="text-[9px] text-amber-400 font-semibold">(GM)</span>}
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono">{time}</span>
                 </div>

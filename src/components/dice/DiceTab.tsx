@@ -46,14 +46,16 @@ import { RollFeedCard } from './RollFeedCard';
 import { CalculatorDock, CalcViewMode } from './CalculatorDock';
 
 export interface DiceTabProps {
-  isDm: boolean;
+  isGM?: boolean;
+  isDm?: boolean;
   playerName?: string;
 }
 
 const INTERACTIVE_DICE: DieType[] = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
 
-export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
-  const rollerName = playerName?.trim() || (isDm ? 'Game Master' : 'Adventurer');
+export const DiceTab: React.FC<DiceTabProps> = ({ isGM, isDm = false, playerName }) => {
+  const isGameMaster = isGM !== undefined ? isGM : isDm;
+  const rollerName = playerName?.trim() || (isGameMaster ? 'Game Master' : 'Adventurer');
 
   // Input & Formula State - Clean-slate formula initialization (eliminates phantom 1d20)
   const [formulaInput, setFormulaInput] = useState<string>('');
@@ -845,7 +847,7 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isDm, playerName }) => {
                     <div className="flex items-center gap-2 text-purple-300">
                       <Dices className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                       <span className="font-medium text-slate-200">
-                        {roll.rollerName || roll.sender} made a secret roll to the DM 🔒
+                        {roll.rollerName || roll.sender} made a secret roll to the GM 🔒
                       </span>
                     </div>
                     <span className="text-[10px] text-slate-500 font-mono shrink-0">

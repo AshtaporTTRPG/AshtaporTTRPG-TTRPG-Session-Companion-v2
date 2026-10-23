@@ -1067,7 +1067,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
         console.warn('Failed to broadcast table_alert:', err);
       }
     }
-    const alertMsg = '⚔️ DM called for Initiative! Check your Roster to join combat.';
+    const alertMsg = '⚔️ GM called for Initiative! Check your Roster to join combat.';
     await broadcastFeedLog(alertMsg, false);
   };
 
@@ -2568,7 +2568,7 @@ export const CombatTracker: React.FC<CombatTrackerProps> = ({ isDm, playerName }
             title="Open Roster to Join Combat"
           >
             <Swords className="w-3.5 h-3.5" />
-            <span>⚔️ DM called for Initiative! Open Roster to join.</span>
+            <span>⚔️ GM called for Initiative! Open Roster to join.</span>
           </button>
         </div>
       )}

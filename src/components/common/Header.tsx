@@ -13,16 +13,19 @@ export type ActiveTab = 'combat' | 'dice' | 'range' | 'geometry' | 'grimoire' | 
 export interface HeaderProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
-  isDm: boolean;
+  isGM?: boolean;
+  isDm?: boolean;
   playerName: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
-  isDm,
+  isGM,
+  isDm = false,
   playerName,
 }) => {
+  const isGameMaster = isGM !== undefined ? isGM : isDm;
   const [soundOn, setSoundOn] = useState(isAudioEnabled());
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [hasSeenHelp, setHasSeenHelp] = useState<boolean>(() => {
@@ -84,18 +87,18 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Ultra-compact GM / PC Role Badge */}
           <div
             className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
-              isDm
+              isGameMaster
                 ? 'bg-amber-950/80 border-amber-600/70 text-amber-300'
                 : 'bg-cyan-950/80 border-cyan-600/70 text-cyan-300'
             }`}
-            title={`Role: ${isDm ? 'Game Master (GM)' : 'Player (PC)'} - ${playerName}`}
+            title={`Role: ${isGameMaster ? 'Game Master (GM)' : 'Player (PC)'} - ${playerName}`}
           >
-            {isDm ? (
+            {isGameMaster ? (
               <Crown className="w-2.5 h-2.5 text-amber-400 shrink-0" />
             ) : (
               <Shield className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
             )}
-            <span>{isDm ? 'GM' : 'PC'}</span>
+            <span>{isGameMaster ? 'GM' : 'PC'}</span>
           </div>
 
           {/* Audio Mute/Unmute Toggle */}
@@ -181,7 +184,7 @@ export const Header: React.FC<HeaderProps> = ({
               ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
               : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
           }`}
-          title="Scoped 3-tier Notes: My Notes, Table Notes, DM Notes"
+          title="Scoped 3-tier Notes: My Notes, Table Notes, GM Notes"
         >
           <span className="text-xs leading-none select-none">📝</span>
           <span className="truncate">Notes</span>
@@ -193,7 +196,7 @@ export const Header: React.FC<HeaderProps> = ({
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
         activeAppTab={activeTab}
-        isGM={isDm}
+        isGM={isGameMaster}
       />
     </header>
   );

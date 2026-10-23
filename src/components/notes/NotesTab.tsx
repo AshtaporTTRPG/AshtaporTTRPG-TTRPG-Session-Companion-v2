@@ -21,6 +21,7 @@ import {
   DmSecretNote,
   BroadcastNotePayload,
   NotesScope,
+  NoteTheme,
   OBR_TABLE_NOTES_KEY,
   OBR_LEGACY_TABLE_NOTES_KEY,
   OBR_BROADCAST_NOTE_KEY,
@@ -193,6 +194,7 @@ function migrateToNoteCards(
         title: item.title || 'Untitled Note',
         category: validCat,
         content: typeof item.content === 'string' ? item.content : '',
+        theme: item.theme,
         isPinned: !!item.isPinned,
         updatedAt: item.updatedAt || new Date().toISOString(),
         createdAt: item.createdAt || new Date().toISOString(),
@@ -255,14 +257,17 @@ function migrateToNoteCards(
   return fallbackDefaults;
 }
 
-interface NotesTabProps {
-  isDm: boolean;
+export interface NotesTabProps {
+  isGM?: boolean;
+  isDm?: boolean;
   playerName?: string;
 }
 
 export type SubTabType = 'myNotes' | 'tableNotes' | 'dmNotes';
 
-export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventurer' }) => {
+export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerName = 'Adventurer' }) => {
+  const isGameMaster = isGM !== undefined ? isGM : isDm;
+
   // 1. Active Sub-Tab State ('myNotes' | 'tableNotes' | 'dmNotes')
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('myNotes');
 
@@ -270,8 +275,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   const [activeReaderNoteId, setActiveReaderNoteId] = useState<string | null>(null);
 
   // Author details
-  const currentRole: 'GM' | 'PLAYER' = isDm ? 'GM' : 'PLAYER';
-  const authorName = playerName || (isDm ? 'Game Master' : 'Player');
+  const currentRole: 'GM' | 'PLAYER' = isGameMaster ? 'GM' : 'PLAYER';
+  const authorName = playerName || (isGameMaster ? 'Game Master' : 'Player');
 
   // Per-sub-tab Search & Category Filter state (retained across sub-tab switches & reader returns)
   const [searchByTab, setSearchByTab] = useState<Record<SubTabType, string>>({
@@ -738,7 +743,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
   const handleStopBroadcast = async () => {
     setActiveBroadcast(null);
     try {
-      if (OBR.isReady) {
+      if (typeof OBR !== 'undefined' && OBR.isReady) {
         await OBR.room.setMetadata({
           [OBR_BROADCAST_NOTE_KEY]: undefined,
           [ROOM_METADATA_KEY]: { activeBroadcast: null } as any,
@@ -760,20 +765,21 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     if (isCurrentlyRevealed) {
       await handleStopBroadcast();
     } else {
-      const payload: BroadcastNotePayload = {
+      const broadcastPayload: BroadcastNotePayload = {
         id: note.id,
         title: note.title,
         content: note.content,
+        theme: note.theme,
         broadcastAt: Date.now(),
       };
 
-      setActiveBroadcast(payload);
+      setActiveBroadcast(broadcastPayload);
 
       try {
-        if (OBR.isReady) {
+        if (typeof OBR !== 'undefined' && OBR.isReady) {
           await OBR.room.setMetadata({
-            [OBR_BROADCAST_NOTE_KEY]: payload,
-            [ROOM_METADATA_KEY]: { activeBroadcast: payload } as any,
+            [OBR_BROADCAST_NOTE_KEY]: broadcastPayload,
+            [ROOM_METADATA_KEY]: { activeBroadcast: broadcastPayload } as any,
           });
         }
       } catch (err) {
@@ -781,10 +787,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       }
 
       try {
-        localStorage.setItem('ashtapor_broadcast_note', JSON.stringify(payload));
+        localStorage.setItem('ashtapor_broadcast_note', JSON.stringify(broadcastPayload));
       } catch {}
       window.dispatchEvent(
-        new CustomEvent('ashtapor-broadcast-note', { detail: payload })
+        new CustomEvent('ashtapor-broadcast-note', { detail: broadcastPayload })
       );
     }
   };
@@ -1044,6 +1050,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         title: sourceNote.title,
         category: (sourceNote.category || 'General') as NoteCategory,
         content: sourceNote.content,
+        theme: sourceNote.theme,
         isPinned: false,
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
@@ -1057,6 +1064,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         title: sourceNote.title,
         category: (sourceNote.category || 'General') as NoteCategory,
         content: sourceNote.content,
+        theme: sourceNote.theme,
         isPinned: false,
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
@@ -1072,6 +1080,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         title: sourceNote.title,
         category: (sourceNote.category || 'General') as NoteCategory,
         content: sourceNote.content,
+        theme: sourceNote.theme,
         isPinned: false,
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
@@ -1085,6 +1094,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         title: sourceNote.title,
         category: (sourceNote.category || 'General') as NoteCategory,
         content: sourceNote.content,
+        theme: sourceNote.theme,
         isPinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -1098,6 +1108,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         title: sourceNote.title,
         category: (sourceNote.category || 'General') as NoteCategory,
         content: sourceNote.content,
+        theme: sourceNote.theme,
         isPinned: false,
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
@@ -1152,6 +1163,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
     category: NoteCategory;
     content: string;
     isPinned: boolean;
+    theme?: NoteTheme;
   }) => {
     if (activeSubTab === 'dmNotes') {
       if (editingNote) {
@@ -1161,6 +1173,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           category: data.category,
           content: data.content,
           isPinned: data.isPinned,
+          theme: data.theme,
           updatedAt: Date.now(),
         };
         handleSaveDmNote(updatedDm);
@@ -1171,6 +1184,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
           category: data.category,
           content: data.content,
           isPinned: data.isPinned,
+          theme: data.theme,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -1188,6 +1202,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
         title: data.title,
         category: data.category,
         content: data.content,
+        theme: data.theme,
         isPinned: data.isPinned,
         updatedAt: new Date().toISOString(),
         createdAt: editingNote?.createdAt || new Date().toISOString(),
@@ -1273,8 +1288,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               </span>
             </button>
 
-            {/* DM Notes Trigger (GM Only) */}
-            {isDm && (
+            {/* GM Notes Trigger (GM Only) */}
+            {isGameMaster && (
               <button
                 type="button"
                 onClick={() => setActiveSubTab('dmNotes')}
@@ -1283,10 +1298,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
                     ? 'text-xs font-bold bg-rose-600 text-white px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
                     : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
                 }
-                title="DM Notes Vault & Broadcast (GM Only)"
+                title="GM Notes Vault & Broadcast (GM Only)"
               >
                 <Lock className="w-3 h-3 mr-1 shrink-0" />
-                <span className="truncate">DM Notes</span>
+                <span className="truncate">GM Notes</span>
                 <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
                   {dmNotes.length}
                 </span>
@@ -1450,7 +1465,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
-              isGM={isDm}
+              isGM={isGameMaster}
               currentVault="myNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'myNotes')}
               onBroadcastNote={handleToggleRevealDmNote}
@@ -1473,14 +1488,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
               currentRole={currentRole}
               currentAuthorName={authorName}
               emptyMessage="No table notes shared yet."
-              emptySubtitle="Any player or DM can add shared quests, clues, or inventory."
+              emptySubtitle="Any player or GM can add shared quests, clues, or inventory."
               hideControls={true}
               externalSearchQuery={searchByTab.tableNotes}
               externalSelectedCategory={categoryByTab.tableNotes}
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
-              isGM={isDm}
+              isGM={isGameMaster}
               currentVault="tableNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
               onBroadcastNote={handleToggleRevealDmNote}
@@ -1488,8 +1503,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
             />
           </div>
 
-          {/* 6. SUB-TAB 3: "DM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
-          {isDm && (
+          {/* 6. SUB-TAB 3: "GM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
+          {isGameMaster && (
             <div className={activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
               <DmNotesVault
                 dmNotes={dmNotes}
@@ -1518,8 +1533,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isDm, playerName = 'Adventur
       {/* 7. UNIFIED CREATE / EDIT NOTE MODAL (GM-Gated Scene & Hook Categories) */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
-        isGM={isDm}
-        isDmSecretNote={activeSubTab === 'dmNotes'}
+        isGM={isGameMaster}
+        isGMSecretNote={activeSubTab === 'dmNotes'}
         editingNote={editingNote}
         defaultCategory={
           activeSelectedCategory !== 'All'

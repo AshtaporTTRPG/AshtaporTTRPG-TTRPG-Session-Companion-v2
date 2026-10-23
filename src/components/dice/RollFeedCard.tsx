@@ -10,15 +10,18 @@ import { DiceRollResult } from '../../types/ttrpg';
 export interface RollFeedCardProps {
   roll: DiceRollResult;
   onReroll: (roll: DiceRollResult, e: React.MouseEvent) => void;
-  isDm: boolean;
+  isGM?: boolean;
+  isDm?: boolean;
   playerName?: string;
 }
 
 export const RollFeedCard: React.FC<RollFeedCardProps> = ({
   roll,
   onReroll,
-  isDm,
+  isGM,
+  isDm = false,
 }) => {
+  const isGameMaster = isGM !== undefined ? isGM : isDm;
   const isGmOnly = roll.visibility === 'gm_only';
   const hasInstances = roll.instances && roll.instances.length > 0;
   const macroName = roll.macroName || (roll.label && !roll.label.includes('1d20') && !roll.label.startsWith('Initiative') ? roll.label : undefined);

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2 } from 'lucide-react';
-import { NoteItem, DmSecretNote, NoteCategory } from '../../types/notes';
+import { NoteItem, DmSecretNote, NoteCategory, NOTE_THEME_CONFIG } from '../../types/notes';
 import { CATEGORY_STYLES } from './NoteCard';
 import { copyToClipboard } from '../../utils/clipboard';
+import { renderMarkdown } from '../../utils/markdownRenderer';
 
 export interface NoteReaderViewProps {
   note: NoteItem | DmSecretNote;
@@ -93,16 +94,18 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     return 'GM';
   }, [note]);
 
+  const themeCfg = note.theme ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate : NOTE_THEME_CONFIG.slate;
+
   return (
-    <div className="flex flex-col h-full bg-slate-950 p-2.5 select-text overflow-hidden rounded-xl border border-slate-800">
+    <div className={`flex flex-col h-full p-2.5 select-text overflow-hidden rounded-xl border ${themeCfg.cardClasses}`}>
       {/* Sticky Utility Header: [ ← Back ] | Title & Badge | [ 📋 Copy ] [ ↗ Transfer ] [ ✏️ Edit ] [ 🗑️ Delete ] */}
-      <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 shrink-0 gap-1.5">
+      <div className="flex items-center justify-between pb-2 mb-2 border-b border-inherit/30 shrink-0 gap-1.5">
         {/* Left: Back Button & Title & Category Pill */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-md transition-colors cursor-pointer shrink-0"
+            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-black/40 hover:bg-black/60 text-inherit border border-white/10 rounded-md transition-colors cursor-pointer shrink-0"
             title="Back to Notes (Esc)"
           >
             <ChevronLeft className="w-4 h-4 text-amber-400" /> Back
@@ -113,7 +116,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
             {cat}
           </span>
           <h2
-            className="text-xs font-bold text-slate-100 truncate min-w-0 flex-1 ml-1"
+            className="text-xs font-bold truncate min-w-0 flex-1 ml-1"
             title={note.title}
           >
             {note.title}
@@ -127,7 +130,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
             type="button"
             onClick={handleCopyFullNote}
             title={copied ? 'Copied to clipboard!' : 'Copy Full Note'}
-            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-900 border border-slate-800 rounded cursor-pointer transition flex items-center gap-1 text-xs"
+            className="p-1.5 text-inherit opacity-80 hover:opacity-100 bg-black/30 hover:bg-black/50 border border-white/10 rounded cursor-pointer transition flex items-center gap-1 text-xs"
           >
             {copied ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -144,14 +147,14 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                 type="button"
                 onClick={() => setIsTransferOpen((prev) => !prev)}
                 title="Transfer note across vaults"
-                className="px-2 py-1 text-xs font-semibold rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 border border-slate-800 transition cursor-pointer flex items-center gap-1"
+                className="px-2 py-1 text-xs font-semibold rounded bg-black/30 hover:bg-black/50 text-inherit opacity-80 hover:opacity-100 border border-white/10 transition cursor-pointer flex items-center gap-1"
               >
                 <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
                 <span className="hidden xs:inline">Transfer</span>
               </button>
 
               {isTransferOpen && (
-                <div className="absolute right-0 top-full mt-1 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-xs font-sans">
+                <div className="absolute right-0 top-full mt-1 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-xs font-sans text-slate-100">
                   {currentVault !== 'tableNotes' && (
                     <button
                       type="button"
@@ -214,7 +217,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
                     >
                       <span>🔒</span>
-                      <span>Move to DM Notes</span>
+                      <span>Move to GM Notes</span>
                     </button>
                   )}
                 </div>
@@ -227,7 +230,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
             type="button"
             onClick={onEdit}
             title="Edit Note"
-            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-900 border border-slate-800 rounded cursor-pointer transition"
+            className="p-1.5 text-inherit opacity-80 hover:opacity-100 bg-black/30 hover:bg-black/50 border border-white/10 rounded cursor-pointer transition"
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
@@ -243,7 +246,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                 }
               }}
               title="Delete Note"
-              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-900 border border-slate-800 rounded cursor-pointer transition"
+              className="p-1.5 text-slate-400 hover:text-rose-400 bg-black/30 hover:bg-black/50 border border-white/10 rounded cursor-pointer transition"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -251,9 +254,9 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
         </div>
       </div>
 
-      {/* Reading Text Body */}
-      <div className="flex-1 overflow-y-auto pr-1 text-sm leading-relaxed text-slate-200 whitespace-pre-wrap font-sans selection:bg-amber-500/30 selection:text-amber-200 p-1">
-        {note.content}
+      {/* Reading Text Body with Lightweight Markdown Rendering */}
+      <div className={`flex-1 overflow-y-auto pr-1 text-sm leading-relaxed p-2.5 rounded-lg border selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
+        {renderMarkdown(note.content)}
       </div>
 
       {/* Footer Meta Strip */}

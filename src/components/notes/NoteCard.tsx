@@ -13,8 +13,9 @@ import {
   ArrowUpRight,
   Radio,
 } from 'lucide-react';
-import { NoteItem, NoteCategory } from '../../types/notes';
+import { NoteItem, NoteCategory, NOTE_THEME_CONFIG } from '../../types/notes';
 import { copyToClipboard } from '../../utils/clipboard';
+import { renderMarkdown } from '../../utils/markdownRenderer';
 
 export const CATEGORY_STYLES: Record<
   NoteCategory,
@@ -170,6 +171,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const wordCount =
     note.content && note.content.trim() ? note.content.trim().split(/\s+/).length : 0;
 
+  const themeCfg = note.theme ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate : NOTE_THEME_CONFIG.slate;
+
   return (
     <div
       className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition-all flex flex-col ${
@@ -177,7 +180,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
           : note.isPinned
           ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-400/30'
-          : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+          : themeCfg.cardClasses
       }`}
     >
       {/* 1. COLLAPSED PRIMARY HEADER ROW (Clean title line with 1-Tap Reader View Access) */}
@@ -203,7 +206,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
           {/* Full Note Title with increased max-width to eliminate premature truncation */}
           <h4
-            className="text-xs font-bold text-slate-100 font-display truncate flex-1 min-w-0 hover:text-amber-300 transition"
+            className="text-xs font-bold font-display truncate flex-1 min-w-0 hover:text-amber-300 transition"
             title={note.title}
           >
             {note.title}
@@ -388,7 +391,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                           className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
                         >
                           <span>🔒</span>
-                          <span>Move to DM Notes</span>
+                          <span>Move to GM Notes</span>
                         </button>
                       )}
                     </div>
@@ -412,7 +415,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </button>
               )}
 
-              {/* Broadcast Reveal Toggle (Strictly GM only on DM Notes) */}
+              {/* Broadcast Reveal Toggle (Strictly GM only on GM Notes) */}
               {isGM && (activeSubTab === 'dm' || currentVault === 'dmNotes') && onToggleReveal && (
                 <button
                   type="button"
@@ -463,11 +466,11 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             </div>
           </div>
 
-          {/* Note Text Content */}
+          {/* Note Text Content with Lightweight Markdown Rendering */}
           <div
-            className="text-xs text-slate-300 font-sans leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/70 shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200"
+            className={`text-xs leading-relaxed max-h-48 overflow-y-auto p-2.5 rounded-lg border shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}
           >
-            {note.content}
+            {renderMarkdown(note.content)}
           </div>
 
           {/* Card Footer */}
