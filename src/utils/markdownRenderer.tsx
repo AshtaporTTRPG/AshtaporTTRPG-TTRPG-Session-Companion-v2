@@ -1,54 +1,236 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+
+export interface MarkdownRenderOptions {
+  onToggleTask?: (lineIndex: number) => void;
+  collapsibleHeaders?: boolean;
+}
 
 /**
- * Lightweight formatting parser for notes.
- * Converts bold (**text**), italics (*text*), task checkboxes (- [ ] / - [x]), and bullet lists (- item).
+ * Toggles a markdown task line at lineIndex between unchecked (- [ ]) and checked (- [x])
  */
-export function renderMarkdown(content: string): React.ReactNode {
+export function toggleMarkdownTask(content: string, lineIndex: number): string {
+  if (!content) return content;
+  const lines = content.split('\n');
+  if (lineIndex < 0 || lineIndex >= lines.length) return content;
+  const line = lines[lineIndex];
+  const match = line.match(/^(\s*-\s*\[)([ xX])(\]\s*.*)$/);
+  if (!match) return content;
+  const currentMark = match[2];
+  const nextMark = currentMark === ' ' ? 'x' : ' ';
+  lines[lineIndex] = `${match[1]}${nextMark}${match[3]}`;
+  return lines.join('\n');
+}
+
+/**
+ * Markdown Viewer Component that supports:
+ * - Interactive task checkboxes
+ * - Collapsible # and ## header sections
+ * - Inline bold (**bold**) and italics (*italic*)
+ * - Bullet lists (- item)
+ */
+export const MarkdownContent: React.FC<{
+  content: string;
+  onToggleTask?: (lineIndex: number) => void;
+  collapsibleHeaders?: boolean;
+}> = ({ content, onToggleTask, collapsibleHeaders = true }) => {
+  const [collapsedHeaders, setCollapsedHeaders] = useState<Record<string, boolean>>({});
+
   if (!content) return null;
 
   const lines = content.split('\n');
+
+  const toggleHeader = (headerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedHeaders((prev) => ({
+      ...prev,
+      [headerId]: !prev[headerId],
+    }));
+  };
+
+  // Pre-calculate which lines belong to which header sections so headers can collapse encounter blocks
+  let currentH1Id: string | null = null;
+  let currentH2Id: string | null = null;
 
   return (
     <div className="space-y-1">
       {lines.map((line, lineIndex) => {
         // Empty line
         if (!line.trim()) {
+          // If inside a collapsed section, hide the blank line
+          if (
+            collapsibleHeaders &&
+            ((currentH1Id && collapsedHeaders[currentH1Id]) ||
+              (currentH2Id && collapsedHeaders[currentH2Id]))
+          ) {
+            return null;
+          }
           return <div key={lineIndex} className="h-2" />;
         }
 
-        // Checkbox Task list item: - [ ] or - [x]
-        const taskMatch = line.match(/^\s*-\s*\[([ xX])\]\s*(.*)$/);
+        // 1. Level 1 Header: # Header
+        const h1Match = line.match(/^#\s+(.*)$/);
+        if (h1Match) {
+          const headerId = `h1-${lineIndex}`;
+          currentH1Id = headerId;
+          currentH2Id = null; // Reset sub-header
+
+          if (!collapsibleHeaders) {
+            return (
+              <div
+                key={lineIndex}
+                className="text-xs md:text-sm font-bold border-b border-inherit/25 pb-0.5 pt-1.5 text-inherit"
+              >
+                {parseInlineFormatting(h1Match[1])}
+              </div>
+            );
+          }
+
+          const isCollapsed = Boolean(collapsedHeaders[headerId]);
+
+          return (
+            <div
+              key={lineIndex}
+              onClick={(e) => toggleHeader(headerId, e)}
+              className="flex items-center gap-1.5 py-1 text-xs md:text-sm font-bold border-b border-inherit/25 cursor-pointer select-none group mt-1.5 mb-1 hover:opacity-85 transition"
+              title={isCollapsed ? 'Click to expand encounter' : 'Click to collapse encounter'}
+            >
+              <button
+                type="button"
+                onClick={(e) => toggleHeader(headerId, e)}
+                className="p-0.5 rounded hover:bg-black/20 text-amber-400 shrink-0 cursor-pointer"
+                title={isCollapsed ? 'Expand section' : 'Collapse section'}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <span className="flex-1 min-w-0 truncate text-inherit">
+                {parseInlineFormatting(h1Match[1])}
+              </span>
+              {isCollapsed && (
+                <span className="text-[10px] font-mono opacity-50 font-normal shrink-0">
+                  (collapsed)
+                </span>
+              )}
+            </div>
+          );
+        }
+
+        // 2. Level 2 Header: ## Sub-Header
+        const h2Match = line.match(/^##\s+(.*)$/);
+        if (h2Match) {
+          const headerId = `h2-${lineIndex}`;
+          currentH2Id = headerId;
+
+          // If parent H1 is collapsed, hide this H2
+          if (collapsibleHeaders && currentH1Id && collapsedHeaders[currentH1Id]) {
+            return null;
+          }
+
+          if (!collapsibleHeaders) {
+            return (
+              <div
+                key={lineIndex}
+                className="text-xs font-semibold pt-1 pb-0.5 text-inherit"
+              >
+                {parseInlineFormatting(h2Match[1])}
+              </div>
+            );
+          }
+
+          const isCollapsed = Boolean(collapsedHeaders[headerId]);
+
+          return (
+            <div
+              key={lineIndex}
+              onClick={(e) => toggleHeader(headerId, e)}
+              className="flex items-center gap-1.5 py-0.5 text-xs font-semibold cursor-pointer select-none group mt-1 mb-0.5 hover:opacity-85 transition pl-1.5"
+              title={isCollapsed ? 'Click to expand section' : 'Click to collapse section'}
+            >
+              <button
+                type="button"
+                onClick={(e) => toggleHeader(headerId, e)}
+                className="p-0.5 rounded hover:bg-black/20 text-amber-400/80 shrink-0 cursor-pointer"
+                title={isCollapsed ? 'Expand sub-section' : 'Collapse sub-section'}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+              </button>
+              <span className="flex-1 min-w-0 truncate text-inherit">
+                {parseInlineFormatting(h2Match[1])}
+              </span>
+              {isCollapsed && (
+                <span className="text-[9px] font-mono opacity-50 font-normal shrink-0">
+                  (collapsed)
+                </span>
+              )}
+            </div>
+          );
+        }
+
+        // Check if content line is hidden under collapsed H1 or H2
+        if (
+          collapsibleHeaders &&
+          ((currentH1Id && collapsedHeaders[currentH1Id]) ||
+            (currentH2Id && collapsedHeaders[currentH2Id]))
+        ) {
+          return null;
+        }
+
+        // 3. Checkbox Task list item: - [ ] or - [x]
+        const taskMatch = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
         if (taskMatch) {
-          const isChecked = taskMatch[1].toLowerCase() === 'x';
-          const taskText = taskMatch[2];
+          const isChecked = taskMatch[2].toLowerCase() === 'x';
+          const taskText = taskMatch[3];
           return (
             <div key={lineIndex} className="flex items-start gap-1.5 my-0.5">
               <input
                 type="checkbox"
-                readOnly
                 checked={isChecked}
-                className="mt-0.5 rounded border-slate-600 bg-slate-900 pointer-events-none w-3.5 h-3.5 shrink-0"
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onToggleTask?.(lineIndex);
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+                className="mt-0.5 rounded border-slate-600 bg-slate-900 cursor-pointer w-3.5 h-3.5 shrink-0 accent-amber-500"
               />
-              <span className={isChecked ? 'line-through opacity-60' : ''}>
+              <span
+                onClick={(e) => {
+                  if (onToggleTask) {
+                    e.stopPropagation();
+                    onToggleTask(lineIndex);
+                  }
+                }}
+                className={`select-text cursor-pointer leading-tight ${
+                  isChecked ? 'line-through opacity-60' : ''
+                }`}
+              >
                 {parseInlineFormatting(taskText)}
               </span>
             </div>
           );
         }
 
-        // Bullet list item: - item or * item
+        // 4. Bullet list item: - item or * item
         const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
         if (bulletMatch) {
           return (
             <div key={lineIndex} className="flex items-start gap-1.5 my-0.5 pl-1">
               <span className="text-amber-400 select-none shrink-0 leading-tight">•</span>
-              <span className="flex-1">{parseInlineFormatting(bulletMatch[1])}</span>
+              <span className="flex-1 leading-relaxed">{parseInlineFormatting(bulletMatch[1])}</span>
             </div>
           );
         }
 
-        // Standard line
+        // 5. Standard text line
         return (
           <div key={lineIndex} className="leading-relaxed">
             {parseInlineFormatting(line)}
@@ -57,16 +239,44 @@ export function renderMarkdown(content: string): React.ReactNode {
       })}
     </div>
   );
+};
+
+/**
+ * Lightweight formatting parser for notes.
+ * Converts bold (**text**), italics (*text*), interactive task checkboxes (- [ ] / - [x]),
+ * bullet lists (- item), and collapsible headers (# / ##).
+ */
+export function renderMarkdown(
+  content: string,
+  optionsOrToggleTask?: ((lineIndex: number) => void) | MarkdownRenderOptions
+): React.ReactNode {
+  if (!content) return null;
+
+  let onToggleTask: ((lineIndex: number) => void) | undefined;
+  let collapsibleHeaders = true;
+
+  if (typeof optionsOrToggleTask === 'function') {
+    onToggleTask = optionsOrToggleTask;
+  } else if (optionsOrToggleTask) {
+    onToggleTask = optionsOrToggleTask.onToggleTask;
+    if (optionsOrToggleTask.collapsibleHeaders !== undefined) {
+      collapsibleHeaders = optionsOrToggleTask.collapsibleHeaders;
+    }
+  }
+
+  return (
+    <MarkdownContent
+      content={content}
+      onToggleTask={onToggleTask}
+      collapsibleHeaders={collapsibleHeaders}
+    />
+  );
 }
 
 /**
  * Inline formatting helper: parses **bold** and *italic*
  */
-function parseInlineFormatting(text: string): React.ReactNode[] {
-  // Regex splitting by bold (**...**) and italic (*...*)
-  // Tokens:
-  // **bold** => group 1
-  // *italic* => group 2
+export function parseInlineFormatting(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   const regex = /(\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
 

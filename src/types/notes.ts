@@ -109,6 +109,8 @@ export const LOCAL_DM_NOTES_KEY = 'ashtapor_dm_secret_notes';
 export const LOCAL_DM_COLLAPSED_KEY = 'ashtapor_dm_notes_collapsed_v1';
 export const LOCAL_COLLAPSED_NOTES_KEY = 'ashtapor_notes_collapsed_v1';
 
+export type NotesSubTab = 'myNotes' | 'tableNotes' | 'gm' | 'dmNotes';
+
 export const NOTE_THEME_CONFIG: Record<
   NoteTheme,
   {
@@ -128,8 +130,8 @@ export const NOTE_THEME_CONFIG: Record<
   },
   parchment: {
     name: 'Parchment',
-    cardClasses: 'bg-[#f4ebd0] border-amber-800/40 text-stone-900 font-serif shadow-amber-950/20',
-    contentClasses: 'bg-amber-100/60 border-amber-800/30 text-stone-900 font-serif',
+    cardClasses: 'bg-[#f4ebd0] border-amber-800/40 text-stone-900 font-serif',
+    contentClasses: 'bg-amber-100/70 border-amber-800/30 text-stone-900 font-serif',
     textClasses: 'text-stone-900 font-serif',
     previewClasses: 'bg-[#f4ebd0] border-amber-800/40 text-stone-900',
   },
@@ -142,7 +144,7 @@ export const NOTE_THEME_CONFIG: Record<
   },
   scroll: {
     name: 'Scroll',
-    cardClasses: 'bg-slate-950 border-indigo-500/60 text-indigo-100 shadow-[0_0_15px_rgba(99,102,241,0.15)] font-sans',
+    cardClasses: 'bg-slate-950 border-indigo-500/60 text-indigo-100 shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     contentClasses: 'bg-indigo-950/40 border-indigo-500/40 text-indigo-100 font-sans',
     textClasses: 'text-indigo-100 font-sans',
     previewClasses: 'bg-slate-950 border-indigo-500 text-indigo-100',

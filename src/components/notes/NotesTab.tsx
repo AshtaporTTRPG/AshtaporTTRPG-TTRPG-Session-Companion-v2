@@ -258,35 +258,38 @@ function migrateToNoteCards(
 }
 
 export interface NotesTabProps {
-  isGM?: boolean;
-  isDm?: boolean;
+  isGM: boolean;
   playerName?: string;
+  isDm?: boolean;
 }
 
-export type SubTabType = 'myNotes' | 'tableNotes' | 'dmNotes';
+export type SubTabType = 'myNotes' | 'tableNotes' | 'gm' | 'dmNotes';
 
-export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerName = 'Adventurer' }) => {
-  const isGameMaster = isGM !== undefined ? isGM : isDm;
+export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Adventurer' }) => {
+  // Standardize role check to use isGM (with fallback for legacy callers)
+  const isGameMaster = isGM !== undefined ? isGM : Boolean(isDm);
 
-  // 1. Active Sub-Tab State ('myNotes' | 'tableNotes' | 'dmNotes')
+  // 1. Active Sub-Tab State ('myNotes' | 'tableNotes' | 'gm')
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('myNotes');
 
   // Reader View State (In-place viewport takeover)
   const [activeReaderNoteId, setActiveReaderNoteId] = useState<string | null>(null);
 
   // Author details
-  const currentRole: 'GM' | 'PLAYER' = isGameMaster ? 'GM' : 'PLAYER';
-  const authorName = playerName || (isGameMaster ? 'Game Master' : 'Player');
+  const currentRole: 'GM' | 'PLAYER' = isGM ? 'GM' : 'PLAYER';
+  const authorName = playerName || (isGM ? 'Game Master' : 'Player');
 
   // Per-sub-tab Search & Category Filter state (retained across sub-tab switches & reader returns)
-  const [searchByTab, setSearchByTab] = useState<Record<SubTabType, string>>({
+  const [searchByTab, setSearchByTab] = useState<Record<string, string>>({
     myNotes: '',
     tableNotes: '',
+    gm: '',
     dmNotes: '',
   });
-  const [categoryByTab, setCategoryByTab] = useState<Record<SubTabType, string>>({
+  const [categoryByTab, setCategoryByTab] = useState<Record<string, string>>({
     myNotes: 'All',
     tableNotes: 'All',
+    gm: 'All',
     dmNotes: 'All',
   });
 
@@ -417,12 +420,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
     }
   }, [activeReaderNoteId, activeReaderNote]);
 
-  // Safety: non-GMs must never access DM Notes
+  // Active sub-tab guard: only redirect to 'tableNotes' or 'myNotes' if (!isGM && (activeSubTab === 'gm' || activeSubTab === 'dmNotes'))
   useEffect(() => {
-    if (!isDm && activeSubTab === 'dmNotes') {
+    if (!isGM && (activeSubTab === 'gm' || (activeSubTab as string) === 'dmNotes')) {
       setActiveSubTab('myNotes');
     }
-  }, [isDm, activeSubTab]);
+  }, [isGM, activeSubTab]);
 
   // Persist My Notes to localStorage
   const saveMyNotes = useCallback((updated: NoteItem[]) => {
@@ -565,68 +568,81 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
 
   // Sync Table Notes with OBR Room Metadata on Mount & Subscription + Mirror to Local Cache & Disaster Shield
   useEffect(() => {
-    if (!OBR.isReady) {
+    if (typeof OBR === 'undefined' || !OBR.isReady) {
       isRoomReadyRef.current = true;
       setIsRoomReady(true);
       return;
     }
 
-    OBR.room
-      .getMetadata()
-      .then((meta) => {
-        isRoomReadyRef.current = true;
-        setIsRoomReady(true);
-        const remoteData = meta[OBR_TABLE_NOTES_KEY] ?? meta[OBR_LEGACY_TABLE_NOTES_KEY];
+    try {
+      OBR.room
+        .getMetadata()
+        .then((meta) => {
+          isRoomReadyRef.current = true;
+          setIsRoomReady(true);
+          const remoteData = meta[OBR_TABLE_NOTES_KEY] ?? meta[OBR_LEGACY_TABLE_NOTES_KEY];
+          if (remoteData !== undefined && remoteData !== null) {
+            const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
+              role: currentRole,
+              name: authorName,
+            }));
+            setTableNotes(loaded);
+
+            if (loadExpandedIdsFromStorage() === null) {
+              setExpandedNoteIds((prev) => {
+                const next = new Set(prev);
+                loaded.forEach((n) => next.add(n.id));
+                persistExpandedIdsToStorage(next);
+                return next;
+              });
+            }
+
+            try {
+              localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
+              localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
+            } catch {}
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not fetch table notes metadata:', err);
+          isRoomReadyRef.current = true;
+          setIsRoomReady(true);
+        });
+    } catch (err) {
+      console.warn('Error reading OBR room metadata:', err);
+      isRoomReadyRef.current = true;
+      setIsRoomReady(true);
+    }
+
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = OBR.room.onMetadataChange((meta) => {
+        const remoteData = meta[OBR_TABLE_NOTES_KEY];
         if (remoteData !== undefined && remoteData !== null) {
           const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
             role: currentRole,
             name: authorName,
           }));
           setTableNotes(loaded);
-
-          if (loadExpandedIdsFromStorage() === null) {
-            setExpandedNoteIds((prev) => {
-              const next = new Set(prev);
-              loaded.forEach((n) => next.add(n.id));
-              persistExpandedIdsToStorage(next);
-              return next;
-            });
-          }
-
           try {
             localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
             localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
           } catch {}
         }
-      })
-      .catch((err) => {
-        console.warn('Could not fetch table notes metadata:', err);
-        isRoomReadyRef.current = true;
-        setIsRoomReady(true);
       });
+    } catch (err) {
+      console.warn('Error subscribing to OBR room metadata:', err);
+    }
 
-    const unsub = OBR.room.onMetadataChange((meta) => {
-      const remoteData = meta[OBR_TABLE_NOTES_KEY];
-      if (remoteData !== undefined && remoteData !== null) {
-        const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
-          role: currentRole,
-          name: authorName,
-        }));
-        setTableNotes(loaded);
-        try {
-          localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
-          localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
-        } catch {}
-      }
-    });
-
-    return () => unsub();
+    return () => {
+      if (unsub) unsub();
+    };
   }, [currentRole, authorName]);
 
   // Debounced Room Sync for Table Notes with Mount Guard
   const triggerDebouncedTableSync = useCallback((notesToSync: NoteItem[]) => {
     // Mount Guard: Never write before initial room metadata has resolved
-    if (OBR.isReady && !isRoomReadyRef.current) {
+    if (typeof OBR !== 'undefined' && OBR.isReady && !isRoomReadyRef.current) {
       console.warn('Blocked table notes write: initial room metadata not yet resolved.');
       return;
     }
@@ -639,7 +655,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
       try {
         localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(notesToSync));
         localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(notesToSync));
-        if (OBR.isReady) {
+        if (typeof OBR !== 'undefined' && OBR.isReady) {
           await OBR.room.setMetadata({
             [OBR_TABLE_NOTES_KEY]: notesToSync,
           });
@@ -808,17 +824,24 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
 
   // Listen for remote OBR broadcast note metadata changes
   useEffect(() => {
-    if (!OBR.isReady) return;
-    const unsub = OBR.room.onMetadataChange((meta) => {
-      const remoteBroadcast = (meta[OBR_BROADCAST_NOTE_KEY] ||
-        (meta[ROOM_METADATA_KEY] as any)?.activeBroadcast) as BroadcastNotePayload | undefined;
-      if (remoteBroadcast && remoteBroadcast.title) {
-        setActiveBroadcast(remoteBroadcast);
-      } else {
-        setActiveBroadcast(null);
-      }
-    });
-    return () => unsub();
+    if (typeof OBR === 'undefined' || !OBR.isReady) return;
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = OBR.room.onMetadataChange((meta) => {
+        const remoteBroadcast = (meta[OBR_BROADCAST_NOTE_KEY] ||
+          (meta[ROOM_METADATA_KEY] as any)?.activeBroadcast) as BroadcastNotePayload | undefined;
+        if (remoteBroadcast && remoteBroadcast.title) {
+          setActiveBroadcast(remoteBroadcast);
+        } else {
+          setActiveBroadcast(null);
+        }
+      });
+    } catch (err) {
+      console.warn('Error subscribing to broadcast metadata:', err);
+    }
+    return () => {
+      if (unsub) unsub();
+    };
   }, []);
 
   // Active sub-tab notes list for category counts
@@ -1165,7 +1188,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
     isPinned: boolean;
     theme?: NoteTheme;
   }) => {
-    if (activeSubTab === 'dmNotes') {
+    if (activeSubTab === 'gm' || activeSubTab === 'dmNotes') {
       if (editingNote) {
         const updatedDm: DmSecretNote = {
           ...(editingNote as DmSecretNote),
@@ -1244,8 +1267,17 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
             else handleDeleteDmNote(activeReaderNote.id);
             setActiveReaderNoteId(null);
           }}
-          isGM={isDm}
-          currentVault={activeSubTab}
+          onSaveNote={(updated) => {
+            if (activeSubTab === 'gm' || activeSubTab === 'dmNotes') {
+              handleSaveDmNote(updated as DmSecretNote);
+            } else if (activeSubTab === 'tableNotes') {
+              handleSaveTableNote(updated as NoteItem);
+            } else {
+              handleSaveMyNote(updated as NoteItem);
+            }
+          }}
+          isGM={isGM}
+          currentVault={activeSubTab === 'gm' ? 'dmNotes' : activeSubTab}
           onTransfer={(action) => handleTransferNote(activeReaderNote.id, action, activeSubTab)}
         />
       ) : (
@@ -1289,12 +1321,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
             </button>
 
             {/* GM Notes Trigger (GM Only) */}
-            {isGameMaster && (
+            {isGM && (
               <button
                 type="button"
-                onClick={() => setActiveSubTab('dmNotes')}
+                onClick={() => setActiveSubTab('gm')}
                 className={
-                  activeSubTab === 'dmNotes'
+                  activeSubTab === 'gm' || activeSubTab === 'dmNotes'
                     ? 'text-xs font-bold bg-rose-600 text-white px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
                     : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
                 }
@@ -1465,7 +1497,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
-              isGM={isGameMaster}
+              isGM={isGM}
               currentVault="myNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'myNotes')}
               onBroadcastNote={handleToggleRevealDmNote}
@@ -1495,7 +1527,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
-              isGM={isGameMaster}
+              isGM={isGM}
               currentVault="tableNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
               onBroadcastNote={handleToggleRevealDmNote}
@@ -1504,8 +1536,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
           </div>
 
           {/* 6. SUB-TAB 3: "GM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
-          {isGameMaster && (
-            <div className={activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+          {isGM && (
+            <div className={activeSubTab === 'gm' || activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
               <DmNotesVault
                 dmNotes={dmNotes}
                 activeBroadcast={activeBroadcast}
@@ -1518,8 +1550,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
                 onExpandAll={handleExpandAllDmNotes}
                 onCollapseAll={handleCollapseAllDmNotes}
                 hideControls={true}
-                externalSearchQuery={searchByTab.dmNotes}
-                externalSelectedCategory={categoryByTab.dmNotes}
+                externalSearchQuery={searchByTab.gm || searchByTab.dmNotes || ''}
+                externalSelectedCategory={categoryByTab.gm || categoryByTab.dmNotes || 'All'}
                 onExternalResetFilters={handleResetActiveFilters}
                 onExternalEditDmNote={handleOpenEditNote}
                 onOpenReader={handleOpenReader}
@@ -1533,8 +1565,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm = false, playerNa
       {/* 7. UNIFIED CREATE / EDIT NOTE MODAL (GM-Gated Scene & Hook Categories) */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
-        isGM={isGameMaster}
-        isGMSecretNote={activeSubTab === 'dmNotes'}
+        isGM={isGM}
+        isGMSecretNote={activeSubTab === 'gm' || activeSubTab === 'dmNotes'}
+        currentVault={activeSubTab === 'gm' ? 'dmNotes' : activeSubTab}
         editingNote={editingNote}
         defaultCategory={
           activeSelectedCategory !== 'All'

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { NoteItem, NoteCategory, NOTE_THEME_CONFIG } from '../../types/notes';
 import { copyToClipboard } from '../../utils/clipboard';
-import { renderMarkdown } from '../../utils/markdownRenderer';
+import { renderMarkdown, toggleMarkdownTask } from '../../utils/markdownRenderer';
 
 export const CATEGORY_STYLES: Record<
   NoteCategory,
@@ -94,6 +94,7 @@ export interface NoteCardProps {
   onTogglePin?: () => void;
   onDelete: () => void;
   onEdit: (e: React.MouseEvent) => void;
+  onSaveNote?: (note: NoteItem) => void;
   onToggleReveal?: () => void;
   onBroadcastNote?: (note: NoteItem) => void;
   onOpenReader?: (id: string) => void;
@@ -111,6 +112,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onTogglePin,
   onDelete,
   onEdit,
+  onSaveNote,
   onToggleReveal,
   onBroadcastNote,
   onOpenReader,
@@ -173,14 +175,26 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
   const themeCfg = note.theme ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate : NOTE_THEME_CONFIG.slate;
 
+  const handleToggleTask = (lineIndex: number) => {
+    const newContent = toggleMarkdownTask(note.content, lineIndex);
+    const updated: NoteItem = {
+      ...note,
+      content: newContent,
+      updatedAt: typeof note.updatedAt === 'number' ? Date.now() : new Date().toISOString(),
+    };
+    if (onSaveNote) {
+      onSaveNote(updated);
+    }
+  };
+
   return (
     <div
-      className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition-all flex flex-col ${
+      className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition-all flex flex-col ${themeCfg.cardClasses} ${
         isRevealed
-          ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
+          ? 'ring-2 ring-amber-400 shadow-md'
           : note.isPinned
-          ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-400/30'
-          : themeCfg.cardClasses
+          ? 'border-amber-500/80 ring-1 ring-amber-400/40 shadow-sm'
+          : ''
       }`}
     >
       {/* 1. COLLAPSED PRIMARY HEADER ROW (Clean title line with 1-Tap Reader View Access) */}
@@ -470,7 +484,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           <div
             className={`text-xs leading-relaxed max-h-48 overflow-y-auto p-2.5 rounded-lg border shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}
           >
-            {renderMarkdown(note.content)}
+            {renderMarkdown(note.content, handleToggleTask)}
           </div>
 
           {/* Card Footer */}

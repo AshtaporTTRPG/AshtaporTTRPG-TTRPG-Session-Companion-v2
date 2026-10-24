@@ -29,7 +29,7 @@ import {
 import { CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './notes/NoteCard';
 import { CreateNoteModal } from './notes/CreateNoteModal';
 import { copyToClipboard } from '../utils/clipboard';
-import { renderMarkdown } from '../utils/markdownRenderer';
+import { renderMarkdown, toggleMarkdownTask } from '../utils/markdownRenderer';
 
 interface DmNotesVaultProps {
   dmNotes: DmSecretNote[];
@@ -212,6 +212,16 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
 
     setIsEditorOpen(false);
     setEditingNote(null);
+  };
+
+  const handleToggleTask = (targetNote: DmSecretNote, lineIndex: number) => {
+    const newContent = toggleMarkdownTask(targetNote.content, lineIndex);
+    const updated: DmSecretNote = {
+      ...targetNote,
+      content: newContent,
+      updatedAt: Date.now(),
+    };
+    onSaveDmNote(updated);
   };
 
   const handleCopy = async (note: DmSecretNote, e: React.MouseEvent) => {
@@ -439,12 +449,12 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
             return (
               <div
                 key={note.id}
-                className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition flex flex-col ${
+                className={`rounded-xl border border-l-[3px] ${catStyle.borderL} transition flex flex-col ${themeCfg.cardClasses} ${
                   isRevealed
-                    ? 'bg-amber-950/30 border-amber-500/80 shadow-md ring-1 ring-amber-400/40'
+                    ? 'ring-2 ring-amber-400 shadow-md'
                     : note.isPinned
-                    ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-400/30'
-                    : themeCfg.cardClasses
+                    ? 'border-amber-500/80 ring-1 ring-amber-400/40 shadow-sm'
+                    : ''
                 }`}
               >
                 {/* Card Header Row */}
@@ -691,7 +701,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
                     <div
                       className={`text-xs leading-relaxed max-h-48 overflow-y-auto p-2.5 rounded-lg border shadow-inner select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}
                     >
-                      {renderMarkdown(note.content)}
+                      {renderMarkdown(note.content, (lineIndex) => handleToggleTask(note, lineIndex))}
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono px-0.5">
@@ -723,6 +733,7 @@ export const DmNotesVault: React.FC<DmNotesVaultProps> = ({
         isOpen={isEditorOpen}
         isGM={true}
         isDmSecretNote={true}
+        currentVault="dmNotes"
         editingNote={editingNote}
         onClose={() => {
           setIsEditorOpen(false);

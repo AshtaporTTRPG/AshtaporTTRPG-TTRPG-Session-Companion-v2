@@ -540,6 +540,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               onTogglePin={() => onTogglePin(note.id)}
               onDelete={() => onDeleteNote(note.id)}
               onEdit={(e) => handleOpenEdit(note, e)}
+              onSaveNote={onSaveNote}
               onOpenReader={onOpenReader}
               isGM={isGM}
               currentVault={currentVault}
@@ -553,8 +554,12 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       {/* Modal: Create or Edit Note (when used standalone) */}
       <CreateNoteModal
         isOpen={isEditorOpen}
-        isGM={currentRole === 'GM'}
+        isGM={isGM}
+        currentVault={currentVault}
         editingNote={editingNote}
+        defaultCategory={
+          selectedCategory !== 'All' ? (selectedCategory as NoteCategory) : 'General'
+        }
         onClose={() => {
           setIsEditorOpen(false);
           setEditingNote(null);

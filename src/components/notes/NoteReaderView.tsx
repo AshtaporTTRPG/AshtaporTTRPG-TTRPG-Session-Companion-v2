@@ -3,13 +3,14 @@ import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2 } from 'lucide-r
 import { NoteItem, DmSecretNote, NoteCategory, NOTE_THEME_CONFIG } from '../../types/notes';
 import { CATEGORY_STYLES } from './NoteCard';
 import { copyToClipboard } from '../../utils/clipboard';
-import { renderMarkdown } from '../../utils/markdownRenderer';
+import { renderMarkdown, toggleMarkdownTask } from '../../utils/markdownRenderer';
 
 export interface NoteReaderViewProps {
   note: NoteItem | DmSecretNote;
   onBack: () => void;
   onEdit: () => void;
   onDelete?: () => void;
+  onSaveNote?: (note: NoteItem | DmSecretNote) => void;
   isGM?: boolean;
   currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
   onTransfer?: (action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
@@ -20,6 +21,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   onBack,
   onEdit,
   onDelete,
+  onSaveNote,
   isGM = false,
   currentVault = 'myNotes',
   onTransfer,
@@ -95,6 +97,18 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   }, [note]);
 
   const themeCfg = note.theme ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate : NOTE_THEME_CONFIG.slate;
+
+  const handleToggleTask = (lineIndex: number) => {
+    const newContent = toggleMarkdownTask(note.content, lineIndex);
+    const updated = {
+      ...note,
+      content: newContent,
+      updatedAt: typeof note.updatedAt === 'number' ? Date.now() : new Date().toISOString(),
+    };
+    if (onSaveNote) {
+      onSaveNote(updated);
+    }
+  };
 
   return (
     <div className={`flex flex-col h-full p-2.5 select-text overflow-hidden rounded-xl border ${themeCfg.cardClasses}`}>
@@ -256,7 +270,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
 
       {/* Reading Text Body with Lightweight Markdown Rendering */}
       <div className={`flex-1 overflow-y-auto pr-1 text-sm leading-relaxed p-2.5 rounded-lg border selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
-        {renderMarkdown(note.content)}
+        {renderMarkdown(note.content, handleToggleTask)}
       </div>
 
       {/* Footer Meta Strip */}
