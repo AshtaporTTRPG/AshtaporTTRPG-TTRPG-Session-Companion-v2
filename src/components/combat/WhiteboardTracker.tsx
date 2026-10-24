@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { WhiteboardCombatant, WhiteboardState } from '../../types/whiteboard';
 
-const WHITEBOARD_KEY = 'ashtapor/whiteboard';
+export const COMBAT_STATE_KEY = 'ashtapor/combat_state';
 
 const DEFAULT_STATE: WhiteboardState = {
   round: 1,
@@ -421,7 +421,10 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
 
 export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = false }) => {
   const [board, setBoard] = useState<WhiteboardState>(DEFAULT_STATE);
+  const boardRef = useRef<WhiteboardState>(DEFAULT_STATE);
+  boardRef.current = board;
   const hasLoadedRoomRef = useRef<boolean>(false);
+  const updateQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // GM Creation Strip Expansion State (directly beneath header cassette)
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
@@ -438,24 +441,36 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       try {
         if (typeof OBR !== 'undefined' && OBR.isReady) {
           const meta = await OBR.room.getMetadata();
-          const existing = meta[WHITEBOARD_KEY] as WhiteboardState | undefined;
+          const existing = (meta[COMBAT_STATE_KEY] || meta['ashtapor/whiteboard']) as WhiteboardState | undefined;
           if (existing && Array.isArray(existing.combatants)) {
+            boardRef.current = existing;
             setBoard(existing);
           }
           hasLoadedRoomRef.current = true;
 
           unsub = OBR.room.onMetadataChange((incomingMeta) => {
-            const live = incomingMeta[WHITEBOARD_KEY] as WhiteboardState | undefined;
-            if (live && Array.isArray(live.combatants)) {
-              setBoard(live);
+            if (COMBAT_STATE_KEY in incomingMeta) {
+              const live = incomingMeta[COMBAT_STATE_KEY] as WhiteboardState | undefined;
+              if (live && Array.isArray(live.combatants)) {
+                boardRef.current = live;
+                setBoard(live);
+              }
+            } else if ('ashtapor/whiteboard' in incomingMeta) {
+              const live = incomingMeta['ashtapor/whiteboard'] as WhiteboardState | undefined;
+              if (live && Array.isArray(live.combatants)) {
+                boardRef.current = live;
+                setBoard(live);
+              }
             }
           });
         } else {
           // Local storage fallback for standalone preview
           try {
-            const cached = localStorage.getItem('ashtapor_whiteboard_state');
+            const cached = localStorage.getItem('ashtapor_combat_state') || localStorage.getItem('ashtapor_whiteboard_state');
             if (cached) {
-              setBoard(JSON.parse(cached));
+              const parsed = JSON.parse(cached);
+              boardRef.current = parsed;
+              setBoard(parsed);
             }
           } catch {}
           hasLoadedRoomRef.current = true;
@@ -504,47 +519,53 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddStripOpen]);
 
-  // 2. Room Metadata Writer
-  const commitBoard = async (newState: WhiteboardState) => {
+  // 2. Room Metadata Writer with Sequential Promise Queuing
+  const commitBoard = (newState: WhiteboardState) => {
+    boardRef.current = newState;
     setBoard(newState);
     try {
-      localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(newState));
+      localStorage.setItem('ashtapor_combat_state', JSON.stringify(newState));
     } catch {}
 
-    try {
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        if (!hasLoadedRoomRef.current) return;
-        await OBR.room.setMetadata({ [WHITEBOARD_KEY]: newState });
-      }
-    } catch (err) {
-      console.error('Failed to commit whiteboard metadata:', err);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      if (!hasLoadedRoomRef.current) return;
+      // Chain onto updateQueueRef so each setMetadata is awaited sequentially and never dropped
+      updateQueueRef.current = updateQueueRef.current
+        .then(async () => {
+          await OBR.room.setMetadata({ [COMBAT_STATE_KEY]: newState });
+        })
+        .catch((err) => {
+          console.error('Failed to commit combat state metadata:', err);
+        });
     }
   };
 
   // 3. GM Controls: Sort, Turn Progression, Rewind, Clear
   const handleSort = () => {
     if (!isGM) return;
-    const sorted = [...board.combatants].sort((a, b) => b.initiative - a.initiative);
-    commitBoard({ ...board, combatants: sorted });
+    const current = boardRef.current;
+    const sorted = [...current.combatants].sort((a, b) => b.initiative - a.initiative);
+    commitBoard({ ...current, combatants: sorted });
   };
 
   const handleNextTurn = () => {
-    if (!isGM || board.combatants.length === 0) return;
-    let nextIndex = board.activeIndex + 1;
-    let nextRound = board.round;
+    const current = boardRef.current;
+    if (!isGM || current.combatants.length === 0) return;
+    let nextIndex = current.activeIndex + 1;
+    let nextRound = current.round;
 
-    if (nextIndex >= board.combatants.length) {
+    if (nextIndex >= current.combatants.length) {
       nextIndex = 0;
       nextRound += 1;
     }
 
     // Skip downed combatants if active ones exist
-    const activeCount = board.combatants.filter((c) => !c.isDowned).length;
+    const activeCount = current.combatants.filter((c) => !c.isDowned).length;
     if (activeCount > 0) {
       let attempts = 0;
-      while (board.combatants[nextIndex]?.isDowned && attempts < board.combatants.length) {
+      while (current.combatants[nextIndex]?.isDowned && attempts < current.combatants.length) {
         nextIndex++;
-        if (nextIndex >= board.combatants.length) {
+        if (nextIndex >= current.combatants.length) {
           nextIndex = 0;
           nextRound += 1;
         }
@@ -552,25 +573,27 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       }
     }
 
-    commitBoard({ ...board, activeIndex: nextIndex, round: nextRound });
+    commitBoard({ ...current, activeIndex: nextIndex, round: nextRound });
   };
 
   const handlePrevTurn = () => {
-    if (!isGM || board.combatants.length === 0) return;
-    let prevIndex = board.activeIndex - 1;
-    let prevRound = board.round;
+    const current = boardRef.current;
+    if (!isGM || current.combatants.length === 0) return;
+    let prevIndex = current.activeIndex - 1;
+    let prevRound = current.round;
 
     if (prevIndex < 0) {
-      prevIndex = board.combatants.length - 1;
+      prevIndex = current.combatants.length - 1;
       prevRound = Math.max(1, prevRound - 1);
     }
 
-    commitBoard({ ...board, activeIndex: prevIndex, round: prevRound });
+    commitBoard({ ...current, activeIndex: prevIndex, round: prevRound });
   };
 
   const handleRewind = () => {
     if (!isGM) return;
-    commitBoard({ ...board, round: 1, activeIndex: 0 });
+    const current = boardRef.current;
+    commitBoard({ ...current, round: 1, activeIndex: 0 });
   };
 
   const handleClearBoard = () => {
@@ -596,8 +619,9 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       isDowned: false,
     };
 
-    const updated = [...board.combatants, newCombatant];
-    commitBoard({ ...board, combatants: updated });
+    const current = boardRef.current;
+    const updated = [...current.combatants, newCombatant];
+    commitBoard({ ...current, combatants: updated });
 
     setNewName('');
     setNewInit('');
@@ -606,64 +630,40 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
   // 5. Update, Duplicate, Delete
   const handleUpdateCombatant = useCallback((id: string, patch: Partial<WhiteboardCombatant>) => {
-    setBoard((prev) => {
-      const updated = prev.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
-      const nextState = { ...prev, combatants: updated };
-      try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady && hasLoadedRoomRef.current) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
-      }
-      return nextState;
-    });
+    const current = boardRef.current;
+    const updated = current.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    commitBoard({ ...current, combatants: updated });
   }, []);
 
   const handleDuplicateCombatant = useCallback((id: string) => {
     if (!isGM) return;
-    setBoard((prev) => {
-      const target = prev.combatants.find((c) => c.id === id);
-      if (!target) return prev;
+    const current = boardRef.current;
+    const target = current.combatants.find((c) => c.id === id);
+    if (!target) return;
 
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-      const clone: WhiteboardCombatant = {
-        ...target,
-        id: newId,
-        name: `${target.name} (Copy)`,
-        conditions: [...target.conditions],
-        isDowned: false,
-      };
+    const clone: WhiteboardCombatant = {
+      ...target,
+      id: newId,
+      name: `${target.name} (Copy)`,
+      conditions: [...target.conditions],
+      isDowned: false,
+    };
 
-      const updated = [...prev.combatants, clone];
-      const nextState = { ...prev, combatants: updated };
-      try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady && hasLoadedRoomRef.current) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
-      }
-      return nextState;
-    });
+    const updated = [...current.combatants, clone];
+    commitBoard({ ...current, combatants: updated });
   }, [isGM]);
 
   const handleDeleteCombatant = useCallback((id: string) => {
     if (!isGM) return;
-    setBoard((prev) => {
-      const updated = prev.combatants.filter((c) => c.id !== id);
-      const newActiveIndex =
-        prev.activeIndex >= updated.length ? Math.max(0, updated.length - 1) : prev.activeIndex;
-      const nextState = { ...prev, combatants: updated, activeIndex: newActiveIndex };
-      try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady && hasLoadedRoomRef.current) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
-      }
-      return nextState;
-    });
+    const current = boardRef.current;
+    const updated = current.combatants.filter((c) => c.id !== id);
+    const newActiveIndex =
+      current.activeIndex >= updated.length ? Math.max(0, updated.length - 1) : current.activeIndex;
+    commitBoard({ ...current, combatants: updated, activeIndex: newActiveIndex });
   }, [isGM]);
 
   // 6. Drag and Drop Reordering (GM Only)
@@ -678,12 +678,13 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     e.preventDefault();
     if (!isGM || draggedIdx === null || draggedIdx === idx) return;
 
-    const list = [...board.combatants];
+    const current = boardRef.current;
+    const list = [...current.combatants];
     const [moved] = list.splice(draggedIdx, 1);
     list.splice(idx, 0, moved);
 
     setDraggedIdx(idx);
-    commitBoard({ ...board, combatants: list });
+    commitBoard({ ...current, combatants: list });
   };
 
   const handleDragEnd = () => {

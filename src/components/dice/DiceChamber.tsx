@@ -73,8 +73,50 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
   const [editingMacro, setEditingMacro] = useState<CustomMacro | null>(null);
   const [isAddMacroOpen, setIsAddMacroOpen] = useState<boolean>(false);
 
-  // Clean initialization: empty array, NO hardcoded mock roll ("GM 5d20 (Dis) + 5")
+  // Clean initialization: empty array, NO hardcoded mock roll
   const [rollFeed, setRollFeed] = useState<RollResult[]>([]);
+
+  // Purge cached ghost dice roll mock data from browser localStorage on mount
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      const keysToCheck = [
+        'ttrpg_ashtapor_feed',
+        'ashtapor_roll_history',
+        'ashtapor_dice_rolls',
+        'ashtapor_dice_feed',
+        'ashtapor_feed',
+      ];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && !keysToCheck.includes(k)) {
+          keysToCheck.push(k);
+        }
+      }
+
+      for (const k of keysToCheck) {
+        const raw = localStorage.getItem(k);
+        if (raw && (raw.includes('5d20 (Dis) + 5') || raw.includes('5d20') && raw.includes('Dis'))) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const cleaned = parsed.filter((item: any) => {
+                const s = JSON.stringify(item);
+                return !s.includes('5d20 (Dis) + 5') && !(s.includes('5d20') && s.includes('Dis') && s.includes('5'));
+              });
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            } else {
+              localStorage.removeItem(k);
+            }
+          } catch {
+            localStorage.removeItem(k);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to purge ghost dice rolls from localStorage:', err);
+    }
+  }, []);
 
   // Real-Time Roll Feed Synchronization via liveFeedSync subscriber
   useEffect(() => {
@@ -89,6 +131,17 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       for (let i = items.length - 1; i >= 0; i--) {
         const item = items[i];
         if (item.type === 'dice' && item.rollDetails && !seenIds.has(item.id)) {
+          // Permanently ignore any ghost roll entry matching 5d20 (Dis) + 5
+          const itemStr = JSON.stringify(item);
+          if (
+            itemStr.includes('5d20 (Dis) + 5') ||
+            (item.rollDetails.count === 5 &&
+              item.rollDetails.advantageMode === 'disadvantage' &&
+              item.rollDetails.modifier === 5)
+          ) {
+            continue;
+          }
+
           seenIds.add(item.id);
           diceRolls.push({
             id: item.id,

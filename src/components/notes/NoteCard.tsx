@@ -250,8 +250,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
         {/* Collapsed Right Micro-Icons: 1-Tap Broadcast + 1-Tap Reader View + Pin */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
-          {/* Direct 1-Click Broadcast Button for GM */}
-          {isGM && (onBroadcastNote || onToggleReveal) && (
+          {/* Direct 1-Click Broadcast Button for GM: Only on Table Notes and GM Notes */}
+          {isGM && currentVault !== 'myNotes' && (onBroadcastNote || onToggleReveal) && (
             <button
               type="button"
               onClick={(e) => {
@@ -434,8 +434,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </button>
               )}
 
-              {/* Broadcast Reveal Toggle for GM */}
-              {isGM && (onBroadcastNote || onToggleReveal) && (
+              {/* Broadcast Reveal Toggle for GM: Only on Table Notes and GM Notes */}
+              {isGM && currentVault !== 'myNotes' && (onBroadcastNote || onToggleReveal) && (
                 <button
                   type="button"
                   onClick={(e) => {

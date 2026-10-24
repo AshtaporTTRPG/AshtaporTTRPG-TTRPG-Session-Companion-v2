@@ -354,8 +354,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return DEFAULT_MY_NOTES;
   });
 
-  // 3. "Table Notes" State (Initialized strictly to empty array [], synced exclusively via OBR Room Metadata)
+  // 3. "Table Notes" State (Disconnected from localStorage; initialized to [] and synced exclusively via OBR Room Metadata)
   const [tableNotes, setTableNotes] = useState<NoteItem[]>([]);
+  const hasLoadedTableNotesRef = useRef<boolean>(false);
 
   // 4. "DM Notes" State (Secret Vault)
   const [dmNotes, setDmNotes] = useState<DmSecretNote[]>(() => {
@@ -565,54 +566,54 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
   // 1. TABLE NOTES REAL-TIME OBR METADATA SYNCHRONIZATION
   useEffect(() => {
-    if (typeof OBR === 'undefined') return;
-
     let unsub: (() => void) | undefined;
     let isMounted = true;
 
-    const setupSync = () => {
-      if (!isMounted || !OBR.isReady) return;
-
-      // 1. Initial Room Fetch
+    const setupSync = async () => {
+      if (!isMounted) return;
       try {
-        OBR.room
-          .getMetadata()
-          .then((meta) => {
-            if (!isMounted) return;
-            const roomNotes = meta[OBR_TABLE_NOTES_KEY] as NoteItem[] | undefined;
-            if (Array.isArray(roomNotes)) {
-              setTableNotes(sanitizeNotesList(roomNotes));
-            }
-          })
-          .catch((err) => {
-            console.warn('Could not fetch room table notes metadata:', err);
-          });
-      } catch (err) {
-        console.warn('Error fetching metadata:', err);
-      }
-
-      // 2. Real-Time Metadata Subscription
-      try {
-        unsub = OBR.room.onMetadataChange((meta) => {
+        if (typeof OBR !== 'undefined' && OBR.isReady) {
+          const meta = await OBR.room.getMetadata();
           if (!isMounted) return;
-          const roomNotes = meta[OBR_TABLE_NOTES_KEY] as NoteItem[] | undefined;
+          const roomNotes = meta['ashtapor/table_notes'] as NoteItem[] | undefined;
           if (Array.isArray(roomNotes)) {
             setTableNotes(sanitizeNotesList(roomNotes));
-          } else if (roomNotes === null || roomNotes === undefined) {
-            setTableNotes([]);
           }
-        });
+          hasLoadedTableNotesRef.current = true;
+          setIsRoomReady(true);
+
+          unsub = OBR.room.onMetadataChange((meta) => {
+            if (!isMounted) return;
+            if ('ashtapor/table_notes' in meta) {
+              const liveNotes = meta['ashtapor/table_notes'] as NoteItem[] | null | undefined;
+              if (Array.isArray(liveNotes)) {
+                setTableNotes(sanitizeNotesList(liveNotes));
+              } else if (liveNotes === null) {
+                setTableNotes([]);
+              }
+            }
+          });
+        } else {
+          hasLoadedTableNotesRef.current = true;
+          setIsRoomReady(true);
+        }
       } catch (err) {
-        console.warn('Error subscribing to onMetadataChange:', err);
+        console.warn('Could not fetch room table notes metadata:', err);
+        hasLoadedTableNotesRef.current = true;
+        setIsRoomReady(true);
       }
     };
 
-    if (OBR.isReady) {
-      setupSync();
-    } else {
-      OBR.onReady(() => {
+    if (typeof OBR !== 'undefined') {
+      if (OBR.isReady) {
         setupSync();
-      });
+      } else {
+        OBR.onReady(() => {
+          setupSync();
+        });
+      }
+    } else {
+      setupSync();
     }
 
     // In standalone preview mode outside Owlbear Rodeo, sync across components via window event
@@ -631,14 +632,20 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     };
   }, []);
 
-  // Persist Table Notes immediately to OBR Room Metadata so all clients sync in real-time
+  // Persist Table Notes immediately to OBR Room Metadata under dedicated key 'ashtapor/table_notes'
   const persistTableNotes = useCallback(async (updatedTableNotes: NoteItem[]) => {
+    // Safety check: never overwrite room metadata with an empty array if existing room notes have not finished loading yet.
+    if (typeof OBR !== 'undefined' && OBR.isReady && !hasLoadedTableNotesRef.current) {
+      console.warn('Blocked table notes write: existing room notes have not finished loading yet.');
+      return;
+    }
+
     setTableNotes(updatedTableNotes);
 
     if (typeof OBR !== 'undefined' && OBR.isReady) {
       try {
         await OBR.room.setMetadata({
-          [OBR_TABLE_NOTES_KEY]: updatedTableNotes,
+          'ashtapor/table_notes': updatedTableNotes,
         });
       } catch (err) {
         console.error('Failed to set table notes room metadata:', err);
@@ -736,7 +743,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
         await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: null,
+          'ashtapor/broadcast_note': null,
         });
       }
     } catch (err) {
@@ -761,11 +768,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
     setActiveBroadcast(payload);
 
-    // 1. Write to Owlbear Room Metadata for all players
+    // 1. Write directly to room metadata under dedicated key 'ashtapor/broadcast_note'
     if (typeof OBR !== 'undefined' && OBR.isReady) {
       try {
         await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: payload,
+          'ashtapor/broadcast_note': payload,
         });
       } catch (err) {
         console.error('Failed to set broadcast metadata:', err);
@@ -816,7 +823,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
           .getMetadata()
           .then((meta) => {
             if (!isMounted) return;
-            const remoteBroadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | null | undefined;
+            const remoteBroadcast = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
             if (remoteBroadcast && remoteBroadcast.title) {
               setActiveBroadcast(remoteBroadcast);
             } else {
@@ -829,11 +836,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       try {
         unsub = OBR.room.onMetadataChange((meta) => {
           if (!isMounted) return;
-          const remoteBroadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | null | undefined;
-          if (remoteBroadcast && remoteBroadcast.title) {
-            setActiveBroadcast(remoteBroadcast);
-          } else {
-            setActiveBroadcast(null);
+          if ('ashtapor/broadcast_note' in meta) {
+            const remoteBroadcast = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
+            if (remoteBroadcast && remoteBroadcast.title) {
+              setActiveBroadcast(remoteBroadcast);
+            } else {
+              setActiveBroadcast(null);
+            }
           }
         });
       } catch (err) {
@@ -1507,7 +1516,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               isGM={isGM}
               currentVault="myNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'myNotes')}
-              onBroadcastNote={handleToggleRevealDmNote}
               activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>
@@ -1537,7 +1545,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               isGM={isGM}
               currentVault="tableNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
-              onBroadcastNote={handleToggleRevealDmNote}
+              onBroadcastNote={isGM ? handleToggleRevealDmNote : undefined}
               activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>

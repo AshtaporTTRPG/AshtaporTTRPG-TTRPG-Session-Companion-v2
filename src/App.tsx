@@ -106,7 +106,7 @@ export default function App() {
         // Fetch initial broadcast note if any
         try {
           const meta = await OBR.room.getMetadata();
-          const broadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
+          const broadcast = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | undefined;
           if (broadcast && broadcast.title) {
             setBroadcastNote(broadcast);
           }
@@ -248,12 +248,15 @@ export default function App() {
   useEffect(() => {
     if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
-      const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | null | undefined;
-      if (live && live.title) {
-        setBroadcastNote(live);
-      } else {
-        setBroadcastNote(null);
-        setDismissedBroadcastId(null);
+      if ('ashtapor/broadcast_note' in meta) {
+        const live = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
+        if (live && live.title) {
+          setBroadcastNote(live);
+          setDismissedBroadcastId(null);
+        } else {
+          setBroadcastNote(null);
+          setDismissedBroadcastId(null);
+        }
       }
     });
     return () => {
@@ -300,7 +303,7 @@ export default function App() {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
         await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: null,
+          'ashtapor/broadcast_note': null,
         });
       }
       try {

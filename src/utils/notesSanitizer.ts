@@ -65,6 +65,22 @@ export function runBootSanitizerOnce(): void {
       }
     }
 
+    // Purge ghost dice roll mock data ('5d20 (Dis) + 5')
+    const feedData = localStorage.getItem('ttrpg_ashtapor_feed');
+    if (feedData && feedData.includes('5d20 (Dis) + 5')) {
+      try {
+        const parsedFeed = JSON.parse(feedData);
+        if (Array.isArray(parsedFeed)) {
+          const cleanedFeed = parsedFeed.filter((item: any) => !JSON.stringify(item).includes('5d20 (Dis) + 5'));
+          localStorage.setItem('ttrpg_ashtapor_feed', JSON.stringify(cleanedFeed));
+        } else {
+          localStorage.removeItem('ttrpg_ashtapor_feed');
+        }
+      } catch {
+        localStorage.removeItem('ttrpg_ashtapor_feed');
+      }
+    }
+
     localStorage.setItem(BOOT_SANITIZED_KEY, 'true');
   } catch (err) {
     console.warn('Boot sanitizer error:', err);
