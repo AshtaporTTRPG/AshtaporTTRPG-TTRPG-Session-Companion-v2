@@ -14,6 +14,7 @@ import {
   Shield,
 } from 'lucide-react';
 import {
+  Note,
   NoteItem,
   NoteCategory,
   NOTE_CATEGORIES,
@@ -34,11 +35,12 @@ import { ROOM_METADATA_KEY } from '../../utils/obrCombatSync';
 import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
 import { DmNotesVault } from '../DmNotesVault';
 import { CreateNoteModal } from './CreateNoteModal';
+import { EditNoteModal } from './EditNoteModal';
 import { NoteReaderView } from './NoteReaderView';
 import { sanitizeNotesList } from '../../utils/notesSanitizer';
 
 // Re-export for App.tsx and external consumers
-export type { BroadcastNotePayload, NotesScope } from '../../types/notes';
+export type { BroadcastNotePayload, NotesScope, Note } from '../../types/notes';
 export { OBR_BROADCAST_NOTE_KEY, OBR_TABLE_NOTES_KEY } from '../../types/notes';
 
 export const LOCAL_EXPANDED_NOTES_KEY = 'ashtapor_notes_expanded_ids';
@@ -261,11 +263,19 @@ export interface NotesTabProps {
   isGM: boolean;
   playerName?: string;
   isDm?: boolean;
+  isReady?: boolean;
 }
 
 export type SubTabType = 'myNotes' | 'tableNotes' | 'gm' | 'dmNotes';
 
-export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Adventurer' }) => {
+export const NotesTab: React.FC<NotesTabProps> = ({
+  isGM,
+  isDm,
+  playerName = 'Adventurer',
+  isReady: propIsReady,
+}) => {
+  const isReady =
+    propIsReady !== undefined ? propIsReady : typeof OBR !== 'undefined' && OBR.isReady;
   // Standardize role check to use isGM (with fallback for legacy callers)
   const isGameMaster = isGM !== undefined ? isGM : Boolean(isDm);
 
@@ -566,152 +576,146 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Ad
     });
   };
 
-  // Sync Table Notes with OBR Room Metadata on Mount & Subscription + Mirror to Local Cache & Disaster Shield
+  // 1. TABLE NOTES REAL-TIME OBR METADATA SYNCHRONIZATION
   useEffect(() => {
-    if (typeof OBR === 'undefined' || !OBR.isReady) {
-      isRoomReadyRef.current = true;
-      setIsRoomReady(true);
-      return;
-    }
+    if (typeof OBR === 'undefined') return;
 
-    try {
-      OBR.room
-        .getMetadata()
-        .then((meta) => {
-          isRoomReadyRef.current = true;
-          setIsRoomReady(true);
-          const remoteData = meta[OBR_TABLE_NOTES_KEY] ?? meta[OBR_LEGACY_TABLE_NOTES_KEY];
-          if (remoteData !== undefined && remoteData !== null) {
-            const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
-              role: currentRole,
-              name: authorName,
-            }));
-            setTableNotes(loaded);
+    let unsub: (() => void) | undefined;
+    let isMounted = true;
 
-            if (loadExpandedIdsFromStorage() === null) {
-              setExpandedNoteIds((prev) => {
-                const next = new Set(prev);
-                loaded.forEach((n) => next.add(n.id));
-                persistExpandedIdsToStorage(next);
-                return next;
-              });
+    const setupSync = () => {
+      if (!isMounted || !OBR.isReady) return;
+
+      // 1. Initial Room Fetch
+      try {
+        OBR.room
+          .getMetadata()
+          .then((meta) => {
+            if (!isMounted) return;
+            const roomNotes = (meta[OBR_TABLE_NOTES_KEY] ??
+              meta[OBR_LEGACY_TABLE_NOTES_KEY] ??
+              meta['com.ashtapor.companion/table-notes']) as NoteItem[] | undefined;
+            if (Array.isArray(roomNotes)) {
+              const loaded = sanitizeNotesList(roomNotes);
+              setTableNotes(loaded);
+              try {
+                localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
+                localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
+              } catch {}
             }
+          })
+          .catch((err) => {
+            console.warn('Could not fetch room table notes metadata:', err);
+          });
+      } catch (err) {
+        console.warn('Error fetching metadata:', err);
+      }
 
+      // 2. Real-Time Metadata Subscription
+      try {
+        unsub = OBR.room.onMetadataChange((meta) => {
+          if (!isMounted) return;
+          const roomNotes = (meta[OBR_TABLE_NOTES_KEY] ??
+            meta[OBR_LEGACY_TABLE_NOTES_KEY] ??
+            meta['com.ashtapor.companion/table-notes']) as NoteItem[] | undefined;
+          if (Array.isArray(roomNotes)) {
+            const loaded = sanitizeNotesList(roomNotes);
+            setTableNotes(loaded);
             try {
               localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
               localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
             } catch {}
           }
-        })
-        .catch((err) => {
-          console.warn('Could not fetch table notes metadata:', err);
-          isRoomReadyRef.current = true;
-          setIsRoomReady(true);
         });
-    } catch (err) {
-      console.warn('Error reading OBR room metadata:', err);
-      isRoomReadyRef.current = true;
-      setIsRoomReady(true);
+      } catch (err) {
+        console.warn('Error subscribing to onMetadataChange:', err);
+      }
+    };
+
+    if (OBR.isReady) {
+      setupSync();
+    } else {
+      OBR.onReady(() => {
+        setupSync();
+      });
     }
 
-    let unsub: (() => void) | undefined;
-    try {
-      unsub = OBR.room.onMetadataChange((meta) => {
-        const remoteData = meta[OBR_TABLE_NOTES_KEY];
-        if (remoteData !== undefined && remoteData !== null) {
-          const loaded = sanitizeNotesList(migrateToNoteCards(remoteData, DEFAULT_TABLE_NOTES, {
-            role: currentRole,
-            name: authorName,
-          }));
-          setTableNotes(loaded);
-          try {
-            localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
-            localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
-          } catch {}
-        }
-      });
-    } catch (err) {
-      console.warn('Error subscribing to OBR room metadata:', err);
-    }
+    // In standalone preview mode outside Owlbear Rodeo, sync across components via window event
+    const handleLocalSync = (e: any) => {
+      const detail = e.detail as NoteItem[] | undefined;
+      if (Array.isArray(detail)) {
+        setTableNotes(detail);
+      }
+    };
+    window.addEventListener('ashtapor-table-notes-sync', handleLocalSync);
 
     return () => {
+      isMounted = false;
       if (unsub) unsub();
+      window.removeEventListener('ashtapor-table-notes-sync', handleLocalSync);
     };
-  }, [currentRole, authorName]);
+  }, [isReady]);
 
-  // Debounced Room Sync for Table Notes with Mount Guard
-  const triggerDebouncedTableSync = useCallback((notesToSync: NoteItem[]) => {
-    // Mount Guard: Never write before initial room metadata has resolved
-    if (typeof OBR !== 'undefined' && OBR.isReady && !isRoomReadyRef.current) {
-      console.warn('Blocked table notes write: initial room metadata not yet resolved.');
-      return;
-    }
+  // Persist Table Notes immediately to OBR Room Metadata so all clients sync in real-time
+  const persistTableNotes = useCallback(async (updatedTableNotes: NoteItem[]) => {
+    setTableNotes(updatedTableNotes);
+    try {
+      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updatedTableNotes));
+      localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(updatedTableNotes));
+    } catch {}
 
-    if (tableDebounceTimerRef.current) {
-      clearTimeout(tableDebounceTimerRef.current);
-    }
-
-    tableDebounceTimerRef.current = setTimeout(async () => {
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
       try {
-        localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(notesToSync));
-        localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(notesToSync));
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          await OBR.room.setMetadata({
-            [OBR_TABLE_NOTES_KEY]: notesToSync,
-          });
-        } else {
-          window.dispatchEvent(
-            new CustomEvent('ashtapor-table-notes-sync', { detail: notesToSync })
-          );
-        }
+        await OBR.room.setMetadata({
+          [OBR_TABLE_NOTES_KEY]: updatedTableNotes,
+        });
       } catch (err) {
-        console.error('Error syncing table notes:', err);
+        console.error('Failed to set table notes room metadata:', err);
       }
-    }, 350);
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('ashtapor-table-notes-sync', { detail: updatedTableNotes })
+      );
+    }
   }, []);
 
-  const handleSaveTableNote = (note: NoteItem) => {
-    const exists = tableNotes.some((n) => n.id === note.id);
-    const updated = exists
-      ? tableNotes.map((n) => (n.id === note.id ? note : n))
-      : [note, ...tableNotes];
-    setTableNotes(updated);
-    try {
-      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updated));
-    } catch {}
+  const handleSaveTableNote = useCallback((note: NoteItem) => {
+    setTableNotes((prev) => {
+      const exists = prev.some((n) => n.id === note.id);
+      const updated = exists ? prev.map((n) => (n.id === note.id ? note : n)) : [note, ...prev];
+      persistTableNotes(updated);
+      return updated;
+    });
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
       return next;
     });
-    triggerDebouncedTableSync(updated);
-  };
+  }, [persistTableNotes]);
 
-  const handleDeleteTableNote = (id: string) => {
-    const updated = tableNotes.filter((n) => n.id !== id);
-    setTableNotes(updated);
-    try {
-      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updated));
-    } catch {}
+  const handleDeleteTableNote = useCallback((id: string) => {
+    setTableNotes((prev) => {
+      const updated = prev.filter((n) => n.id !== id);
+      persistTableNotes(updated);
+      return updated;
+    });
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
       persistExpandedIdsToStorage(next);
       return next;
     });
-    triggerDebouncedTableSync(updated);
-  };
+  }, [persistTableNotes]);
 
-  const handleTogglePinTableNote = (id: string) => {
-    const updated = tableNotes.map((n) =>
-      n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: new Date().toISOString() } : n
-    );
-    setTableNotes(updated);
-    try {
-      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updated));
-    } catch {}
-    triggerDebouncedTableSync(updated);
-  };
+  const handleTogglePinTableNote = useCallback((id: string) => {
+    setTableNotes((prev) => {
+      const updated = prev.map((n) =>
+        n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: new Date().toISOString() } : n
+      );
+      persistTableNotes(updated);
+      return updated;
+    });
+  }, [persistTableNotes]);
 
   // DM Notes State Operations (No independent note.isRevealed flag stored)
   const saveDmNotes = (updated: DmSecretNote[]) => {
@@ -774,6 +778,38 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Ad
     window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
   };
 
+  // 2. GM BROADCAST ROOM METADATA FIX
+  const handleBroadcast = async (note: NoteItem | DmSecretNote) => {
+    const payload: BroadcastNotePayload = {
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      theme: note.theme || 'slate',
+      author: (note as any).author || (note as any).authorName || (isGM ? 'GM' : authorName),
+      timestamp: Date.now(),
+      broadcastAt: Date.now(),
+    };
+
+    setActiveBroadcast(payload);
+
+    // 1. Write to Owlbear Room Metadata for all players
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      try {
+        await OBR.room.setMetadata({
+          [OBR_BROADCAST_NOTE_KEY]: payload,
+        });
+      } catch (err) {
+        console.error('Failed to set broadcast metadata:', err);
+      }
+    }
+
+    // 2. Local fallback dispatch for in-tab feedback and AI Studio preview
+    try {
+      localStorage.setItem('ashtapor_broadcast_note', JSON.stringify(payload));
+    } catch {}
+    window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: payload }));
+  };
+
   // Toggle reveal for any note (derived from activeBroadcast single source of truth)
   const handleToggleRevealDmNote = async (note: DmSecretNote | NoteItem) => {
     const isCurrentlyRevealed = activeBroadcast !== null && activeBroadcast.id === note.id;
@@ -781,33 +817,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Ad
     if (isCurrentlyRevealed) {
       await handleStopBroadcast();
     } else {
-      const broadcastPayload: BroadcastNotePayload = {
-        id: note.id,
-        title: note.title,
-        content: note.content,
-        theme: note.theme,
-        broadcastAt: Date.now(),
-      };
-
-      setActiveBroadcast(broadcastPayload);
-
-      try {
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          await OBR.room.setMetadata({
-            [OBR_BROADCAST_NOTE_KEY]: broadcastPayload,
-            [ROOM_METADATA_KEY]: { activeBroadcast: broadcastPayload } as any,
-          });
-        }
-      } catch (err) {
-        console.error('Failed to broadcast note to room:', err);
-      }
-
-      try {
-        localStorage.setItem('ashtapor_broadcast_note', JSON.stringify(broadcastPayload));
-      } catch {}
-      window.dispatchEvent(
-        new CustomEvent('ashtapor-broadcast-note', { detail: broadcastPayload })
-      );
+      await handleBroadcast(note);
     }
   };
 
@@ -824,22 +834,38 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Ad
 
   // Listen for remote OBR broadcast note metadata changes
   useEffect(() => {
-    if (typeof OBR === 'undefined' || !OBR.isReady) return;
+    if (typeof OBR === 'undefined') return;
     let unsub: (() => void) | undefined;
-    try {
-      unsub = OBR.room.onMetadataChange((meta) => {
-        const remoteBroadcast = (meta[OBR_BROADCAST_NOTE_KEY] ||
-          (meta[ROOM_METADATA_KEY] as any)?.activeBroadcast) as BroadcastNotePayload | undefined;
-        if (remoteBroadcast && remoteBroadcast.title) {
-          setActiveBroadcast(remoteBroadcast);
-        } else {
-          setActiveBroadcast(null);
-        }
+    let isMounted = true;
+
+    const setupBroadcastListener = () => {
+      if (!isMounted || !OBR.isReady) return;
+      try {
+        unsub = OBR.room.onMetadataChange((meta) => {
+          if (!isMounted) return;
+          const remoteBroadcast = (meta[OBR_BROADCAST_NOTE_KEY] ||
+            (meta[ROOM_METADATA_KEY] as any)?.activeBroadcast) as BroadcastNotePayload | undefined;
+          if (remoteBroadcast && remoteBroadcast.title) {
+            setActiveBroadcast(remoteBroadcast);
+          } else {
+            setActiveBroadcast(null);
+          }
+        });
+      } catch (err) {
+        console.warn('Error subscribing to broadcast metadata:', err);
+      }
+    };
+
+    if (OBR.isReady) {
+      setupBroadcastListener();
+    } else {
+      OBR.onReady(() => {
+        setupBroadcastListener();
       });
-    } catch (err) {
-      console.warn('Error subscribing to broadcast metadata:', err);
     }
+
     return () => {
+      isMounted = false;
       if (unsub) unsub();
     };
   }, []);
@@ -1042,11 +1068,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({ isGM, isDm, playerName = 'Ad
   const handleRestoreDisasterBackup = () => {
     setIsMaintenanceMenuOpen(false);
     if (disasterBackupNotes.length === 0) return;
-    setTableNotes(disasterBackupNotes);
-    try {
-      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(disasterBackupNotes));
-    } catch {}
-    triggerDebouncedTableSync(disasterBackupNotes);
+    persistTableNotes(disasterBackupNotes);
   };
 
   // Note Transfer (Move & Copy Across Vaults for Players & GM)

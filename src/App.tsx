@@ -556,7 +556,7 @@ export default function App() {
           <Grimoire isGM={isGM} />
         </div>
         <div className={activeTab === 'notes' ? 'flex flex-col h-full' : 'hidden'}>
-          <NotesTab isGM={isGM} playerName={playerName} />
+          <NotesTab isGM={isGM} playerName={playerName} isReady={isReady} />
         </div>
       </main>
 
@@ -636,7 +636,7 @@ export default function App() {
               {/* Modal Actions */}
               <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
                 <span className="text-[10px] opacity-60 font-mono">
-                  Revealed by Game Master (GM)
+                  {broadcastNote.author ? `Revealed by ${broadcastNote.author}` : 'Revealed by Game Master (GM)'}
                 </span>
 
                 <div className="flex items-center gap-2">

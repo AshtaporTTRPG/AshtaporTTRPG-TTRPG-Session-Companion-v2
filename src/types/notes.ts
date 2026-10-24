@@ -80,12 +80,16 @@ export interface DmSecretNote {
 
 export type GmSecretNote = DmSecretNote;
 
+export type Note = NoteItem;
+
 export interface BroadcastNotePayload {
   id: string;
   title: string;
   content: string;
   theme?: NoteTheme;
-  broadcastAt: number;
+  author?: string;
+  timestamp?: number;
+  broadcastAt?: number;
 }
 
 export type NotesScope =
@@ -98,8 +102,9 @@ export type NotesScope =
   | 'dmNotes'
   | 'gmNotes';
 
-export const OBR_TABLE_NOTES_KEY = 'com.ashtapor.session-companion/table-notes';
-export const OBR_LEGACY_TABLE_NOTES_KEY = 'com.ashtapor.companion/table-notes';
+export const OBR_TABLE_NOTES_KEY = 'ashtapor/table_notes';
+export const OBR_LEGACY_TABLE_NOTES_KEY = 'com.ashtapor.session-companion/table-notes';
+export const OBR_PREV_TABLE_NOTES_KEY = 'com.ashtapor.companion/table-notes';
 export const OBR_BROADCAST_NOTE_KEY = 'com.ashtapor.companion/broadcast-note';
 
 export const LOCAL_MY_NOTES_KEY = 'ashtapor_my_notes';

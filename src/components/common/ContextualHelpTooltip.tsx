@@ -93,17 +93,33 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
           {/* NOTES & BROADCASTS */}
           <section className="space-y-1.5">
             <h3 className="font-bold text-amber-400 text-sm flex items-center gap-1.5">
-              <span>📝</span> Notes & Table Broadcasts
+              <span>📝</span> Notes, Handouts & Broadcasts
             </h3>
-            <ul className="list-disc pl-4 space-y-1 text-slate-300">
+            <ul className="list-disc pl-4 space-y-1.5 text-slate-300">
               <li>
-                <strong>My Notes:</strong> Your private scratchpad stored locally on your device.
+                <strong>My Notes (Private):</strong> Your personal offline scratchpad stored locally on your device for secret goals, inventory, and player reminders.
               </li>
               <li>
-                <strong>Table Notes:</strong> Shared scratchpad that everyone in the room can see and edit collaboratively.
+                <strong>Table Notes (Real-Time Sync):</strong> Shared tabletop notes synchronized instantly across all connected player and GM windows via Owlbear Rodeo room metadata (<code>ashtapor/table_notes</code>). Notes persist across page reloads and incognito sessions so no notes disappear.
               </li>
               <li>
-                <strong>GM Notes (GM Only):</strong> Secret campaign notes with 5 Handout Themes (Slate, Parchment, Tablet, Scroll, Journal) and mini markdown helper toolbar. Click the radio broadcast icon on any note card to project boxed flavor text or clues directly onto all player screens.
+                <strong>Handout Themes (All Players & GM):</strong> Choose from 5 distinct visual presentation styles:
+                <div className="grid grid-cols-1 gap-1 my-1 pl-2 text-[11px] text-slate-300">
+                  <div>• <strong className="text-slate-200">Slate:</strong> Clean, high-contrast dark stone for tactical session logs.</div>
+                  <div>• <strong className="text-amber-200">Parchment:</strong> Weathered historic manuscript with classic serif font for letters and lore.</div>
+                  <div>• <strong className="text-zinc-200">Tablet:</strong> Chiseled monospaced slate with uppercase tracking for ancient ruins and runes.</div>
+                  <div>• <strong className="text-indigo-300">Scroll:</strong> Mystical deep indigo parchment with arcane glow for magical spells and decrees.</div>
+                  <div>• <strong className="text-amber-300">Journal:</strong> Warm leather-bound antique tome with serif typography for character diaries.</div>
+                </div>
+              </li>
+              <li>
+                <strong>Interactive In-Card Checklists:</strong> Use <code>- [ ]</code> syntax to create checklists. Players and GMs can tap checkboxes directly inside note cards to check off quest objectives, clues, and loot distribution on the fly.
+              </li>
+              <li>
+                <strong>GM Notes & Table Broadcasts (((o))):</strong> Secret GM campaign vault. Click the broadcast radio icon (<strong>((o))</strong>) on any GM note to project it across every player's screen in its styled handout theme. The GM has a dedicated 1-click "Stop Revealing & Close" control to dismiss the broadcast for everyone.
+              </li>
+              <li>
+                <strong>Vault Transfers:</strong> Effortlessly copy or move notes between My Notes, Table Notes, and GM Notes using the Transfer menu.
               </li>
             </ul>
           </section>

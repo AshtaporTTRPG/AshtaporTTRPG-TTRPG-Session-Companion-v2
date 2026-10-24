@@ -5,8 +5,9 @@
 
 import React, { useState } from 'react';
 import { Radio, X, EyeOff, Copy, Check } from 'lucide-react';
-import { BroadcastNotePayload } from '../../types/notes';
+import { BroadcastNotePayload, NOTE_THEME_CONFIG } from '../../types/notes';
 import { copyToClipboard } from '../../utils/clipboard';
+import { renderMarkdown } from '../../utils/markdownRenderer';
 
 export interface BroadcastModalProps {
   broadcastNote: BroadcastNotePayload;
@@ -33,11 +34,17 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
     }
   };
 
+  const themeCfg = broadcastNote.theme
+    ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
+    : NOTE_THEME_CONFIG.slate;
+
   return (
     <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
-      <div className="w-full max-w-sm bg-neutral-900 border-2 border-amber-500/80 rounded-2xl p-4 shadow-2xl space-y-3 ring-1 ring-amber-400/40">
+      <div
+        className={`w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3 border-2 ring-1 ring-amber-400/40 transition-colors ${themeCfg.cardClasses}`}
+      >
         {/* Broadcast Banner Header */}
-        <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+        <div className="flex items-center justify-between pb-2 border-b border-inherit/30">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
               <Radio className="w-4 h-4 animate-pulse" />
@@ -46,7 +53,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
               <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider block">
                 Table Broadcast
               </span>
-              <h3 className="text-xs font-bold text-neutral-100 font-display truncate" title={broadcastNote.title}>
+              <h3 className="text-xs font-bold truncate" title={broadcastNote.title}>
                 {broadcastNote.title}
               </h3>
             </div>
@@ -57,7 +64,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
             <button
               type="button"
               onClick={handleCopy}
-              className="px-2 py-1 text-[11px] font-semibold rounded bg-neutral-800 hover:bg-neutral-700 text-amber-300 border border-neutral-700 hover:border-amber-400/50 flex items-center gap-1 transition cursor-pointer"
+              className="px-2 py-1 text-[11px] font-semibold rounded bg-black/30 hover:bg-black/50 text-inherit border border-white/20 hover:border-amber-400/50 flex items-center gap-1 transition cursor-pointer"
               title={copied ? 'Copied to clipboard!' : 'Copy broadcast message to clipboard'}
               aria-label="Copy broadcast message"
             >
@@ -77,7 +84,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
             <button
               type="button"
               onClick={isGM && onStopRevealing ? onStopRevealing : onCloseOrDismiss}
-              className="text-neutral-400 hover:text-neutral-200 p-1 rounded-md hover:bg-neutral-800 transition cursor-pointer"
+              className="opacity-70 hover:opacity-100 p-1 rounded-md hover:bg-white/10 transition cursor-pointer"
               title={isGM ? 'Stop Revealing & Close' : 'Dismiss'}
             >
               <X className="w-4 h-4" />
@@ -85,15 +92,17 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
           </div>
         </div>
 
-        {/* Note Text Content with native text selection */}
-        <div className="select-text cursor-text p-3 rounded-xl bg-neutral-950/90 border border-neutral-800 text-xs text-neutral-200 font-sans leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto selection:bg-amber-500/30 selection:text-amber-200">
-          {broadcastNote.content}
+        {/* Note Text Content with themed styles and markdown rendering */}
+        <div
+          className={`select-text cursor-text p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}
+        >
+          {renderMarkdown(broadcastNote.content)}
         </div>
 
         {/* Modal Actions */}
-        <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80">
-          <span className="text-[10px] text-neutral-500 font-mono">
-            Revealed by Game Master
+        <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
+          <span className="text-[10px] opacity-70 font-mono">
+            {broadcastNote.author ? `Revealed by ${broadcastNote.author}` : 'Revealed by Game Master'}
           </span>
 
           <div className="flex items-center gap-2">
@@ -101,7 +110,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
               <button
                 type="button"
                 onClick={onStopRevealing || onCloseOrDismiss}
-                className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer"
+                className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
               >
                 <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
               </button>

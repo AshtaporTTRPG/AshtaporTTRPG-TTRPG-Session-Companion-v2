@@ -72,46 +72,8 @@ export const DiceTab: React.FC<DiceTabProps> = ({ isGM, isDm = false, playerName
   const [editingMacro, setEditingMacro] = useState<CustomMacro | null>(null);
   const [isAddMacroOpen, setIsAddMacroOpen] = useState<boolean>(false);
 
-  // Dice History Feed State
-  const [rollHistory, setRollHistory] = useState<DiceRollResult[]>(() => {
-    const feed = liveFeedSync.getFeed();
-    const list: DiceRollResult[] = [];
-    for (let i = feed.length - 1; i >= 0; i--) {
-      const item = feed[i];
-      if (item.type === 'dice' && item.rollDetails) {
-        list.push({
-          id: item.id,
-          timestamp: item.timestamp,
-          sender: item.sender,
-          rollerName: item.rollerName || item.rollDetails.rollerName || item.sender,
-          rollerId: item.rollerId || item.rollDetails.rollerId,
-          isDm: !!item.isDm,
-          visibility: (item.rollDetails.visibility as RollVisibility) || 'public',
-          rollType: item.rollDetails.rollType || 'Straight roll',
-          diceType: item.rollDetails.diceType || 'd20',
-          count: item.rollDetails.count || 1,
-          modifier: item.rollDetails.modifier || 0,
-          rolls: item.rollDetails.rolls || [item.rollDetails.total || 0],
-          breakdown: item.rollDetails.breakdown,
-          total: item.rollDetails.total ?? 0,
-          advantageMode: item.rollDetails.advantageMode || 'normal',
-          isCrit: item.rollDetails.isCrit,
-          isFumble: item.rollDetails.isFumble,
-          label: item.rollDetails.label,
-          displayMode: item.rollDetails.displayMode || 'sum',
-          poolBreakdown: item.rollDetails.poolBreakdown,
-          formula: item.rollDetails.formula,
-          individualSummary: item.rollDetails.individualSummary,
-          individualLineItems: item.rollDetails.individualLineItems,
-          pairedRolls: item.rollDetails.pairedRolls,
-          rawRolls: item.rollDetails.rawRolls,
-          instances: item.rollDetails.instances,
-          macroName: item.rollDetails.macroName,
-        });
-      }
-    }
-    return list.slice(0, 40);
-  });
+  // Dice History Feed State - initialized clean with zero ghost rolls
+  const [rollHistory, setRollHistory] = useState<DiceRollResult[]>([]);
 
   // Sync with live feed strictly through liveFeedSync subscriber
   useEffect(() => {
