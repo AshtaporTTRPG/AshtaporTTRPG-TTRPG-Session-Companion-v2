@@ -248,9 +248,11 @@ export default function App() {
   useEffect(() => {
     if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
-      const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
-      setBroadcastNote(live || null);
-      if (!live) {
+      const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | null | undefined;
+      if (live && live.title) {
+        setBroadcastNote(live);
+      } else {
+        setBroadcastNote(null);
         setDismissedBroadcastId(null);
       }
     });
@@ -298,7 +300,7 @@ export default function App() {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
         await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: undefined,
+          [OBR_BROADCAST_NOTE_KEY]: null,
         });
       }
       try {

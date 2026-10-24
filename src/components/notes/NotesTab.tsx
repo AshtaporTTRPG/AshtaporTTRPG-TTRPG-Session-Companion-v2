@@ -354,21 +354,8 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return DEFAULT_MY_NOTES;
   });
 
-  // 3. "Table Notes" State (Offline Cache Hydration First for Resilience)
-  const [tableNotes, setTableNotes] = useState<NoteItem[]>(() => {
-    try {
-      const cached = localStorage.getItem(LOCAL_TABLE_NOTES_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return sanitizeNotesList(migrateToNoteCards(parsed, DEFAULT_TABLE_NOTES, {
-          role: currentRole,
-          name: authorName,
-        }));
-      }
-    } catch {}
-    return DEFAULT_TABLE_NOTES;
-  });
-  const tableDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // 3. "Table Notes" State (Initialized strictly to empty array [], synced exclusively via OBR Room Metadata)
+  const [tableNotes, setTableNotes] = useState<NoteItem[]>([]);
 
   // 4. "DM Notes" State (Secret Vault)
   const [dmNotes, setDmNotes] = useState<DmSecretNote[]>(() => {
@@ -592,16 +579,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({
           .getMetadata()
           .then((meta) => {
             if (!isMounted) return;
-            const roomNotes = (meta[OBR_TABLE_NOTES_KEY] ??
-              meta[OBR_LEGACY_TABLE_NOTES_KEY] ??
-              meta['com.ashtapor.companion/table-notes']) as NoteItem[] | undefined;
+            const roomNotes = meta[OBR_TABLE_NOTES_KEY] as NoteItem[] | undefined;
             if (Array.isArray(roomNotes)) {
-              const loaded = sanitizeNotesList(roomNotes);
-              setTableNotes(loaded);
-              try {
-                localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
-                localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
-              } catch {}
+              setTableNotes(sanitizeNotesList(roomNotes));
             }
           })
           .catch((err) => {
@@ -615,16 +595,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       try {
         unsub = OBR.room.onMetadataChange((meta) => {
           if (!isMounted) return;
-          const roomNotes = (meta[OBR_TABLE_NOTES_KEY] ??
-            meta[OBR_LEGACY_TABLE_NOTES_KEY] ??
-            meta['com.ashtapor.companion/table-notes']) as NoteItem[] | undefined;
+          const roomNotes = meta[OBR_TABLE_NOTES_KEY] as NoteItem[] | undefined;
           if (Array.isArray(roomNotes)) {
-            const loaded = sanitizeNotesList(roomNotes);
-            setTableNotes(loaded);
-            try {
-              localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(loaded));
-              localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(loaded));
-            } catch {}
+            setTableNotes(sanitizeNotesList(roomNotes));
+          } else if (roomNotes === null || roomNotes === undefined) {
+            setTableNotes([]);
           }
         });
       } catch (err) {
@@ -654,15 +629,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       if (unsub) unsub();
       window.removeEventListener('ashtapor-table-notes-sync', handleLocalSync);
     };
-  }, [isReady]);
+  }, []);
 
   // Persist Table Notes immediately to OBR Room Metadata so all clients sync in real-time
   const persistTableNotes = useCallback(async (updatedTableNotes: NoteItem[]) => {
     setTableNotes(updatedTableNotes);
-    try {
-      localStorage.setItem(LOCAL_TABLE_NOTES_KEY, JSON.stringify(updatedTableNotes));
-      localStorage.setItem('ashtapor_table_notes_backup', JSON.stringify(updatedTableNotes));
-    } catch {}
 
     if (typeof OBR !== 'undefined' && OBR.isReady) {
       try {
@@ -765,8 +736,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
         await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: undefined,
-          [ROOM_METADATA_KEY]: { activeBroadcast: null } as any,
+          [OBR_BROADCAST_NOTE_KEY]: null,
         });
       }
     } catch (err) {
@@ -787,7 +757,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       theme: note.theme || 'slate',
       author: (note as any).author || (note as any).authorName || (isGM ? 'GM' : authorName),
       timestamp: Date.now(),
-      broadcastAt: Date.now(),
     };
 
     setActiveBroadcast(payload);
@@ -840,11 +809,27 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
     const setupBroadcastListener = () => {
       if (!isMounted || !OBR.isReady) return;
+
+      // Initial Fetch
+      try {
+        OBR.room
+          .getMetadata()
+          .then((meta) => {
+            if (!isMounted) return;
+            const remoteBroadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | null | undefined;
+            if (remoteBroadcast && remoteBroadcast.title) {
+              setActiveBroadcast(remoteBroadcast);
+            } else {
+              setActiveBroadcast(null);
+            }
+          })
+          .catch(() => {});
+      } catch {}
+
       try {
         unsub = OBR.room.onMetadataChange((meta) => {
           if (!isMounted) return;
-          const remoteBroadcast = (meta[OBR_BROADCAST_NOTE_KEY] ||
-            (meta[ROOM_METADATA_KEY] as any)?.activeBroadcast) as BroadcastNotePayload | undefined;
+          const remoteBroadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | null | undefined;
           if (remoteBroadcast && remoteBroadcast.title) {
             setActiveBroadcast(remoteBroadcast);
           } else {

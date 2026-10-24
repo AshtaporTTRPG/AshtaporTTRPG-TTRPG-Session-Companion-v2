@@ -218,9 +218,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             )}
           </button>
 
-          {/* Full Note Title with increased max-width to eliminate premature truncation */}
+          {/* Full Note Title with theme-consistent font */}
           <h4
-            className="text-xs font-bold font-display truncate flex-1 min-w-0 hover:text-amber-300 transition"
+            className="text-xs font-bold truncate flex-1 min-w-0 hover:text-amber-300 transition"
             title={note.title}
           >
             {note.title}
@@ -250,18 +250,23 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
         {/* Collapsed Right Micro-Icons: 1-Tap Broadcast + 1-Tap Reader View + Pin */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
-          {/* Direct 1-Click Broadcast Button (Strictly GM only on DM Notes) */}
-          {isGM && (activeSubTab === 'dm' || currentVault === 'dmNotes') && (
+          {/* Direct 1-Click Broadcast Button for GM */}
+          {isGM && (onBroadcastNote || onToggleReveal) && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 handleBroadcastNote(note);
               }}
-              title="Broadcast Note to Table"
-              className="p-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition-colors"
+              title={isRevealed ? 'Stop Revealing & Close' : 'Broadcast Note to Table'}
+              aria-label={isRevealed ? 'Stop Revealing & Close' : 'Broadcast Note to Table'}
+              className={`p-1 rounded transition-colors cursor-pointer ${
+                isRevealed
+                  ? 'text-amber-400 bg-amber-950/60 ring-1 ring-amber-400'
+                  : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+              }`}
             >
-              <Radio className="w-3.5 h-3.5" />
+              <Radio className={`w-3.5 h-3.5 ${isRevealed ? 'animate-pulse' : ''}`} />
             </button>
           )}
 
@@ -429,20 +434,20 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </button>
               )}
 
-              {/* Broadcast Reveal Toggle (Strictly GM only on GM Notes) */}
-              {isGM && (activeSubTab === 'dm' || currentVault === 'dmNotes') && onToggleReveal && (
+              {/* Broadcast Reveal Toggle for GM */}
+              {isGM && (onBroadcastNote || onToggleReveal) && (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleReveal();
+                    handleBroadcastNote(note);
                   }}
                   className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer border ${
                     isRevealed
                       ? 'bg-amber-950/80 border-amber-500/80 text-amber-300'
                       : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-300 border-slate-800'
                   }`}
-                  title={isRevealed ? 'Hide from Table' : 'Broadcast to Table'}
+                  title={isRevealed ? 'Stop Revealing & Close' : 'Broadcast to Table'}
                 >
                   {isRevealed ? <Eye className="w-3 h-3 text-amber-400 animate-pulse" /> : <EyeOff className="w-3 h-3" />}
                   <span>{isRevealed ? 'Broadcasting' : 'Broadcast'}</span>

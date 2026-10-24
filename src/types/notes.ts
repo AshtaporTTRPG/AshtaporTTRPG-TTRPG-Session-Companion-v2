@@ -105,7 +105,7 @@ export type NotesScope =
 export const OBR_TABLE_NOTES_KEY = 'ashtapor/table_notes';
 export const OBR_LEGACY_TABLE_NOTES_KEY = 'com.ashtapor.session-companion/table-notes';
 export const OBR_PREV_TABLE_NOTES_KEY = 'com.ashtapor.companion/table-notes';
-export const OBR_BROADCAST_NOTE_KEY = 'com.ashtapor.companion/broadcast-note';
+export const OBR_BROADCAST_NOTE_KEY = 'ashtapor/broadcast_note';
 
 export const LOCAL_MY_NOTES_KEY = 'ashtapor_my_notes';
 export const LOCAL_LEGACY_PLAYER_NOTES_KEY = 'ashtapor_player_notes_v2';

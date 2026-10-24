@@ -110,9 +110,9 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/70 backdrop-blur-sm animate-fadeIn">
       <div
-        className={`w-full max-w-2xl h-full max-h-[88vh] rounded-xl shadow-2xl flex flex-col overflow-hidden border transition-colors ${currentThemeConfig.cardClasses}`}
+        className={`w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden rounded-xl shadow-2xl border transition-colors ${currentThemeConfig.cardClasses}`}
       >
-        <form onSubmit={handleSubmit} className="flex flex-col h-full min-h-0">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Header (Shrink-0) */}
           <div className="shrink-0 p-3 border-b border-inherit/30 flex items-center gap-2">
             <input
