@@ -244,25 +244,59 @@ export default function App() {
     return () => unsub();
   }, [isReady, isGM, playerName]);
 
-  // Listen for remote OBR Broadcast Note updates
+  // Listen for remote OBR Broadcast Note updates using the exact WhiteboardTracker pattern
   useEffect(() => {
-    if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
-    const unsub = OBR.room.onMetadataChange((meta) => {
-      if ('ashtapor/broadcast_note' in meta) {
-        const live = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
-        if (live && live.title) {
-          setBroadcastNote(live);
-          setDismissedBroadcastId(null);
-        } else {
-          setBroadcastNote(null);
-          setDismissedBroadcastId(null);
+    let unsub: (() => void) | undefined;
+
+    const attach = async () => {
+      try {
+        if (typeof OBR !== 'undefined' && OBR.isReady) {
+          const meta = await OBR.room.getMetadata();
+          if ('ashtapor/broadcast_note' in meta) {
+            const live = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
+            if (live && live.title) {
+              setBroadcastNote(live);
+              setDismissedBroadcastId(null);
+            } else {
+              setBroadcastNote(null);
+              setDismissedBroadcastId(null);
+            }
+          }
+
+          unsub = OBR.room.onMetadataChange((incomingMeta) => {
+            if ('ashtapor/broadcast_note' in incomingMeta) {
+              const live = incomingMeta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
+              if (live && live.title) {
+                setBroadcastNote(live);
+                setDismissedBroadcastId(null);
+              } else {
+                setBroadcastNote(null);
+                setDismissedBroadcastId(null);
+              }
+            }
+          });
         }
+      } catch (err) {
+        console.warn('Could not initialize broadcast room sync in App:', err);
       }
-    });
+    };
+
+    if (typeof OBR !== 'undefined') {
+      if (OBR.isReady) {
+        attach();
+      } else {
+        OBR.onReady(() => {
+          attach();
+        });
+      }
+    } else {
+      attach();
+    }
+
     return () => {
       if (unsub) unsub();
     };
-  }, [isReady]);
+  }, []);
 
   // Standalone event listener fallback for local browser testing
   useEffect(() => {
