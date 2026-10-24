@@ -19,6 +19,8 @@ import { renderMarkdown } from './utils/markdownRenderer';
 import { liveFeedSync } from './utils/liveFeedSync';
 import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip';
 
+const BROADCAST_KEY = 'ashtapor/broadcast_note';
+
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
 
 export default function App() {
@@ -42,15 +44,8 @@ export default function App() {
     }
   });
 
-  // Table Broadcast Note State (revealed by GM to entire table)
-  const [broadcastNote, setBroadcastNote] = useState<BroadcastNotePayload | null>(() => {
-    try {
-      const cached = localStorage.getItem('ashtapor_broadcast_note');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return null;
-  });
-  const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
+  // Table Broadcast Note State
+  const [broadcastNote, setBroadcastNote] = useState<any>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
   // Table-wide Alert State (e.g. DM Called for Initiative)
@@ -102,15 +97,6 @@ export default function App() {
         isGmRef.current = isGmRole;
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
-
-        // Fetch initial broadcast note if any
-        try {
-          const meta = await OBR.room.getMetadata();
-          const broadcast = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | undefined;
-          if (broadcast && broadcast.title) {
-            setBroadcastNote(broadcast);
-          }
-        } catch {}
 
         setIsReady(true);
       } catch (err) {
@@ -244,74 +230,22 @@ export default function App() {
     return () => unsub();
   }, [isReady, isGM, playerName]);
 
-  // Listen for remote OBR Broadcast Note updates using the exact WhiteboardTracker pattern
+  // Table Broadcast Note room synchronization via OBR SDK
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
-    const attach = async () => {
-      try {
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          const meta = await OBR.room.getMetadata();
-          if ('ashtapor/broadcast_note' in meta) {
-            const live = meta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
-            if (live && live.title) {
-              setBroadcastNote(live);
-              setDismissedBroadcastId(null);
-            } else {
-              setBroadcastNote(null);
-              setDismissedBroadcastId(null);
-            }
-          }
-
-          unsub = OBR.room.onMetadataChange((incomingMeta) => {
-            if ('ashtapor/broadcast_note' in incomingMeta) {
-              const live = incomingMeta['ashtapor/broadcast_note'] as BroadcastNotePayload | null | undefined;
-              if (live && live.title) {
-                setBroadcastNote(live);
-                setDismissedBroadcastId(null);
-              } else {
-                setBroadcastNote(null);
-                setDismissedBroadcastId(null);
-              }
-            }
-          });
-        }
-      } catch (err) {
-        console.warn('Could not initialize broadcast room sync in App:', err);
-      }
-    };
-
-    if (typeof OBR !== 'undefined') {
-      if (OBR.isReady) {
-        attach();
-      } else {
-        OBR.onReady(() => {
-          attach();
-        });
-      }
-    } else {
-      attach();
-    }
+    OBR.onReady(() => {
+      OBR.room.getMetadata().then((meta) => {
+        setBroadcastNote(meta?.[BROADCAST_KEY] || null);
+      });
+      unsub = OBR.room.onMetadataChange((meta) => {
+        setBroadcastNote(meta?.[BROADCAST_KEY] || null);
+      });
+    });
 
     return () => {
       if (unsub) unsub();
     };
-  }, []);
-
-  // Standalone event listener fallback for local browser testing
-  useEffect(() => {
-    const handleLocalBroadcast = (e: any) => {
-      const detail = e.detail as BroadcastNotePayload | null;
-      if (detail && detail.title) {
-        setBroadcastNote(detail);
-        setDismissedBroadcastId(null);
-      } else {
-        setBroadcastNote(null);
-        setDismissedBroadcastId(null);
-      }
-    };
-    window.addEventListener('ashtapor-broadcast-note', handleLocalBroadcast);
-    return () => window.removeEventListener('ashtapor-broadcast-note', handleLocalBroadcast);
   }, []);
 
   // Audio Toggle Handler
@@ -332,29 +266,13 @@ export default function App() {
     }
   };
 
-  // Stop broadcasting note (GM Action) - 1-Click Broadcast Teardown
+  // When the close / "Stop Revealing & Close" button is clicked:
   const handleStopRevealing = async () => {
-    try {
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        await OBR.room.setMetadata({
-          'ashtapor/broadcast_note': null,
-        });
-      }
-      try {
-        localStorage.removeItem('ashtapor_broadcast_note');
-      } catch {}
-      window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
-
-      setBroadcastNote(null);
-      setDismissedBroadcastId(null);
-    } catch (err) {
-      console.error('Error stopping broadcast:', err);
-      setBroadcastNote(null);
-      setDismissedBroadcastId(null);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({ [BROADCAST_KEY]: null });
     }
+    setBroadcastNote(null);
   };
-
-  const shouldShowBroadcastModal = broadcastNote && dismissedBroadcastId !== broadcastNote.id;
 
   // Fallback loader if OBR is not yet ready (sized to expanded 820px height)
   if (!isReady) {
@@ -599,11 +517,12 @@ export default function App() {
         </div>
       </main>
 
-      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY (ALL CONNECTED CLIENTS WITH HANDOUT THEME SUPPORT) */}
-      {shouldShowBroadcastModal && (() => {
-        const themeCfg = broadcastNote.theme
-          ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
-          : NOTE_THEME_CONFIG.slate;
+      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY */}
+      {broadcastNote !== null && (() => {
+        const themeCfg =
+          broadcastNote.theme && (NOTE_THEME_CONFIG as Record<string, any>)[broadcastNote.theme]
+            ? (NOTE_THEME_CONFIG as Record<string, any>)[broadcastNote.theme]
+            : NOTE_THEME_CONFIG.slate;
 
         return (
           <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
@@ -658,9 +577,9 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
+                    onClick={handleStopRevealing}
                     className="opacity-70 hover:opacity-100 p-1 rounded-md hover:bg-white/10 transition cursor-pointer"
-                    title={isGM ? "Stop Revealing & Close" : "Dismiss"}
+                    title={isGM ? "Stop Revealing & Close" : "Close"}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -669,7 +588,7 @@ export default function App() {
 
               {/* Note Text Content with Lightweight Markdown Rendering */}
               <div className={`p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
-                {renderMarkdown(broadcastNote.content)}
+                {renderMarkdown(broadcastNote.content || '')}
               </div>
 
               {/* Modal Actions */}
@@ -679,23 +598,13 @@ export default function App() {
                 </span>
 
                 <div className="flex items-center gap-2">
-                  {isGM ? (
-                    <button
-                      type="button"
-                      onClick={handleStopRevealing}
-                      className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDismissedBroadcastId(broadcastNote.id)}
-                      className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
-                    >
-                      Dismiss / Close
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleStopRevealing}
+                    className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                  >
+                    <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
+                  </button>
                 </div>
               </div>
             </div>

@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { WhiteboardCombatant, WhiteboardState } from '../../types/whiteboard';
 
-export const COMBAT_STATE_KEY = 'ashtapor/combat_state';
+export const COMBAT_KEY = 'ashtapor/combat_state';
+export const COMBAT_STATE_KEY = COMBAT_KEY;
 
 const DEFAULT_STATE: WhiteboardState = {
   round: 1,
@@ -339,7 +340,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
                       onClick={() => setIsTagPickerOpen(false)}
                       className="text-slate-500 hover:text-slate-300"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
@@ -384,7 +385,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
                       onClick={() => handleAddTag(customTag)}
                       className="p-1 bg-amber-500 text-slate-950 rounded hover:bg-amber-400 active:scale-95 cursor-pointer"
                     >
-                      <Plus className="w-3 h-3" />
+                      <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -420,11 +421,16 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
 };
 
 export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = false }) => {
-  const [board, setBoard] = useState<WhiteboardState>(DEFAULT_STATE);
-  const boardRef = useRef<WhiteboardState>(DEFAULT_STATE);
-  boardRef.current = board;
-  const hasLoadedRoomRef = useRef<boolean>(false);
-  const updateQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [combatants, setCombatants] = useState<WhiteboardCombatant[]>([]);
+  const [currentRound, setCurrentRound] = useState<number>(1);
+  const [activeIndex, setActiveIndex] = useState<number>(0);
+
+  const combatantsRef = useRef(combatants);
+  combatantsRef.current = combatants;
+  const currentRoundRef = useRef(currentRound);
+  currentRoundRef.current = currentRound;
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
 
   // GM Creation Strip Expansion State (directly beneath header cassette)
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
@@ -437,61 +443,26 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
-    const attach = async () => {
-      try {
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          const meta = await OBR.room.getMetadata();
-          const existing = (meta[COMBAT_STATE_KEY] || meta['ashtapor/whiteboard']) as WhiteboardState | undefined;
-          if (existing && Array.isArray(existing.combatants)) {
-            boardRef.current = existing;
-            setBoard(existing);
-          }
-          hasLoadedRoomRef.current = true;
-
-          unsub = OBR.room.onMetadataChange((incomingMeta) => {
-            if (COMBAT_STATE_KEY in incomingMeta) {
-              const live = incomingMeta[COMBAT_STATE_KEY] as WhiteboardState | undefined;
-              if (live && Array.isArray(live.combatants)) {
-                boardRef.current = live;
-                setBoard(live);
-              }
-            } else if ('ashtapor/whiteboard' in incomingMeta) {
-              const live = incomingMeta['ashtapor/whiteboard'] as WhiteboardState | undefined;
-              if (live && Array.isArray(live.combatants)) {
-                boardRef.current = live;
-                setBoard(live);
-              }
-            }
-          });
-        } else {
-          // Local storage fallback for standalone preview
-          try {
-            const cached = localStorage.getItem('ashtapor_combat_state') || localStorage.getItem('ashtapor_whiteboard_state');
-            if (cached) {
-              const parsed = JSON.parse(cached);
-              boardRef.current = parsed;
-              setBoard(parsed);
-            }
-          } catch {}
-          hasLoadedRoomRef.current = true;
+    OBR.onReady(() => {
+      OBR.room.getMetadata().then((meta) => {
+        const metaRecord = meta as Record<string, any>;
+        if (metaRecord && metaRecord[COMBAT_KEY]) {
+          setCombatants(metaRecord[COMBAT_KEY].combatants || []);
+          if (metaRecord[COMBAT_KEY].currentRound !== undefined) setCurrentRound(metaRecord[COMBAT_KEY].currentRound);
+          else if (metaRecord[COMBAT_KEY].round !== undefined) setCurrentRound(metaRecord[COMBAT_KEY].round);
+          if (metaRecord[COMBAT_KEY].activeIndex !== undefined) setActiveIndex(metaRecord[COMBAT_KEY].activeIndex);
         }
-      } catch (err) {
-        console.warn('Could not initialize whiteboard room sync:', err);
-        hasLoadedRoomRef.current = true;
-      }
-    };
+      });
 
-    if (typeof OBR !== 'undefined') {
-      if (OBR.isReady) {
-        attach();
-      } else {
-        OBR.onReady(() => {
-          attach();
-        });
-      }
-    } else {
-      attach();
-    }
+      unsub = OBR.room.onMetadataChange((meta) => {
+        const metaRecord = meta as Record<string, any>;
+        if (metaRecord && metaRecord[COMBAT_KEY] && Array.isArray(metaRecord[COMBAT_KEY].combatants)) {
+          setCombatants(metaRecord[COMBAT_KEY].combatants);
+          if (metaRecord[COMBAT_KEY].currentRound !== undefined) setCurrentRound(metaRecord[COMBAT_KEY].currentRound);
+          if (metaRecord[COMBAT_KEY].activeIndex !== undefined) setActiveIndex(metaRecord[COMBAT_KEY].activeIndex);
+        }
+      });
+    });
 
     return () => {
       if (unsub) unsub();
@@ -519,53 +490,35 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddStripOpen]);
 
-  // 2. Room Metadata Writer with Sequential Promise Queuing
-  const commitBoard = (newState: WhiteboardState) => {
-    boardRef.current = newState;
-    setBoard(newState);
-    try {
-      localStorage.setItem('ashtapor_combat_state', JSON.stringify(newState));
-    } catch {}
-
+  // 3. GM Controls: Sort, Turn Progression, Rewind, Clear
+  const handleSort = async () => {
+    if (!isGM) return;
+    const sorted = [...combatantsRef.current].sort((a, b) => b.initiative - a.initiative);
+    setCombatants(sorted);
     if (typeof OBR !== 'undefined' && OBR.isReady) {
-      if (!hasLoadedRoomRef.current) return;
-      // Chain onto updateQueueRef so each setMetadata is awaited sequentially and never dropped
-      updateQueueRef.current = updateQueueRef.current
-        .then(async () => {
-          await OBR.room.setMetadata({ [COMBAT_STATE_KEY]: newState });
-        })
-        .catch((err) => {
-          console.error('Failed to commit combat state metadata:', err);
-        });
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: sorted, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
+      });
     }
   };
 
-  // 3. GM Controls: Sort, Turn Progression, Rewind, Clear
-  const handleSort = () => {
-    if (!isGM) return;
-    const current = boardRef.current;
-    const sorted = [...current.combatants].sort((a, b) => b.initiative - a.initiative);
-    commitBoard({ ...current, combatants: sorted });
-  };
+  const handleNextTurn = async () => {
+    if (!isGM || combatantsRef.current.length === 0) return;
+    let nextIndex = activeIndexRef.current + 1;
+    let nextRound = currentRoundRef.current;
 
-  const handleNextTurn = () => {
-    const current = boardRef.current;
-    if (!isGM || current.combatants.length === 0) return;
-    let nextIndex = current.activeIndex + 1;
-    let nextRound = current.round;
-
-    if (nextIndex >= current.combatants.length) {
+    if (nextIndex >= combatantsRef.current.length) {
       nextIndex = 0;
       nextRound += 1;
     }
 
     // Skip downed combatants if active ones exist
-    const activeCount = current.combatants.filter((c) => !c.isDowned).length;
+    const activeCount = combatantsRef.current.filter((c) => !c.isDowned).length;
     if (activeCount > 0) {
       let attempts = 0;
-      while (current.combatants[nextIndex]?.isDowned && attempts < current.combatants.length) {
+      while (combatantsRef.current[nextIndex]?.isDowned && attempts < combatantsRef.current.length) {
         nextIndex++;
-        if (nextIndex >= current.combatants.length) {
+        if (nextIndex >= combatantsRef.current.length) {
           nextIndex = 0;
           nextRound += 1;
         }
@@ -573,38 +526,61 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       }
     }
 
-    commitBoard({ ...current, activeIndex: nextIndex, round: nextRound });
+    setActiveIndex(nextIndex);
+    setCurrentRound(nextRound);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: combatantsRef.current, currentRound: nextRound, activeIndex: nextIndex }
+      });
+    }
   };
 
-  const handlePrevTurn = () => {
-    const current = boardRef.current;
-    if (!isGM || current.combatants.length === 0) return;
-    let prevIndex = current.activeIndex - 1;
-    let prevRound = current.round;
+  const handlePrevTurn = async () => {
+    if (!isGM || combatantsRef.current.length === 0) return;
+    let prevIndex = activeIndexRef.current - 1;
+    let prevRound = currentRoundRef.current;
 
     if (prevIndex < 0) {
-      prevIndex = current.combatants.length - 1;
+      prevIndex = combatantsRef.current.length - 1;
       prevRound = Math.max(1, prevRound - 1);
     }
 
-    commitBoard({ ...current, activeIndex: prevIndex, round: prevRound });
+    setActiveIndex(prevIndex);
+    setCurrentRound(prevRound);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: combatantsRef.current, currentRound: prevRound, activeIndex: prevIndex }
+      });
+    }
   };
 
-  const handleRewind = () => {
+  const handleRewind = async () => {
     if (!isGM) return;
-    const current = boardRef.current;
-    commitBoard({ ...current, round: 1, activeIndex: 0 });
+    setActiveIndex(0);
+    setCurrentRound(1);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: combatantsRef.current, currentRound: 1, activeIndex: 0 }
+      });
+    }
   };
 
-  const handleClearBoard = () => {
+  const handleClearBoard = async () => {
     if (!isGM) return;
     if (window.confirm('Clear all combatants from the Whiteboard?')) {
-      commitBoard(DEFAULT_STATE);
+      setCombatants([]);
+      setCurrentRound(1);
+      setActiveIndex(0);
+      if (typeof OBR !== 'undefined' && OBR.isReady) {
+        await OBR.room.setMetadata({
+          [COMBAT_KEY]: { combatants: [], currentRound: 1, activeIndex: 0 }
+        });
+      }
     }
   };
 
   // 4. Add Combatant from Top Strip (GM Only)
-  const handleConfirmAddCombatant = (e?: React.FormEvent) => {
+  const handleConfirmAddCombatant = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isGM) return;
     if (!newName.trim()) return;
@@ -619,9 +595,13 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       isDowned: false,
     };
 
-    const current = boardRef.current;
-    const updated = [...current.combatants, newCombatant];
-    commitBoard({ ...current, combatants: updated });
+    const updatedCombatants = [...combatantsRef.current, newCombatant];
+    setCombatants(updatedCombatants);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
+      });
+    }
 
     setNewName('');
     setNewInit('');
@@ -629,16 +609,19 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   };
 
   // 5. Update, Duplicate, Delete
-  const handleUpdateCombatant = useCallback((id: string, patch: Partial<WhiteboardCombatant>) => {
-    const current = boardRef.current;
-    const updated = current.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
-    commitBoard({ ...current, combatants: updated });
+  const handleUpdateCombatant = useCallback(async (id: string, patch: Partial<WhiteboardCombatant>) => {
+    const updatedCombatants = combatantsRef.current.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    setCombatants(updatedCombatants);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
+      });
+    }
   }, []);
 
-  const handleDuplicateCombatant = useCallback((id: string) => {
+  const handleDuplicateCombatant = useCallback(async (id: string) => {
     if (!isGM) return;
-    const current = boardRef.current;
-    const target = current.combatants.find((c) => c.id === id);
+    const target = combatantsRef.current.find((c) => c.id === id);
     if (!target) return;
 
     const newId = typeof crypto !== 'undefined' && crypto.randomUUID
@@ -653,17 +636,27 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       isDowned: false,
     };
 
-    const updated = [...current.combatants, clone];
-    commitBoard({ ...current, combatants: updated });
+    const updatedCombatants = [...combatantsRef.current, clone];
+    setCombatants(updatedCombatants);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
+      });
+    }
   }, [isGM]);
 
-  const handleDeleteCombatant = useCallback((id: string) => {
+  const handleDeleteCombatant = useCallback(async (id: string) => {
     if (!isGM) return;
-    const current = boardRef.current;
-    const updated = current.combatants.filter((c) => c.id !== id);
-    const newActiveIndex =
-      current.activeIndex >= updated.length ? Math.max(0, updated.length - 1) : current.activeIndex;
-    commitBoard({ ...current, combatants: updated, activeIndex: newActiveIndex });
+    const updatedCombatants = combatantsRef.current.filter((c) => c.id !== id);
+    const nextActiveIndex =
+      activeIndexRef.current >= updatedCombatants.length ? Math.max(0, updatedCombatants.length - 1) : activeIndexRef.current;
+    setCombatants(updatedCombatants);
+    setActiveIndex(nextActiveIndex);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: nextActiveIndex }
+      });
+    }
   }, [isGM]);
 
   // 6. Drag and Drop Reordering (GM Only)
@@ -674,24 +667,29 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     setDraggedIdx(idx);
   };
 
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
+  const handleDragOver = async (e: React.DragEvent, idx: number) => {
     e.preventDefault();
     if (!isGM || draggedIdx === null || draggedIdx === idx) return;
 
-    const current = boardRef.current;
-    const list = [...current.combatants];
+    const list = [...combatantsRef.current];
     const [moved] = list.splice(draggedIdx, 1);
     list.splice(idx, 0, moved);
 
     setDraggedIdx(idx);
-    commitBoard({ ...current, combatants: list });
+    const updatedCombatants = list;
+    setCombatants(updatedCombatants);
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
+      });
+    }
   };
 
   const handleDragEnd = () => {
     setDraggedIdx(null);
   };
 
-  const currentCombatant = board.combatants[board.activeIndex];
+  const currentCombatant = combatants[activeIndex];
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-950 text-slate-100 select-text">
@@ -700,7 +698,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
         {/* Left: Round badge & Active turn */}
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded shrink-0">
-            R{board.round}
+            R{currentRound}
           </span>
           <span className="text-xs font-semibold text-slate-300 truncate max-w-[140px]">
             {currentCombatant ? `Turn: ${currentCombatant.name}` : 'No Combatants'}
@@ -766,7 +764,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
               </div>
 
               {/* Reset/Clear board if combatants exist */}
-              {board.combatants.length > 0 && (
+              {combatants.length > 0 && (
                 <button
                   type="button"
                   onClick={handleClearBoard}
@@ -843,7 +841,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
       {/* 3. COMBATANT TILES LIST (High Density: Reclaims vertical real estate, fits 8–10 combatants) */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
-        {board.combatants.length === 0 ? (
+        {combatants.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs text-center p-4">
             <p className="font-semibold text-slate-400">Battle Board is empty.</p>
             <p className="mt-1 text-[11px] text-slate-500">
@@ -853,11 +851,11 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
             </p>
           </div>
         ) : (
-          board.combatants.map((c, idx) => (
+          combatants.map((c, idx) => (
             <CombatantRow
               key={c.id}
               combatant={c}
-              isActive={idx === board.activeIndex}
+              isActive={idx === activeIndex}
               isGM={isGM}
               idx={idx}
               onUpdate={handleUpdateCombatant}
