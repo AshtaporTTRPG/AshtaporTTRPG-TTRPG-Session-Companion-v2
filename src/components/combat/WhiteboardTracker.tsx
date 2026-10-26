@@ -397,8 +397,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
 
-  const obrReadyRef = useRef(false);
-
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newInit, setNewInit] = useState('');
@@ -440,30 +438,24 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     }
   }, []);
 
+  // Robust mount: No isMounted blocker; fetches immediately and attaches live listener
   useEffect(() => {
     let unsub: (() => void) | undefined;
-    let isMounted = true;
 
     OBR.onReady(async () => {
-      if (!isMounted) return;
-      obrReadyRef.current = true;
-
       try {
         const initialMeta = await OBR.room.getMetadata();
-        if (!isMounted) return;
         syncFromMetadata(initialMeta);
       } catch (e) {
         console.warn('Failed to load initial combat metadata:', e);
       }
 
       unsub = OBR.room.onMetadataChange((meta) => {
-        if (!isMounted) return;
         syncFromMetadata(meta);
       });
     });
 
     return () => {
-      isMounted = false;
       if (unsub) unsub();
     };
   }, [syncFromMetadata]);
