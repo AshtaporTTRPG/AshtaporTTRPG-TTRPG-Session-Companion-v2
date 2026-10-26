@@ -44,13 +44,6 @@ interface CombatantRowProps {
   onDragEnd?: () => void;
 }
 
-/**
- * Combatant Tile Row with Race-Condition-Free Buffered PC Edits (Option B)
- * - Local useState scratchpad for Name, Note, Init.
- * - Keystrokes update only local state.
- * - Commits to Owlbear room metadata only on onBlur or Enter.
- * - Atomic actions (downed skull, color change, tag click, duplicate, delete) commit immediately.
- */
 const CombatantRow: React.FC<CombatantRowProps> = ({
   combatant,
   isActive,
@@ -63,21 +56,17 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
   onDragOver,
   onDragEnd,
 }) => {
-  // Buffered local scratchpads for text fields
   const [localName, setLocalName] = useState(combatant.name);
   const [localInit, setLocalInit] = useState(String(combatant.initiative));
   const [localNote, setLocalNote] = useState(combatant.note || '');
 
-  // Tag popover state
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
   const [customTag, setCustomTag] = useState('');
 
-  // Track whether inputs are currently focused to prevent remote overwrites while user is actively typing
   const isNameFocusedRef = useRef(false);
   const isInitFocusedRef = useRef(false);
   const isNoteFocusedRef = useRef(false);
 
-  // Sync from props if not focused
   useEffect(() => {
     if (!isNameFocusedRef.current) {
       setLocalName(combatant.name);
@@ -96,7 +85,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
     }
   }, [combatant.note]);
 
-  // Name commit handler
   const commitName = useCallback(() => {
     const trimmed = localName.trim();
     if (trimmed && trimmed !== combatant.name) {
@@ -106,7 +94,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
     }
   }, [localName, combatant.name, combatant.id, onUpdate]);
 
-  // Init commit handler
   const commitInit = useCallback(() => {
     const parsed = parseFloat(localInit);
     const valid = isNaN(parsed) ? 0 : parsed;
@@ -115,7 +102,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
     }
   }, [localInit, combatant.initiative, combatant.id, onUpdate]);
 
-  // Note commit handler
   const commitNote = useCallback(() => {
     const trimmed = localNote.trim();
     const existing = combatant.note || '';
@@ -124,7 +110,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
     }
   }, [localNote, combatant.note, combatant.id, onUpdate]);
 
-  // Atomic tag add
   const handleAddTag = (tag: string) => {
     const trimmed = tag.trim();
     if (!trimmed || combatant.conditions.includes(trimmed)) return;
@@ -135,15 +120,12 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
     setIsTagPickerOpen(false);
   };
 
-  // Atomic tag remove
   const handleRemoveTag = (tagIndex: number) => {
     onUpdate(combatant.id, {
       conditions: combatant.conditions.filter((_, i) => i !== tagIndex),
     });
   };
 
-  // Check if Row 2 should render:
-  // Render Row 2 ONLY if the combatant has active tags, non-empty note, or tag picker is currently open
   const hasActiveTags = combatant.conditions.length > 0;
   const hasNote = Boolean(combatant.note && combatant.note.trim());
   const shouldRenderRow2 = hasActiveTags || hasNote || isTagPickerOpen;
@@ -164,11 +146,8 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
         borderLeftColor: combatant.color || '#3B82F6',
       }}
     >
-      {/* ROW 1 (Standard): [Drag Handle] [Init Pill] [Name Field] [Active Tag Badges] [Color Dot] [Downed Skull Toggle] [GM Controls] */}
       <div className="flex items-center justify-between gap-1.5 py-1 px-2 min-h-[36px]">
-        {/* Left cluster: Drag handle, Init Pill, Name input, Active Tag Badges */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {/* GM Drag Handle */}
           {isGM && (
             <span
               className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-300 shrink-0"
@@ -178,7 +157,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             </span>
           )}
 
-          {/* Initiative Pill (Buffered - commits on blur / Enter) */}
           <input
             type="number"
             value={localInit}
@@ -199,7 +177,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             title="Initiative Score (saves on Blur / Enter)"
           />
 
-          {/* Combatant Name (Buffered - smooth keystrokes, commits on blur / Enter) */}
           <input
             type="text"
             value={localName}
@@ -222,7 +199,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             title="Combatant Name (saves on Blur / Enter)"
           />
 
-          {/* Compact Active Tag Badges on Row 1 when not expanded, or quick tag button if empty */}
           {!shouldRenderRow2 && (
             <button
               type="button"
@@ -236,9 +212,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
           )}
         </div>
 
-        {/* Right cluster: Color Dot, Downed Skull Toggle, GM Controls (Duplicate, Delete) */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Color Dot Swatch (commits immediately on change) */}
           <label
             className="relative w-4 h-4 rounded-full cursor-pointer border border-white/30 shadow-sm hover:scale-110 transition-transform shrink-0 flex items-center justify-center"
             style={{ backgroundColor: combatant.color || '#3B82F6' }}
@@ -252,7 +226,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             />
           </label>
 
-          {/* Downed Skull Toggle (atomic action - commits immediately) */}
           <button
             type="button"
             onClick={() => onUpdate(combatant.id, { isDowned: !combatant.isDowned })}
@@ -266,10 +239,8 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             <Skull className="w-3.5 h-3.5" />
           </button>
 
-          {/* GM Controls: Duplicate & Delete (strictly GM only) */}
           {isGM && (
             <>
-              {/* Duplicate Combatant Action (GM Only) */}
               <button
                 type="button"
                 onClick={() => onDuplicate(combatant.id)}
@@ -279,7 +250,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
                 <Copy className="w-3.5 h-3.5" />
               </button>
 
-              {/* Delete Combatant Action (GM Only) */}
               <button
                 type="button"
                 onClick={() => onDelete(combatant.id)}
@@ -293,10 +263,8 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
         </div>
       </div>
 
-      {/* ROW 2 (Conditional): Only rendered if combatant has active tags, non-empty note, or tag picker is open */}
       {shouldRenderRow2 && (
         <div className="flex flex-wrap items-center gap-1.5 px-2 pb-1.5 pt-0.5 border-t border-slate-800/60 text-xs">
-          {/* Active Condition Tags */}
           {combatant.conditions.map((tag, tIdx) => (
             <span
               key={`${tag}-${tIdx}`}
@@ -314,7 +282,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             </span>
           ))}
 
-          {/* + Tag Popover Button */}
           <div className="relative">
             <button
               type="button"
@@ -325,7 +292,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
               <span>Tag</span>
             </button>
 
-            {/* Tag Picker Popover Dropdown */}
             {isTagPickerOpen && (
               <>
                 <div
@@ -393,7 +359,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             )}
           </div>
 
-          {/* Buffered Freeform Note Scratchpad */}
           <input
             type="text"
             placeholder="+ note (e.g. AC 15, Resist Fire)..."
@@ -432,44 +397,70 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
 
-  // GM Creation Strip Expansion State (directly beneath header cassette)
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newInit, setNewInit] = useState('');
   const [newColor, setNewColor] = useState('#3B82F6');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Initial Mount & Live Room Sync
+  // Helper to sync state while supporting both 'round' and 'currentRound' symmetrically
+  const syncFromMetadata = useCallback((meta: any) => {
+    const raw = meta?.[COMBAT_KEY];
+    if (!raw) return;
+
+    if (Array.isArray(raw.combatants)) {
+      setCombatants(raw.combatants);
+    }
+    const roundVal = raw.currentRound !== undefined ? raw.currentRound : raw.round;
+    if (typeof roundVal === 'number') {
+      setCurrentRound(roundVal);
+    }
+    if (typeof raw.activeIndex === 'number') {
+      setActiveIndex(raw.activeIndex);
+    }
+  }, []);
+
+  // Centralized writer ensuring both 'round' and 'currentRound' are populated
+  const commitCombatState = useCallback(async (
+    newCombatants: WhiteboardCombatant[],
+    round: number,
+    activeIdx: number
+  ) => {
+    if (typeof OBR === 'undefined' || !OBR.isReady) return;
+    await OBR.room.setMetadata({
+      [COMBAT_KEY]: {
+        combatants: newCombatants,
+        round,
+        currentRound: round,
+        activeIndex: activeIdx,
+      },
+    });
+  }, []);
+
+  // 1. Lifecycle-safe mount & Room Sync
   useEffect(() => {
     let unsub: (() => void) | undefined;
+    let isMounted = true;
 
-    OBR.onReady(() => {
-      OBR.room.getMetadata().then((meta) => {
-        const metaRecord = meta as Record<string, any>;
-        if (metaRecord && metaRecord[COMBAT_KEY]) {
-          setCombatants(metaRecord[COMBAT_KEY].combatants || []);
-          if (metaRecord[COMBAT_KEY].currentRound !== undefined) setCurrentRound(metaRecord[COMBAT_KEY].currentRound);
-          else if (metaRecord[COMBAT_KEY].round !== undefined) setCurrentRound(metaRecord[COMBAT_KEY].round);
-          if (metaRecord[COMBAT_KEY].activeIndex !== undefined) setActiveIndex(metaRecord[COMBAT_KEY].activeIndex);
-        }
-      });
+    OBR.onReady(async () => {
+      if (!isMounted) return;
+
+      const initialMeta = await OBR.room.getMetadata();
+      if (!isMounted) return;
+      syncFromMetadata(initialMeta);
 
       unsub = OBR.room.onMetadataChange((meta) => {
-        const metaRecord = meta as Record<string, any>;
-        if (metaRecord && metaRecord[COMBAT_KEY] && Array.isArray(metaRecord[COMBAT_KEY].combatants)) {
-          setCombatants(metaRecord[COMBAT_KEY].combatants);
-          if (metaRecord[COMBAT_KEY].currentRound !== undefined) setCurrentRound(metaRecord[COMBAT_KEY].currentRound);
-          if (metaRecord[COMBAT_KEY].activeIndex !== undefined) setActiveIndex(metaRecord[COMBAT_KEY].activeIndex);
-        }
+        if (!isMounted) return;
+        syncFromMetadata(meta);
       });
     });
 
     return () => {
+      isMounted = false;
       if (unsub) unsub();
     };
-  }, []);
+  }, [syncFromMetadata]);
 
-  // Autofocus name input when add strip expands
   useEffect(() => {
     if (isAddStripOpen) {
       setTimeout(() => {
@@ -478,7 +469,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     }
   }, [isAddStripOpen]);
 
-  // Keyboard shortcut: Escape collapses creation strip
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isAddStripOpen) {
@@ -490,16 +480,12 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddStripOpen]);
 
-  // 3. GM Controls: Sort, Turn Progression, Rewind, Clear
+  // Turn management (GM only)
   const handleSort = async () => {
     if (!isGM) return;
     const sorted = [...combatantsRef.current].sort((a, b) => b.initiative - a.initiative);
     setCombatants(sorted);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: sorted, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
-      });
-    }
+    await commitCombatState(sorted, currentRoundRef.current, activeIndexRef.current);
   };
 
   const handleNextTurn = async () => {
@@ -512,7 +498,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       nextRound += 1;
     }
 
-    // Skip downed combatants if active ones exist
     const activeCount = combatantsRef.current.filter((c) => !c.isDowned).length;
     if (activeCount > 0) {
       let attempts = 0;
@@ -528,11 +513,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
     setActiveIndex(nextIndex);
     setCurrentRound(nextRound);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: combatantsRef.current, currentRound: nextRound, activeIndex: nextIndex }
-      });
-    }
+    await commitCombatState(combatantsRef.current, nextRound, nextIndex);
   };
 
   const handlePrevTurn = async () => {
@@ -547,22 +528,14 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
     setActiveIndex(prevIndex);
     setCurrentRound(prevRound);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: combatantsRef.current, currentRound: prevRound, activeIndex: prevIndex }
-      });
-    }
+    await commitCombatState(combatantsRef.current, prevRound, prevIndex);
   };
 
   const handleRewind = async () => {
     if (!isGM) return;
     setActiveIndex(0);
     setCurrentRound(1);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: combatantsRef.current, currentRound: 1, activeIndex: 0 }
-      });
-    }
+    await commitCombatState(combatantsRef.current, 1, 0);
   };
 
   const handleClearBoard = async () => {
@@ -571,23 +544,19 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       setCombatants([]);
       setCurrentRound(1);
       setActiveIndex(0);
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        await OBR.room.setMetadata({
-          [COMBAT_KEY]: { combatants: [], currentRound: 1, activeIndex: 0 }
-        });
-      }
+      await commitCombatState([], 1, 0);
     }
   };
 
-  // 4. Add Combatant from Top Strip (GM Only)
   const handleConfirmAddCombatant = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!isGM) return;
-    if (!newName.trim()) return;
+    if (!isGM || !newName.trim()) return;
 
     const parsedInit = parseFloat(newInit) || 0;
     const newCombatant: WhiteboardCombatant = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       name: newName.trim(),
       initiative: parsedInit,
       color: newColor,
@@ -597,27 +566,28 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
     const updatedCombatants = [...combatantsRef.current, newCombatant];
     setCombatants(updatedCombatants);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
-      });
-    }
+    await commitCombatState(updatedCombatants, currentRoundRef.current, activeIndexRef.current);
 
     setNewName('');
     setNewInit('');
     setIsAddStripOpen(false);
   };
 
-  // 5. Update, Duplicate, Delete
+  // Combatant update: preserves current room round & turn index rather than stale local refs
   const handleUpdateCombatant = useCallback(async (id: string, patch: Partial<WhiteboardCombatant>) => {
     const updatedCombatants = combatantsRef.current.map((c) => (c.id === id ? { ...c, ...patch } : c));
     setCombatants(updatedCombatants);
+
     if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
-      });
+      // Fetch latest metadata to avoid rewinding an in-flight round/turn advance
+      const currentMeta = await OBR.room.getMetadata();
+      const raw = currentMeta?.[COMBAT_KEY] as Record<string, any> | undefined;
+      const latestRound = raw?.currentRound ?? raw?.round ?? currentRoundRef.current;
+      const latestIndex = raw?.activeIndex ?? activeIndexRef.current;
+
+      await commitCombatState(updatedCombatants, latestRound, latestIndex);
     }
-  }, []);
+  }, [commitCombatState]);
 
   const handleDuplicateCombatant = useCallback(async (id: string) => {
     if (!isGM) return;
@@ -638,12 +608,8 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
     const updatedCombatants = [...combatantsRef.current, clone];
     setCombatants(updatedCombatants);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
-      });
-    }
-  }, [isGM]);
+    await commitCombatState(updatedCombatants, currentRoundRef.current, activeIndexRef.current);
+  }, [isGM, commitCombatState]);
 
   const handleDeleteCombatant = useCallback(async (id: string) => {
     if (!isGM) return;
@@ -652,14 +618,10 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       activeIndexRef.current >= updatedCombatants.length ? Math.max(0, updatedCombatants.length - 1) : activeIndexRef.current;
     setCombatants(updatedCombatants);
     setActiveIndex(nextActiveIndex);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: nextActiveIndex }
-      });
-    }
-  }, [isGM]);
+    await commitCombatState(updatedCombatants, currentRoundRef.current, nextActiveIndex);
+  }, [isGM, commitCombatState]);
 
-  // 6. Drag and Drop Reordering (GM Only)
+  // Drag and Drop: Local reorder during drag, SINGLE commit on drag end
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const handleDragStart = (idx: number) => {
@@ -667,7 +629,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     setDraggedIdx(idx);
   };
 
-  const handleDragOver = async (e: React.DragEvent, idx: number) => {
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault();
     if (!isGM || draggedIdx === null || draggedIdx === idx) return;
 
@@ -676,26 +638,22 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     list.splice(idx, 0, moved);
 
     setDraggedIdx(idx);
-    const updatedCombatants = list;
-    setCombatants(updatedCombatants);
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({
-        [COMBAT_KEY]: { combatants: updatedCombatants, currentRound: currentRoundRef.current, activeIndex: activeIndexRef.current }
-      });
-    }
+    setCombatants(list); // Updates local DOM UI only - NO WebSocket call here
   };
 
-  const handleDragEnd = () => {
+  const handleDragEnd = async () => {
     setDraggedIdx(null);
+    if (isGM) {
+      // Single atomic commit to OBR when user releases mouse
+      await commitCombatState(combatantsRef.current, currentRoundRef.current, activeIndexRef.current);
+    }
   };
 
   const currentCombatant = combatants[activeIndex];
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-950 text-slate-100 select-text">
-      {/* 1. TOP HEADER CASSETTE BAR */}
       <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-slate-800 bg-slate-900/95 shrink-0 min-h-[38px]">
-        {/* Left: Round badge & Active turn */}
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded shrink-0">
             R{currentRound}
@@ -705,11 +663,9 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
           </span>
         </div>
 
-        {/* Right: GM Only Controls (Add +, Sort ⇅, Rewind, Prev, Next, Clear) */}
         <div className="flex items-center gap-1 shrink-0">
           {isGM && (
             <>
-              {/* + (Add Combatant) Button - Toggles compact creation strip */}
               <button
                 type="button"
                 onClick={() => setIsAddStripOpen(!isAddStripOpen)}
@@ -723,7 +679,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
                 <Plus className="w-3.5 h-3.5" />
               </button>
 
-              {/* Sort Descending by Initiative */}
               <button
                 type="button"
                 onClick={handleSort}
@@ -734,7 +689,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
                 <span className="hidden xs:inline">Sort</span>
               </button>
 
-              {/* Turn Navigation & Progression */}
               <div className="flex items-center gap-0.5 ml-1 border-l border-slate-700 pl-1">
                 <button
                   type="button"
@@ -763,7 +717,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
                 </button>
               </div>
 
-              {/* Reset/Clear board if combatants exist */}
               {combatants.length > 0 && (
                 <button
                   type="button"
@@ -779,13 +732,11 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
         </div>
       </div>
 
-      {/* 2. COMPACT SINGLE-LINE CREATION STRIP (Directly beneath header cassette, GM Only) */}
       {isGM && isAddStripOpen && (
         <form
           onSubmit={handleConfirmAddCombatant}
           className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 border-b border-amber-500/50 shadow-md shrink-0 animate-fadeIn text-xs"
         >
-          {/* Init Input */}
           <input
             type="number"
             placeholder="Init"
@@ -794,7 +745,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
             className="w-12 px-1.5 py-1 text-xs font-mono font-bold bg-slate-950 border border-slate-700 rounded text-amber-300 focus:outline-none focus:border-amber-400 text-center"
           />
 
-          {/* Name Input */}
           <input
             ref={nameInputRef}
             type="text"
@@ -804,7 +754,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
             className="flex-1 px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-amber-400 font-sans"
           />
 
-          {/* Color Dot Picker */}
           <label
             className="relative w-5 h-5 rounded-full cursor-pointer border border-white/30 shadow-sm shrink-0 flex items-center justify-center hover:scale-105 transition"
             style={{ backgroundColor: newColor }}
@@ -818,7 +767,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
             />
           </label>
 
-          {/* Confirm Check / Add */}
           <button
             type="submit"
             className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded shadow active:scale-95 cursor-pointer shrink-0"
@@ -827,7 +775,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
             <span>Add</span>
           </button>
 
-          {/* Cancel button */}
           <button
             type="button"
             onClick={() => setIsAddStripOpen(false)}
@@ -839,7 +786,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
         </form>
       )}
 
-      {/* 3. COMBATANT TILES LIST (High Density: Reclaims vertical real estate, fits 8–10 combatants) */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
         {combatants.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs text-center p-4">
@@ -868,8 +814,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
           ))
         )}
       </div>
-
-      {/* Note: The bottom-docked Add Combatant form is removed entirely! Reclaimed for vertical space */}
     </div>
   );
 };
