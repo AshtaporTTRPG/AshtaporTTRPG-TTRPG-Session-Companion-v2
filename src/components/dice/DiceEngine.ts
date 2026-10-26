@@ -53,21 +53,6 @@ export interface ExecuteRollOptions {
   macroName?: string;
 }
 
-/**
- * Normalized Dice Engine ("What You Type Is What Rolls")
- * Zero implicit dice-cloning loops.
- * 
- * 1. [ 🎲 ROLL SUM ] Mode:
- *    Intended for Skill Challenges (e.g. party pooling 5d20 + 1d4 + 15), damage pools, and healing.
- *    Evaluates all dice in the expression once and sums them into a single aggregate total.
- *    Example: 5d20 [18, 12, 16, 9, 14] + 1d4 [3] + 15 = 104
- * 
- * 2. [ 📊 ROLL INDIV ] Mode:
- *    Intended for multi-attacks and mob checks (e.g. 5d20 + 5).
- *    Rolls N individual d20s, applies flat modifier to EACH d20 roll individually.
- *    Example: Attack Batch -> Roll 1: [18] + 5 = 23, Roll 2: [12] + 5 = 17...
- *    If no d20 present (e.g. 4d6), rolls the dice and displays individual faces without summing.
- */
 export function executeDiceRoll({
   diceType,
   count = 1,
@@ -96,7 +81,6 @@ export function executeDiceRoll({
       ? 'Dungeon Master'
       : 'Adventurer';
 
-  // Normalize pool entries from provided pool or single die configuration
   const poolEntries: DicePoolEntry[] = [];
   if (pool && pool.length > 0) {
     pool.forEach((p) => {
@@ -120,18 +104,20 @@ export function executeDiceRoll({
   const isActuallySecret = visibility === 'dm' || visibility === 'gm_only' || isSecret;
 
   // -------------------------------------------------------------------------
-  // MODE 1: [ 🎲 ROLL SUM ] Execution (Grand Totals & Skill Challenges)
+  // MODE 1: [ ROLL SUM ] Execution (Grand Totals & Skill Challenges)
   // -------------------------------------------------------------------------
-  // Evaluates all dice in the expression exactly once.
-  // Every die and modifier entered in the formula is rolled exactly as typed. Zero implicit cloning.
   if (displayMode === 'sum') {
     const allResolvedRolls: number[] = [];
     const allRawRolls: number[] = [];
     const poolBreakdown: DieGroupRoll[] = [];
     const breakdownSegments: string[] = [];
+    const pairedRollsList: PairedD20Roll[] = [];
+    const instanceList: RollInstance[] = [];
+
     let hasCrit = false;
     let hasFumble = false;
     let totalDiceCount = 0;
+    let d20Index = 1;
 
     poolEntries.forEach((entry) => {
       const sides = DIE_SIDES[entry.diceType] || 20;
@@ -145,18 +131,70 @@ export function executeDiceRoll({
           allRawRolls.push(valA, valB);
           const isAdv = advantageMode === 'advantage';
           const chosen = isAdv ? Math.max(valA, valB) : Math.min(valA, valB);
+          const discarded = isAdv ? Math.min(valA, valB) : Math.max(valA, valB);
+
           groupRolls.push(chosen);
           allResolvedRolls.push(chosen);
+
           if (chosen === 20) hasCrit = true;
           if (chosen === 1) hasFumble = true;
+
+          const isSoloD20 = poolEntries.length === 1 && entry.count === 1;
+          const instMod = isSoloD20 ? modifier : 0;
+          const instTotal = chosen + instMod;
+          const modText = instMod !== 0 ? (instMod > 0 ? ` + ${instMod}` : ` - ${Math.abs(instMod)}`) : '';
+          const lineItem = `[${chosen}, ~~${discarded}~~]${modText}`;
+
+          pairedRollsList.push({
+            pairIndex: d20Index,
+            die1: valA,
+            die2: valB,
+            selected: chosen,
+            discarded: discarded,
+            modifier: instMod,
+            totalWithModifier: instTotal,
+            lineItem,
+          });
+
+          instanceList.push({
+            index: d20Index,
+            d20Chosen: chosen,
+            d20Discarded: discarded,
+            isCrit: chosen === 20,
+            isFumble: chosen === 1,
+            riders: [],
+            modifier: instMod,
+            total: instTotal,
+            rawText: `Roll ${d20Index}: ${lineItem}`,
+          });
+
+          d20Index++;
         } else {
           const val = rollSingleDie(sides);
           groupRolls.push(val);
           allRawRolls.push(val);
           allResolvedRolls.push(val);
+
           if (entry.diceType === 'd20') {
             if (val === 20) hasCrit = true;
             if (val === 1) hasFumble = true;
+
+            const isSoloD20 = poolEntries.length === 1 && entry.count === 1;
+            const instMod = isSoloD20 ? modifier : 0;
+            const instTotal = val + instMod;
+
+            instanceList.push({
+              index: d20Index,
+              d20Chosen: val,
+              isCrit: val === 20,
+              isFumble: val === 1,
+              riders: [],
+              modifier: instMod,
+              total: instTotal,
+              rawText: `Roll ${d20Index}: [${val}]`,
+            });
+
+            d20Index++;
           }
         }
       }
@@ -167,7 +205,12 @@ export function executeDiceRoll({
         rawRolls: groupRolls,
       });
 
-      breakdownSegments.push(`${entry.count}${entry.diceType} [${groupRolls.join(', ')}]`);
+      if (entry.diceType === 'd20' && advantageMode !== 'normal') {
+        const pairStrings = pairedRollsList.map((p) => `[${p.selected}, ~~${p.discarded}~~]`).join(', ');
+        breakdownSegments.push(`${entry.count}d20 (${advantageMode === 'advantage' ? 'Adv' : 'Dis'}) ${pairStrings}`);
+      } else {
+        breakdownSegments.push(`${entry.count}${entry.diceType} [${groupRolls.join(', ')}]`);
+      }
     });
 
     const sumOfAllDice = allResolvedRolls.reduce((acc, curr) => acc + curr, 0);
@@ -176,7 +219,6 @@ export function executeDiceRoll({
     const modText = modifier !== 0 ? (modifier > 0 ? ` + ${modifier}` : ` - ${Math.abs(modifier)}`) : '';
     const breakdownLine = `${breakdownSegments.join(' + ')}${modText} = ${grandTotal}`;
 
-    // Construct clean formula string
     const formulaParts = poolEntries.map((e) => {
       if (e.diceType === 'd20' && advantageMode !== 'normal') {
         return `${e.count}d20 (${advantageMode === 'advantage' ? 'Adv' : 'Dis'})`;
@@ -212,6 +254,8 @@ export function executeDiceRoll({
       rolls: allResolvedRolls,
       breakdown: [breakdownLine],
       rawRolls: allRawRolls,
+      pairedRolls: pairedRollsList.length > 0 ? pairedRollsList : undefined,
+      instances: instanceList.length > 0 ? instanceList : undefined,
       total: grandTotal,
       advantageMode,
       label: label.trim() || undefined,
@@ -227,11 +271,8 @@ export function executeDiceRoll({
   }
 
   // -------------------------------------------------------------------------
-  // MODE 2: [ 📊 ROLL INDIV ] Execution (Attacks & Contested Checks)
+  // MODE 2: [ ROLL INDIV ] Execution (Attacks & Contested Checks)
   // -------------------------------------------------------------------------
-  // If formula contains Nd20:
-  // Rolls N individual d20s, applies flat modifier to EACH d20 roll individually.
-  // Feeds output as a batch of distinct results (Roll 1, Roll 2, ...).
   if (isD20Present) {
     const allResolvedRolls: number[] = [];
     const allRawRolls: number[] = [];
@@ -243,11 +284,7 @@ export function executeDiceRoll({
     let hasCrit = false;
     let hasFumble = false;
 
-    // Separate non-d20 auxiliary dice (e.g. 1d8 damage rider on an attack)
-    // Distributed evenly across the N attacks without multiplication/cloning!
     const auxiliaryEntries = poolEntries.filter((p) => p.diceType !== 'd20');
-
-    // Pre-roll auxiliary dice exactly as typed once
     const rolledAuxiliaryDice: { diceType: DieType; value: number }[] = [];
     auxiliaryEntries.forEach((aux) => {
       const sides = DIE_SIDES[aux.diceType] || 6;
@@ -287,7 +324,6 @@ export function executeDiceRoll({
           lineItem: `Roll ${i}: [${chosenD20}, ~~${discardedD20}~~]`,
         });
       } else {
-        // Disadvantage
         const valA = rollSingleDie(20);
         const valB = rollSingleDie(20);
         chosenD20 = Math.min(valA, valB);
@@ -312,19 +348,15 @@ export function executeDiceRoll({
       if (instCrit) hasCrit = true;
       if (instFumble) hasFumble = true;
 
-      // Assign auxiliary rider dice to this attack instance (1-to-1 mapping, zero cloning)
       const instRiders: RollRiderDie[] = [];
       let riderSum = 0;
 
       if (rolledAuxiliaryDice.length > 0) {
-        // If single d20, assign all auxiliary dice
-        // If multiple d20s, assign auxiliary dice matching index or distributed
         const assignedDice =
           d20Count === 1
             ? rolledAuxiliaryDice
             : rolledAuxiliaryDice.filter((_, idx) => idx % d20Count === i - 1);
 
-        // Group by die type
         const grouped = new Map<DieType, number[]>();
         assignedDice.forEach((d) => {
           if (!grouped.has(d.diceType)) grouped.set(d.diceType, []);
@@ -343,7 +375,6 @@ export function executeDiceRoll({
         });
       }
 
-      // Flat modifier applied to each individual attack roll
       const instanceTotal = chosenD20 + riderSum + modifier;
 
       const d20BadgeText =
@@ -417,7 +448,7 @@ export function executeDiceRoll({
       breakdown: allIndividualLineItems,
       rawRolls: allRawRolls,
       pairedRolls: allPairedRolls.length > 0 ? allPairedRolls : undefined,
-      total: 0, // Individual mode does not sum
+      total: 0,
       advantageMode,
       label: label.trim() || undefined,
       isCrit: hasCrit,
@@ -433,9 +464,8 @@ export function executeDiceRoll({
   }
 
   // -------------------------------------------------------------------------
-  // MODE 3: [ 📊 ROLL INDIV ] Without D20 (e.g. 4d6)
+  // MODE 3: [ ROLL INDIV ] Without D20
   // -------------------------------------------------------------------------
-  // Rolls the dice and displays each individual die face without summing.
   const allResolvedRolls: number[] = [];
   const allRawRolls: number[] = [];
   const allIndividualLineItems: string[] = [];
@@ -501,10 +531,6 @@ export function executeDiceRoll({
   };
 }
 
-/**
- * Universal Formula Parser
- * Correctly parses mixed expressions like 5d20+1d4+15, 2d6+3, 8d6, 1d20-2
- */
 export function parseDiceFormula(formula: string): {
   count: number;
   diceType: DieType;
@@ -514,7 +540,6 @@ export function parseDiceFormula(formula: string): {
   const cleaned = formula.replace(/\s+/g, '').toLowerCase();
   if (!cleaned) return null;
 
-  // Single die formula: 2d6+3, 1d20, 8d6
   const singleMatch = cleaned.match(/^(\d*)d(4|6|8|10|12|20|100)([+-]\d+)?$/);
   if (singleMatch) {
     const count = singleMatch[1] ? parseInt(singleMatch[1], 10) : 1;
@@ -523,7 +548,6 @@ export function parseDiceFormula(formula: string): {
     return { count, diceType, modifier, pool: [{ diceType, count }] };
   }
 
-  // Mixed dice pool formula: 5d20 + 1d4 + 15, 2d6 + 1d8 - 2
   const poolRegex = /(\d*)d(4|6|8|10|12|20|100)/g;
   let match: RegExpExecArray | null;
   const pool: DicePoolEntry[] = [];
@@ -543,7 +567,6 @@ export function parseDiceFormula(formula: string): {
     totalCount += count;
   }
 
-  // Extract flat modifiers
   const remainder = cleaned.replace(/(\d*)d(4|6|8|10|12|20|100)/g, '');
   let modifier = 0;
   if (remainder) {
