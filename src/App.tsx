@@ -47,7 +47,7 @@ export default function App() {
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
-  // Initialize OBR Lifecycle & Purge Legacy Metadata Keys
+  // Initialize OBR Lifecycle & Audit Room Metadata
   useEffect(() => {
     runBootSanitizerOnce();
     OBR.onReady(async () => {
@@ -64,48 +64,26 @@ export default function App() {
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
 
-        // ONE-TIME CLEANUP: Delete legacy keys from room metadata to reclaim the 16 kB quota
-        if (isGmRole) {
-          try {
-            const meta = await OBR.room.getMetadata();
-            const deadKeys = [
-              'ashtapor/roster',
-              'ashtapor/turn',
-              'ashtapor/combat_state',
-              'com.ashtapor.companion/feed-history',
-              'com.ashtapor.companion/feed-event',
-              'ashtapor/feed_event',
-              'ttrpg_ashtapor_feed',
-              'ashtapor/feed-event',
-            ];
-
-            const cleanupPatch: Record<string, undefined> = {};
-            let needsCleanup = false;
-
-            for (const key of deadKeys) {
-              if (key in meta) {
-                cleanupPatch[key] = undefined;
-                needsCleanup = true;
-              }
-            }
-
-            if (needsCleanup) {
-              await OBR.room.setMetadata(cleanupPatch);
-              console.log('Successfully purged legacy metadata keys to reclaim room quota.');
-            }
-          } catch (cleanupErr) {
-            console.warn('Metadata cleanup notice:', cleanupErr);
-          }
-        }
-
-        // Fetch initial broadcast note if any
+        // FACTUAL AUDIT: Read and display all keys and byte sizes in this room
         try {
           const meta = await OBR.room.getMetadata();
+          console.log('=== ROOM METADATA AUDIT START ===');
+          let totalBytes = 0;
+          for (const [key, value] of Object.entries(meta)) {
+            const keyBytes = JSON.stringify(value).length;
+            totalBytes += keyBytes;
+            console.log(`Key: "${key}" | Size: ${keyBytes} bytes`);
+          }
+          console.log(`TOTAL ROOM USAGE: ${totalBytes} / 16384 bytes`);
+          console.log('=== ROOM METADATA AUDIT END ===');
+
           const broadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
           if (broadcast && broadcast.title) {
             setBroadcastNote(broadcast);
           }
-        } catch {}
+        } catch (auditErr) {
+          console.error('Room metadata audit failed:', auditErr);
+        }
 
         setIsReady(true);
       } catch (err) {
@@ -199,7 +177,6 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-full max-h-[820px] w-full max-w-[480px] bg-neutral-950 text-neutral-100 overflow-hidden select-none mx-auto border border-neutral-800 shadow-2xl relative">
-      {/* 1. TOP HEADER: RELOCATED UTILITY MICRO-BAR + ZERO-SCROLL 5 TABS */}
       <header className="shrink-0 z-40 bg-neutral-900/95 border-b border-neutral-800">
         <div className="h-6 px-2.5 bg-neutral-950/90 border-b border-neutral-800/80 flex items-center justify-between text-[11px]">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -255,7 +232,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Navigation Tabs (Exact 5-column grid: ZERO horizontal scroll) */}
         <nav className="w-full grid grid-cols-5 gap-1 p-1 bg-neutral-900 select-none overflow-hidden">
           <button
             type="button"
@@ -329,7 +305,6 @@ export default function App() {
         onClose={() => setIsHelpOpen(false)}
       />
 
-      {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
         <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
           <WhiteboardTracker isGM={isGM} />
@@ -348,7 +323,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY */}
       {shouldShowBroadcastModal && (() => {
         const themeCfg = broadcastNote.theme
           ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
