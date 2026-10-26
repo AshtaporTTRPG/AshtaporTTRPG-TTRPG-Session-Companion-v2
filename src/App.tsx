@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
-import { Crown, Shield, Volume2, VolumeX, Eye, EyeOff, Radio, X, Copy, Check } from 'lucide-react';
+import { Crown, Shield, Volume2, VolumeX, EyeOff, Radio, X, Copy, Check } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from './utils/audio';
 import { copyToClipboard } from './utils/clipboard';
 import { runBootSanitizerOnce } from './utils/notesSanitizer';
@@ -42,50 +42,12 @@ export default function App() {
     }
   });
 
-  // Table Broadcast Note State (revealed by GM to entire table)
-  const [broadcastNote, setBroadcastNote] = useState<BroadcastNotePayload | null>(() => {
-    try {
-      const cached = localStorage.getItem('ashtapor_broadcast_note');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return null;
-  });
+  // Table Broadcast Note State
+  const [broadcastNote, setBroadcastNote] = useState<BroadcastNotePayload | null>(null);
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
-  // Table-wide Alert State (e.g. DM Called for Initiative)
-  const [tableAlert, setTableAlert] = useState<string | null>(null);
-
-  const isGmRef = useRef<boolean>(isGM);
-  useEffect(() => {
-    isGmRef.current = isGM;
-  }, [isGM]);
-
-  // Live combat state snapshot ref for replying to player sync requests
-  const liveCombatSnapshotRef = useRef<{
-    combatants: any[];
-    round: number;
-    activeIndex: number;
-    activeCombatantId: string | null;
-  }>({
-    combatants: [],
-    round: 0,
-    activeIndex: 0,
-    activeCombatantId: null,
-  });
-
-  // Track live snapshot updates dispatched from CombatTracker
-  useEffect(() => {
-    const handleSnapshot = (e: any) => {
-      if (e.detail) {
-        liveCombatSnapshotRef.current = e.detail;
-      }
-    };
-    window.addEventListener('ashtapor-combat-snapshot', handleSnapshot);
-    return () => window.removeEventListener('ashtapor-combat-snapshot', handleSnapshot);
-  }, []);
-
-  // Initialize OBR Lifecycle, boot sanitizer, and read initial pin preference
+  // Initialize OBR Lifecycle
   useEffect(() => {
     runBootSanitizerOnce();
     OBR.onReady(async () => {
@@ -99,7 +61,6 @@ export default function App() {
         } catch {}
 
         setIsGM(isGmRole);
-        isGmRef.current = isGmRole;
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
 
@@ -119,11 +80,9 @@ export default function App() {
       }
     });
 
-    // Auto-fallback if opened in a standalone browser tab / dev environment outside of Owlbear Rodeo
     const fallbackTimer = setTimeout(() => {
       if (!OBR.isAvailable) {
         setIsGM(true);
-        isGmRef.current = true;
         setPlayerName('GM (Standalone)');
         liveFeedSync.setIdentity('GM (Standalone)', true);
         setIsReady(true);
@@ -133,112 +92,13 @@ export default function App() {
     return () => clearTimeout(fallbackTimer);
   }, []);
 
-  // Static root broadcast listener for turn sync, table alerts, and cold-start handshake
-  useEffect(() => {
-    if (!isReady || !OBR.isReady) return;
-    const obrAny = OBR as any;
-    if (!obrAny.broadcast) return;
-
-    // 1. Sub-30ms Raw WebSocket Turn Sync Listener
-    const unsubTurnSync = obrAny.broadcast.onMessage('ashtapor/turn_sync', (event: any) => {
-      const data = event.data as any;
-      if (data && typeof data.round === 'number' && typeof data.activeIndex === 'number') {
-        window.dispatchEvent(new CustomEvent('ashtapor-turn-sync', { detail: data }));
-      }
-    });
-
-    // 2. Table Alert Listener ("Call for Initiative")
-    const unsubTableAlert = obrAny.broadcast.onMessage('ashtapor/table_alert', (event: any) => {
-      const data = event.data as any;
-      if (data && data.type === 'ROLL_FOR_INITIATIVE') {
-        if (!isGmRef.current) {
-          setTableAlert('⚔️ GM called for Initiative! Open Roster to join.');
-        }
-        window.dispatchEvent(new CustomEvent('ashtapor-table-alert', { detail: data }));
-      }
-    });
-
-    // 3. Combat Ended Listener (immediately clears locks and table alerts)
-    const unsubCombatEnded = obrAny.broadcast.onMessage('ashtapor/combat_ended', (event: any) => {
-      setTableAlert(null);
-      window.dispatchEvent(new CustomEvent('ashtapor-combat-ended', { detail: event.data }));
-    });
-
-    // 4. Cold-Start Sync Handshake
-    // GM client catches sync requests from newly mounted players and replies immediately in <50ms
-    const unsubSyncReq = obrAny.broadcast.onMessage('ashtapor/sync_request', async (event: any) => {
-      if (!isGmRef.current) return;
-      const data = event.data as any;
-      try {
-        let snapshot = liveCombatSnapshotRef.current;
-        // If snapshot is empty, fallback to reading room metadata
-        if (!snapshot.combatants || snapshot.combatants.length === 0) {
-          const roomMeta = await OBR.room.getMetadata();
-          const rawRoster = roomMeta['ashtapor/roster'] as any;
-          const combatantsList = Array.isArray(rawRoster)
-            ? rawRoster
-            : Array.isArray(rawRoster?.combatants)
-            ? rawRoster.combatants
-            : [];
-          const rawTurn = roomMeta['ashtapor/turn'] as any;
-          snapshot = {
-            combatants: combatantsList,
-            round: rawTurn?.currentRound ?? rawTurn?.round ?? 0,
-            activeIndex: rawTurn?.currentTurnIndex ?? rawTurn?.activeIndex ?? 0,
-            activeCombatantId: rawTurn?.activeCombatantId ?? null,
-          };
-        }
-
-        obrAny.broadcast.sendMessage('ashtapor/sync_response', {
-          targetId: data?.senderId,
-          combatants: snapshot.combatants,
-          round: snapshot.round,
-          activeIndex: snapshot.activeIndex,
-          activeCombatantId: snapshot.activeCombatantId,
-        });
-      } catch (err) {
-        console.warn('Error replying to sync_request:', err);
-      }
-    });
-
-    // Player client catches sync response from GM and hydrates state in <50ms
-    const unsubSyncResp = obrAny.broadcast.onMessage('ashtapor/sync_response', (event: any) => {
-      if (isGmRef.current) return;
-      const data = event.data as any;
-      if (data) {
-        window.dispatchEvent(new CustomEvent('ashtapor-sync-response', { detail: data }));
-      }
-    });
-
-    // Send cold-start request if player
-    if (!isGmRef.current) {
-      OBR.player.getId().then((myId) => {
-        obrAny.broadcast.sendMessage('ashtapor/sync_request', { senderId: myId });
-      }).catch(() => {
-        obrAny.broadcast.sendMessage('ashtapor/sync_request', { senderId: 'player' });
-      });
-    }
-
-    return () => {
-      if (typeof unsubTurnSync === 'function') unsubTurnSync();
-      if (typeof unsubTableAlert === 'function') unsubTableAlert();
-      if (typeof unsubCombatEnded === 'function') unsubCombatEnded();
-      if (typeof unsubSyncReq === 'function') unsubSyncReq();
-      if (typeof unsubSyncResp === 'function') unsubSyncResp();
-    };
-  }, [isReady]);
-
-  // Listen for native OBR player identity and role updates
+  // Listen for native OBR player identity changes
   useEffect(() => {
     if (!isReady || !OBR.isReady) return;
     const unsub = OBR.player.onChange((player) => {
       const isGmRole = player.role ? player.role === 'GM' : isGM;
-      if (player.role) {
-        setIsGM(isGmRole);
-      }
-      if (player.name) {
-        setPlayerName(player.name);
-      }
+      if (player.role) setIsGM(isGmRole);
+      if (player.name) setPlayerName(player.name);
       liveFeedSync.setIdentity(player.name || playerName, isGmRole, player.id);
     });
     return () => unsub();
@@ -250,38 +110,16 @@ export default function App() {
     const unsub = OBR.room.onMetadataChange((meta) => {
       const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
       setBroadcastNote(live || null);
-      if (!live) {
-        setDismissedBroadcastId(null);
-      }
+      if (!live) setDismissedBroadcastId(null);
     });
-    return () => {
-      if (unsub) unsub();
-    };
+    return () => unsub();
   }, [isReady]);
 
-  // Standalone event listener fallback for local browser testing
-  useEffect(() => {
-    const handleLocalBroadcast = (e: any) => {
-      const detail = e.detail as BroadcastNotePayload | null;
-      if (detail && detail.title) {
-        setBroadcastNote(detail);
-        setDismissedBroadcastId(null);
-      } else {
-        setBroadcastNote(null);
-        setDismissedBroadcastId(null);
-      }
-    };
-    window.addEventListener('ashtapor-broadcast-note', handleLocalBroadcast);
-    return () => window.removeEventListener('ashtapor-broadcast-note', handleLocalBroadcast);
-  }, []);
-
-  // Audio Toggle Handler
   const handleToggleSound = () => {
     const next = toggleAudio();
     setSoundOn(next);
   };
 
-  // Quick Help Guide Toggle Handler
   const handleToggleHelp = () => {
     const next = !isHelpOpen;
     setIsHelpOpen(next);
@@ -293,19 +131,11 @@ export default function App() {
     }
   };
 
-  // Stop broadcasting note (GM Action) - 1-Click Broadcast Teardown
   const handleStopRevealing = async () => {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        await OBR.room.setMetadata({
-          [OBR_BROADCAST_NOTE_KEY]: undefined,
-        });
+        await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: undefined });
       }
-      try {
-        localStorage.removeItem('ashtapor_broadcast_note');
-      } catch {}
-      window.dispatchEvent(new CustomEvent('ashtapor-broadcast-note', { detail: null }));
-
       setBroadcastNote(null);
       setDismissedBroadcastId(null);
     } catch (err) {
@@ -317,58 +147,27 @@ export default function App() {
 
   const shouldShowBroadcastModal = broadcastNote && dismissedBroadcastId !== broadcastNote.id;
 
-  // Fallback loader if OBR is not yet ready (sized to expanded 820px height)
   if (!isReady) {
     return (
       <div className="w-full max-w-[480px] h-[820px] max-h-[820px] mx-auto bg-[#0b0f17] text-slate-200 flex flex-col items-center justify-center p-6 text-center select-none overflow-hidden border border-slate-800 shadow-2xl">
-        <div className="relative mb-5">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shadow-lg shadow-amber-500/5">
-            <div className="w-7 h-7 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
-          </div>
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shadow-lg shadow-amber-500/5 mb-5">
+          <div className="w-7 h-7 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
         </div>
         <h2 className="text-base font-bold font-display tracking-wide text-amber-300 mb-1.5">
           Connecting to Tabletop...
         </h2>
-        <p className="text-xs text-slate-400 max-w-xs mb-5 leading-relaxed">
+        <p className="text-xs text-slate-400 max-w-xs leading-relaxed">
           Loading Ashtapor Companion for Owlbear Rodeo.
         </p>
-
-        {/* Standalone preview buttons for testing outside Owlbear */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => {
-              setIsGM(true);
-              setPlayerName('GM (Preview)');
-              liveFeedSync.setIdentity('GM (Preview)', true);
-              setIsReady(true);
-            }}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 hover:border-amber-500/40 transition cursor-pointer"
-          >
-            Preview GM
-          </button>
-          <button
-            onClick={() => {
-              setIsGM(false);
-              setPlayerName('Player (Preview)');
-              liveFeedSync.setIdentity('Player (Preview)', false);
-              setIsReady(true);
-            }}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 hover:border-cyan-500/40 transition cursor-pointer"
-          >
-            Preview Player
-          </button>
-        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full max-h-[820px] w-full max-w-[480px] bg-neutral-950 text-neutral-100 overflow-hidden select-none mx-auto border border-neutral-800 shadow-2xl relative">
-      {/* 1. TOP HEADER: RELOCATED UTILITY MICRO-BAR (22px) + ZERO-SCROLL FULL-WIDTH 5 TABS */}
+      {/* 1. TOP HEADER */}
       <header className="shrink-0 z-40 bg-neutral-900/95 border-b border-neutral-800">
-        {/* Row A: Slim Utility Micro-Bar (22px height) */}
         <div className="h-6 px-2.5 bg-neutral-950/90 border-b border-neutral-800/80 flex items-center justify-between text-[11px]">
-          {/* Left: App Identity & Player Tag */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-xs leading-none">⚔️</span>
             <span className="font-bold text-[11px] font-display text-neutral-200 tracking-wide">
@@ -379,16 +178,12 @@ export default function App() {
             </span>
           </div>
 
-          {/* Right: Relocated Utility Controls (Help Guide, GM badge, Audio Toggle, Pin Button) */}
           <div className="flex items-center gap-1 shrink-0">
-            {/* Quick Guide Trigger Button [ ? ] immediately adjacent to GM/PC badge */}
             <button
               type="button"
-              data-help-trigger="true"
               onClick={handleToggleHelp}
               className="relative w-6 h-6 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-400 border border-slate-700 flex items-center justify-center font-bold text-xs transition-colors shrink-0 cursor-pointer"
               title="Quick Guide (Help)"
-              aria-label="Quick Guide (Help)"
             >
               ?
               {!hasSeenHelp && (
@@ -396,14 +191,12 @@ export default function App() {
               )}
             </button>
 
-            {/* Ultra-compact GM / PC Role Badge */}
             <div
               className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
                 isGM
                   ? 'bg-amber-950/80 border-amber-600/70 text-amber-300'
                   : 'bg-cyan-950/80 border-cyan-600/70 text-cyan-300'
               }`}
-              title={`Role: ${isGM ? 'Game Master (GM)' : 'Player (PC)'} - ${playerName}`}
             >
               {isGM ? (
                 <Crown className="w-2.5 h-2.5 text-amber-400 shrink-0" />
@@ -413,12 +206,10 @@ export default function App() {
               <span>{isGM ? 'GM' : 'PC'}</span>
             </div>
 
-            {/* Audio Mute/Unmute Toggle */}
             <button
               type="button"
               onClick={handleToggleSound}
               title={soundOn ? 'Mute Audio' : 'Unmute Audio'}
-              aria-label={soundOn ? 'Mute Audio' : 'Unmute Audio'}
               className="p-1 rounded text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition cursor-pointer"
             >
               {soundOn ? (
@@ -430,7 +221,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Row B: 5 Navigation Tabs (Exact 5-column grid: ZERO horizontal scroll, perfectly visible) */}
+        {/* Navigation Tabs */}
         <nav className="w-full grid grid-cols-5 gap-1 p-1 bg-neutral-900 select-none overflow-hidden">
           <button
             type="button"
@@ -440,9 +231,8 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Unified Combat Tracker & Combat Feed"
           >
-            <span className="text-xs leading-none select-none">⚔️</span>
+            <span className="text-xs leading-none">⚔️</span>
             <span className="truncate">Combat</span>
           </button>
 
@@ -454,9 +244,8 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Dice Tray (formula bar, staged dice pool, multi-d20 engine, macros, roll feed)"
           >
-            <span className="text-xs leading-none select-none">🎲</span>
+            <span className="text-xs leading-none">🎲</span>
             <span className="truncate">Dice</span>
           </button>
 
@@ -468,9 +257,8 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="3D Range Finder & Homebrew Jump/Fall damage tools"
           >
-            <span className="text-xs leading-none select-none">📐</span>
+            <span className="text-xs leading-none">📐</span>
             <span className="truncate">3D Range</span>
           </button>
 
@@ -482,9 +270,8 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Ashtapor Homebrew Rules reference with search"
           >
-            <span className="text-xs leading-none select-none">📖</span>
+            <span className="text-xs leading-none">📖</span>
             <span className="truncate">Grimoire</span>
           </button>
 
@@ -496,52 +283,19 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Scoped 3-tier Notes: My Notes, Table Notes, GM Notes"
           >
-            <span className="text-xs leading-none select-none">📝</span>
+            <span className="text-xs leading-none">📝</span>
             <span className="truncate">Notes</span>
           </button>
         </nav>
       </header>
 
-      {/* 1.5 TABLE ALERT BANNER (e.g. GM Called for Initiative) */}
-      {tableAlert && !isGM && (
-        <div className="bg-amber-500/20 border-b border-amber-500/50 px-2.5 py-1.5 flex items-center justify-between text-xs text-amber-200 animate-pulse z-30 shrink-0">
-          <div className="flex items-center gap-1.5 font-bold truncate">
-            <span>⚔️</span>
-            <span className="truncate">{tableAlert}</span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0 ml-2">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('combat');
-                setTableAlert(null);
-                window.dispatchEvent(new CustomEvent('ashtapor-open-roster'));
-              }}
-              className="px-2 py-0.5 rounded bg-amber-400 text-neutral-950 font-bold text-[11px] hover:bg-amber-300 transition cursor-pointer"
-            >
-              Open Roster
-            </button>
-            <button
-              type="button"
-              onClick={() => setTableAlert(null)}
-              className="p-0.5 text-amber-400/80 hover:text-amber-200 transition cursor-pointer"
-              title="Dismiss alert"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Floating Contextual Help Guide Tooltip */}
       <ContextualHelpTooltip
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
       />
 
-      {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
+      {/* 2. MAIN CONTENT AREA */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
         <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
           <WhiteboardTracker isGM={isGM} />
@@ -560,7 +314,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY (ALL CONNECTED CLIENTS WITH HANDOUT THEME SUPPORT) */}
+      {/* 3. BROADCAST NOTE MODAL */}
       {shouldShowBroadcastModal && (() => {
         const themeCfg = broadcastNote.theme
           ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
@@ -569,7 +323,6 @@ export default function App() {
         return (
           <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
             <div className={`w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3 border-2 ring-1 ring-amber-400/40 ${themeCfg.cardClasses}`}>
-              {/* Broadcast Banner Header */}
               <div className="flex items-center justify-between pb-2 border-b border-inherit/30">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
@@ -602,7 +355,6 @@ export default function App() {
                         ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
                         : 'bg-black/30 hover:bg-black/50 text-inherit border-white/20 hover:border-amber-400/50'
                     }`}
-                    title="Copy message to clipboard"
                   >
                     {broadcastCopied ? (
                       <>
@@ -612,7 +364,7 @@ export default function App() {
                     ) : (
                       <>
                         <Copy className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Copy Message</span>
+                        <span>Copy</span>
                       </>
                     )}
                   </button>
@@ -621,19 +373,16 @@ export default function App() {
                     type="button"
                     onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
                     className="opacity-70 hover:opacity-100 p-1 rounded-md hover:bg-white/10 transition cursor-pointer"
-                    title={isGM ? "Stop Revealing & Close" : "Dismiss"}
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Note Text Content with Lightweight Markdown Rendering */}
               <div className={`p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
                 {renderMarkdown(broadcastNote.content)}
               </div>
 
-              {/* Modal Actions */}
               <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
                 <span className="text-[10px] opacity-60 font-mono">
                   Revealed by Game Master (GM)
@@ -646,7 +395,7 @@ export default function App() {
                       onClick={handleStopRevealing}
                       className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
                     >
-                      <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
+                      <EyeOff className="w-3.5 h-3.5" /> Stop Revealing
                     </button>
                   ) : (
                     <button
@@ -654,7 +403,7 @@ export default function App() {
                       onClick={() => setDismissedBroadcastId(broadcastNote.id)}
                       className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
                     >
-                      Dismiss / Close
+                      Dismiss
                     </button>
                   )}
                 </div>
