@@ -15,6 +15,21 @@ export interface RollFeedCardProps {
   playerName?: string;
 }
 
+const renderFormattedBreakdown = (text: string) => {
+  if (!text.includes('~~')) return text;
+  const parts = text.split(/(~~.*?~~)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('~~') && part.endsWith('~~')) {
+      return (
+        <span key={i} className="line-through text-slate-500 font-normal">
+          {part.slice(2, -2)}
+        </span>
+      );
+    }
+    return part;
+  });
+};
+
 export const RollFeedCard: React.FC<RollFeedCardProps> = ({
   roll,
   onReroll,
@@ -38,7 +53,7 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
           : 'border-slate-800'
       }`}
     >
-      {/* Header Row: Flex row with Roller name + Expression on left, Bold Total + RotateCcw on right */}
+      {/* Header Row */}
       <div className="flex items-center justify-between gap-1.5 pb-1 border-b border-slate-800/80">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <span
@@ -66,7 +81,6 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {/* Bold amber/gold total / results */}
           <span className="font-mono font-bold text-amber-300 text-xs tabular-nums">
             {roll.displayMode === 'individual'
               ? `Results: ${
@@ -77,7 +91,6 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
               : `Total: ${roll.total}`}
           </span>
 
-          {/* Compact RotateCcw re-roll icon button */}
           <button
             type="button"
             onClick={(e) => onReroll(roll, e)}
@@ -89,7 +102,7 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
         </div>
       </div>
 
-      {/* Body: Multi-Instance Rows or Pure Damage Breakdown */}
+      {/* Body */}
       {hasInstances ? (
         <div className="space-y-1 pt-0.5">
           {roll.instances!.map((inst) => (
@@ -107,7 +120,6 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   Roll {inst.index}:
                 </span>
 
-                {/* Boxed d20 badge */}
                 <span className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-slate-700 font-mono tabular-nums shrink-0 inline-flex items-center gap-1">
                   <span>{inst.d20Chosen}</span>
                   {inst.d20Discarded !== undefined && (
@@ -120,28 +132,24 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   )}
                 </span>
 
-                {/* Crit badge */}
                 {inst.isCrit && (
                   <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
                     CRIT
                   </span>
                 )}
 
-                {/* Fumble badge */}
                 {inst.isFumble && (
                   <span className="bg-rose-950 text-rose-400 border border-rose-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
                     FUMBLE
                   </span>
                 )}
 
-                {/* Rider dice notation */}
                 {inst.riders.map((r, rIdx) => (
                   <span key={rIdx} className="text-slate-300 font-mono text-[11px] shrink-0">
                     + {r.count}{r.diceType}[{r.rolls.join(', ')}]
                   </span>
                 ))}
 
-                {/* Modifier notation */}
                 {inst.modifier !== 0 && (
                   <span className="text-slate-400 font-mono text-[11px] shrink-0">
                     {inst.modifier > 0
@@ -151,14 +159,12 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                 )}
               </div>
 
-              {/* Instance subtotal: Bold right-aligned value in bright yellow/gold */}
               <span className="text-amber-300 font-bold font-mono text-xs tabular-nums shrink-0 ml-auto pl-1">
                 = {inst.total}
               </span>
             </div>
           ))}
 
-          {/* Sum Mode Footer */}
           {roll.displayMode === 'sum' && (
             <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
               <span>Combined Total:</span>
@@ -167,7 +173,6 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
           )}
         </div>
       ) : (
-        /* Pure damage or legacy fallback */
         <div className="pt-0.5 space-y-1 text-[11px] font-mono">
           {macroName && (
             <div className="pb-1">
@@ -176,6 +181,24 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
               </span>
             </div>
           )}
+
+          {roll.pairedRolls && roll.pairedRolls.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-1">
+              {roll.pairedRolls.map((pair) => (
+                <span
+                  key={pair.pairIndex}
+                  className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-slate-700 font-mono tabular-nums text-xs inline-flex items-center gap-1"
+                >
+                  <span>{pair.selected}</span>
+                  <span className="text-slate-600">,</span>
+                  <span className="line-through text-slate-500 font-normal">
+                    {pair.discarded}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
           {roll.breakdown && roll.breakdown.length > 0 ? (
             roll.breakdown
               .filter((line) => !line.startsWith('Total:') && !line.startsWith('Combined Total:'))
@@ -184,7 +207,7 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   key={idx}
                   className="flex items-center justify-between text-slate-300 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/60"
                 >
-                  <span>{line}</span>
+                  <span>{renderFormattedBreakdown(line)}</span>
                 </div>
               ))
           ) : (
