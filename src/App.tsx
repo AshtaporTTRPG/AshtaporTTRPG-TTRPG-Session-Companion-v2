@@ -10,7 +10,7 @@ import { isAudioEnabled, toggleAudio } from './utils/audio';
 import { copyToClipboard } from './utils/clipboard';
 import { runBootSanitizerOnce } from './utils/notesSanitizer';
 import { WhiteboardTracker } from './components/combat/WhiteboardTracker';
-import { DiceChamber } from './components/DiceChamber';
+import { DiceChamber } from './components/dice/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
@@ -44,11 +44,8 @@ export default function App() {
     }
   });
 
-  // Table Broadcast Note State
   const [broadcastNote, setBroadcastNote] = useState<any>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
-
-  // Table-wide Alert State (e.g. DM Called for Initiative)
   const [tableAlert, setTableAlert] = useState<string | null>(null);
 
   const isGmRef = useRef<boolean>(isGM);
@@ -56,7 +53,6 @@ export default function App() {
     isGmRef.current = isGM;
   }, [isGM]);
 
-  // Live combat state snapshot ref for replying to player sync requests
   const liveCombatSnapshotRef = useRef<{
     combatants: any[];
     round: number;
@@ -69,7 +65,6 @@ export default function App() {
     activeCombatantId: null,
   });
 
-  // Track live snapshot updates dispatched from CombatTracker
   useEffect(() => {
     const handleSnapshot = (e: any) => {
       if (e.detail) {
@@ -80,7 +75,6 @@ export default function App() {
     return () => window.removeEventListener('ashtapor-combat-snapshot', handleSnapshot);
   }, []);
 
-  // Initialize OBR Lifecycle, boot sanitizer, and read initial pin preference
   useEffect(() => {
     runBootSanitizerOnce();
     OBR.onReady(async () => {
@@ -105,7 +99,6 @@ export default function App() {
       }
     });
 
-    // Auto-fallback if opened in a standalone browser tab / dev environment outside of Owlbear Rodeo
     const fallbackTimer = setTimeout(() => {
       if (!OBR.isAvailable) {
         setIsGM(true);
@@ -119,13 +112,12 @@ export default function App() {
     return () => clearTimeout(fallbackTimer);
   }, []);
 
-  // Static root broadcast listener for turn sync, table alerts, and cold-start handshake
+  // Corrected: Uses isReady state without undefined OBR.isReady guard
   useEffect(() => {
-    if (!isReady || !OBR.isReady) return;
+    if (!isReady) return;
     const obrAny = OBR as any;
     if (!obrAny.broadcast) return;
 
-    // 1. Sub-30ms Raw WebSocket Turn Sync Listener
     const unsubTurnSync = obrAny.broadcast.onMessage('ashtapor/turn_sync', (event: any) => {
       const data = event.data as any;
       if (data && typeof data.round === 'number' && typeof data.activeIndex === 'number') {
@@ -133,7 +125,6 @@ export default function App() {
       }
     });
 
-    // 2. Table Alert Listener ("Call for Initiative")
     const unsubTableAlert = obrAny.broadcast.onMessage('ashtapor/table_alert', (event: any) => {
       const data = event.data as any;
       if (data && data.type === 'ROLL_FOR_INITIATIVE') {
@@ -144,20 +135,16 @@ export default function App() {
       }
     });
 
-    // 3. Combat Ended Listener (immediately clears locks and table alerts)
     const unsubCombatEnded = obrAny.broadcast.onMessage('ashtapor/combat_ended', (event: any) => {
       setTableAlert(null);
       window.dispatchEvent(new CustomEvent('ashtapor-combat-ended', { detail: event.data }));
     });
 
-    // 4. Cold-Start Sync Handshake
-    // GM client catches sync requests from newly mounted players and replies immediately in <50ms
     const unsubSyncReq = obrAny.broadcast.onMessage('ashtapor/sync_request', async (event: any) => {
       if (!isGmRef.current) return;
       const data = event.data as any;
       try {
         let snapshot = liveCombatSnapshotRef.current;
-        // If snapshot is empty, fallback to reading room metadata
         if (!snapshot.combatants || snapshot.combatants.length === 0) {
           const roomMeta = await OBR.room.getMetadata();
           const rawRoster = roomMeta['ashtapor/roster'] as any;
@@ -187,7 +174,6 @@ export default function App() {
       }
     });
 
-    // Player client catches sync response from GM and hydrates state in <50ms
     const unsubSyncResp = obrAny.broadcast.onMessage('ashtapor/sync_response', (event: any) => {
       if (isGmRef.current) return;
       const data = event.data as any;
@@ -196,7 +182,6 @@ export default function App() {
       }
     });
 
-    // Send cold-start request if player
     if (!isGmRef.current) {
       OBR.player.getId().then((myId) => {
         obrAny.broadcast.sendMessage('ashtapor/sync_request', { senderId: myId });
@@ -214,9 +199,9 @@ export default function App() {
     };
   }, [isReady]);
 
-  // Listen for native OBR player identity and role updates
+  // Corrected: Uses isReady state without undefined OBR.isReady guard
   useEffect(() => {
-    if (!isReady || !OBR.isReady) return;
+    if (!isReady) return;
     const unsub = OBR.player.onChange((player) => {
       const isGmRole = player.role ? player.role === 'GM' : isGM;
       if (player.role) {
@@ -230,31 +215,28 @@ export default function App() {
     return () => unsub();
   }, [isReady, isGM, playerName]);
 
-  // Table Broadcast Note room synchronization via OBR SDK
+  // Synchronize broadcast note
   useEffect(() => {
+    if (!isReady) return;
     let unsub: (() => void) | undefined;
 
-    OBR.onReady(() => {
-      OBR.room.getMetadata().then((meta) => {
-        setBroadcastNote(meta?.[BROADCAST_KEY] || null);
-      });
-      unsub = OBR.room.onMetadataChange((meta) => {
-        setBroadcastNote(meta?.[BROADCAST_KEY] || null);
-      });
+    OBR.room.getMetadata().then((meta) => {
+      setBroadcastNote(meta?.[BROADCAST_KEY] || null);
+    });
+    unsub = OBR.room.onMetadataChange((meta) => {
+      setBroadcastNote(meta?.[BROADCAST_KEY] || null);
     });
 
     return () => {
       if (unsub) unsub();
     };
-  }, []);
+  }, [isReady]);
 
-  // Audio Toggle Handler
   const handleToggleSound = () => {
     const next = toggleAudio();
     setSoundOn(next);
   };
 
-  // Quick Help Guide Toggle Handler
   const handleToggleHelp = () => {
     const next = !isHelpOpen;
     setIsHelpOpen(next);
@@ -266,15 +248,13 @@ export default function App() {
     }
   };
 
-  // When the close / "Stop Revealing & Close" button is clicked:
   const handleStopRevealing = async () => {
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
+    try {
       await OBR.room.setMetadata({ [BROADCAST_KEY]: null });
-    }
+    } catch {}
     setBroadcastNote(null);
   };
 
-  // Fallback loader if OBR is not yet ready (sized to expanded 820px height)
   if (!isReady) {
     return (
       <div className="w-full max-w-[480px] h-[820px] max-h-[820px] mx-auto bg-[#0b0f17] text-slate-200 flex flex-col items-center justify-center p-6 text-center select-none overflow-hidden border border-slate-800 shadow-2xl">
@@ -290,7 +270,6 @@ export default function App() {
           Loading Ashtapor Companion for Owlbear Rodeo.
         </p>
 
-        {/* Standalone preview buttons for testing outside Owlbear */}
         <div className="flex items-center gap-2.5">
           <button
             onClick={() => {
@@ -321,11 +300,8 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-full max-h-[820px] w-full max-w-[480px] bg-neutral-950 text-neutral-100 overflow-hidden select-none mx-auto border border-neutral-800 shadow-2xl relative">
-      {/* 1. TOP HEADER: RELOCATED UTILITY MICRO-BAR (22px) + ZERO-SCROLL FULL-WIDTH 5 TABS */}
       <header className="shrink-0 z-40 bg-neutral-900/95 border-b border-neutral-800">
-        {/* Row A: Slim Utility Micro-Bar (22px height) */}
         <div className="h-6 px-2.5 bg-neutral-950/90 border-b border-neutral-800/80 flex items-center justify-between text-[11px]">
-          {/* Left: App Identity & Player Tag */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-xs leading-none">⚔️</span>
             <span className="font-bold text-[11px] font-display text-neutral-200 tracking-wide">
@@ -336,9 +312,7 @@ export default function App() {
             </span>
           </div>
 
-          {/* Right: Relocated Utility Controls (Help Guide, GM badge, Audio Toggle, Pin Button) */}
           <div className="flex items-center gap-1 shrink-0">
-            {/* Quick Guide Trigger Button [ ? ] immediately adjacent to GM/PC badge */}
             <button
               type="button"
               data-help-trigger="true"
@@ -353,7 +327,6 @@ export default function App() {
               )}
             </button>
 
-            {/* Ultra-compact GM / PC Role Badge */}
             <div
               className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
                 isGM
@@ -370,7 +343,6 @@ export default function App() {
               <span>{isGM ? 'GM' : 'PC'}</span>
             </div>
 
-            {/* Audio Mute/Unmute Toggle */}
             <button
               type="button"
               onClick={handleToggleSound}
@@ -387,7 +359,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Row B: 5 Navigation Tabs (Exact 5-column grid: ZERO horizontal scroll, perfectly visible) */}
         <nav className="w-full grid grid-cols-5 gap-1 p-1 bg-neutral-900 select-none overflow-hidden">
           <button
             type="button"
@@ -411,7 +382,7 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Dice Tray (formula bar, staged dice pool, multi-d20 engine, macros, roll feed)"
+            title="Dice Tray"
           >
             <span className="text-xs leading-none select-none">🎲</span>
             <span className="truncate">Dice</span>
@@ -425,7 +396,7 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="3D Range Finder & Homebrew Jump/Fall damage tools"
+            title="3D Range Finder"
           >
             <span className="text-xs leading-none select-none">📐</span>
             <span className="truncate">3D Range</span>
@@ -439,7 +410,7 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Ashtapor Homebrew Rules reference with search"
+            title="Grimoire"
           >
             <span className="text-xs leading-none select-none">📖</span>
             <span className="truncate">Grimoire</span>
@@ -453,7 +424,7 @@ export default function App() {
                 ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60'
             }`}
-            title="Scoped 3-tier Notes: My Notes, Table Notes, GM Notes"
+            title="Notes"
           >
             <span className="text-xs leading-none select-none">📝</span>
             <span className="truncate">Notes</span>
@@ -461,7 +432,6 @@ export default function App() {
         </nav>
       </header>
 
-      {/* 1.5 TABLE ALERT BANNER (e.g. GM Called for Initiative) */}
       {tableAlert && !isGM && (
         <div className="bg-amber-500/20 border-b border-amber-500/50 px-2.5 py-1.5 flex items-center justify-between text-xs text-amber-200 animate-pulse z-30 shrink-0">
           <div className="flex items-center gap-1.5 font-bold truncate">
@@ -492,16 +462,15 @@ export default function App() {
         </div>
       )}
 
-      {/* Floating Contextual Help Guide Tooltip */}
       <ContextualHelpTooltip
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
       />
 
-      {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting (Preserves scroll, inputs & states across tab switches) */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
         <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
-          <WhiteboardTracker isGM={isGM} />
+          {/* Passed isReady here to prevent child race conditions */}
+          <WhiteboardTracker isGM={isGM} isReady={isReady} />
         </div>
         <div className={activeTab === 'dice' ? 'flex flex-col h-full' : 'hidden'}>
           <DiceChamber isGM={isGM} playerName={playerName} />
@@ -517,7 +486,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY */}
       {broadcastNote !== null && (() => {
         const themeCfg =
           broadcastNote.theme && (NOTE_THEME_CONFIG as Record<string, any>)[broadcastNote.theme]
@@ -527,7 +495,6 @@ export default function App() {
         return (
           <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
             <div className={`w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3 border-2 ring-1 ring-amber-400/40 ${themeCfg.cardClasses}`}>
-              {/* Broadcast Banner Header */}
               <div className="flex items-center justify-between pb-2 border-b border-inherit/30">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
@@ -586,12 +553,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Note Text Content with Lightweight Markdown Rendering */}
               <div className={`p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
                 {renderMarkdown(broadcastNote.content || '')}
               </div>
 
-              {/* Modal Actions */}
               <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
                 <span className="text-[10px] opacity-60 font-mono">
                   {broadcastNote.author ? `Revealed by ${broadcastNote.author}` : 'Revealed by Game Master (GM)'}
