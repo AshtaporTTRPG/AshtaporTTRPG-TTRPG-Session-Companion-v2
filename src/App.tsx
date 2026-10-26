@@ -21,6 +21,26 @@ import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
 
+// Verified keys to purge based on console audit
+const KEYS_TO_PURGE = [
+  // Category A: Dead Ashtapor keys from previous versions
+  'ashtapor/feed',
+  'com.ashtapor.session-companion/table-notes',
+  'com.ashtapor.companion/feed-event',
+  'com.ashtapor.companion/table-notes',
+  'ashtapor/turn',
+  'com.ashtapor.companion/combat-state',
+  'ashtapor/roster',
+  // Category C: Dead/unneeded extension keys in this room
+  'com.motw.companion/keeper-mystery',
+  'com.motw.companion/table-notes',
+  'com.motw.companion/hunters',
+  'com.motw.companion/roll-feed',
+  'com.bitperfect-software.hp-tracker/metadata',
+  'com.dddice/roomSlug',
+  'com.dddice/9c7c11a3-20c5-4ab7-8973-86fb8b5b798f',
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('combat');
   const [isReady, setIsReady] = useState<boolean>(false);
@@ -47,7 +67,7 @@ export default function App() {
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
-  // Initialize OBR Lifecycle & Audit Room Metadata
+  // Initialize OBR Lifecycle, Purge Dead Keys, and Audit
   useEffect(() => {
     runBootSanitizerOnce();
     OBR.onReady(async () => {
@@ -64,26 +84,49 @@ export default function App() {
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
 
-        // FACTUAL AUDIT: Read and display all keys and byte sizes in this room
+        // GM Room Purge & Verification
+        if (isGmRole) {
+          try {
+            const meta = await OBR.room.getMetadata();
+            const cleanupPatch: Record<string, undefined> = {};
+            let keysFound = 0;
+
+            for (const key of KEYS_TO_PURGE) {
+              if (key in meta) {
+                cleanupPatch[key] = undefined;
+                keysFound++;
+              }
+            }
+
+            if (keysFound > 0) {
+              await OBR.room.setMetadata(cleanupPatch);
+              console.log(`Successfully purged ${keysFound} dead keys from room metadata.`);
+            }
+
+            // Post-Purge Audit
+            const updatedMeta = await OBR.room.getMetadata();
+            console.log('=== POST-PURGE ROOM METADATA AUDIT ===');
+            let totalBytes = 0;
+            for (const [key, value] of Object.entries(updatedMeta)) {
+              const keyBytes = JSON.stringify(value).length;
+              totalBytes += keyBytes;
+              console.log(`Key: "${key}" | Size: ${keyBytes} bytes`);
+            }
+            console.log(`TOTAL ROOM USAGE: ${totalBytes} / 16384 bytes`);
+            console.log('======================================');
+          } catch (cleanupErr) {
+            console.error('Metadata purge failed:', cleanupErr);
+          }
+        }
+
+        // Fetch initial broadcast note if any
         try {
           const meta = await OBR.room.getMetadata();
-          console.log('=== ROOM METADATA AUDIT START ===');
-          let totalBytes = 0;
-          for (const [key, value] of Object.entries(meta)) {
-            const keyBytes = JSON.stringify(value).length;
-            totalBytes += keyBytes;
-            console.log(`Key: "${key}" | Size: ${keyBytes} bytes`);
-          }
-          console.log(`TOTAL ROOM USAGE: ${totalBytes} / 16384 bytes`);
-          console.log('=== ROOM METADATA AUDIT END ===');
-
           const broadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
           if (broadcast && broadcast.title) {
             setBroadcastNote(broadcast);
           }
-        } catch (auditErr) {
-          console.error('Room metadata audit failed:', auditErr);
-        }
+        } catch {}
 
         setIsReady(true);
       } catch (err) {
