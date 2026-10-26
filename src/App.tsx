@@ -47,7 +47,7 @@ export default function App() {
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
-  // Initialize OBR Lifecycle
+  // Initialize OBR Lifecycle & Purge Legacy Metadata Keys
   useEffect(() => {
     runBootSanitizerOnce();
     OBR.onReady(async () => {
@@ -63,6 +63,40 @@ export default function App() {
         setIsGM(isGmRole);
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
+
+        // ONE-TIME CLEANUP: Delete legacy keys from room metadata to reclaim the 16 kB quota
+        if (isGmRole) {
+          try {
+            const meta = await OBR.room.getMetadata();
+            const deadKeys = [
+              'ashtapor/roster',
+              'ashtapor/turn',
+              'ashtapor/combat_state',
+              'com.ashtapor.companion/feed-history',
+              'com.ashtapor.companion/feed-event',
+              'ashtapor/feed_event',
+              'ttrpg_ashtapor_feed',
+              'ashtapor/feed-event',
+            ];
+
+            const cleanupPatch: Record<string, undefined> = {};
+            let needsCleanup = false;
+
+            for (const key of deadKeys) {
+              if (key in meta) {
+                cleanupPatch[key] = undefined;
+                needsCleanup = true;
+              }
+            }
+
+            if (needsCleanup) {
+              await OBR.room.setMetadata(cleanupPatch);
+              console.log('Successfully purged legacy metadata keys to reclaim room quota.');
+            }
+          } catch (cleanupErr) {
+            console.warn('Metadata cleanup notice:', cleanupErr);
+          }
+        }
 
         // Fetch initial broadcast note if any
         try {
@@ -165,7 +199,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-full max-h-[820px] w-full max-w-[480px] bg-neutral-950 text-neutral-100 overflow-hidden select-none mx-auto border border-neutral-800 shadow-2xl relative">
-      {/* 1. TOP HEADER */}
+      {/* 1. TOP HEADER: RELOCATED UTILITY MICRO-BAR + ZERO-SCROLL 5 TABS */}
       <header className="shrink-0 z-40 bg-neutral-900/95 border-b border-neutral-800">
         <div className="h-6 px-2.5 bg-neutral-950/90 border-b border-neutral-800/80 flex items-center justify-between text-[11px]">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -221,7 +255,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Navigation Tabs */}
+        {/* Navigation Tabs (Exact 5-column grid: ZERO horizontal scroll) */}
         <nav className="w-full grid grid-cols-5 gap-1 p-1 bg-neutral-900 select-none overflow-hidden">
           <button
             type="button"
@@ -295,7 +329,7 @@ export default function App() {
         onClose={() => setIsHelpOpen(false)}
       />
 
-      {/* 2. MAIN CONTENT AREA */}
+      {/* 2. MAIN CONTENT AREA: Keep-Alive Persistent DOM Mounting */}
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
         <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
           <WhiteboardTracker isGM={isGM} />
@@ -314,7 +348,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* 3. BROADCAST NOTE MODAL */}
+      {/* 3. TABLE BROADCAST NOTE MODAL OVERLAY */}
       {shouldShowBroadcastModal && (() => {
         const themeCfg = broadcastNote.theme
           ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
