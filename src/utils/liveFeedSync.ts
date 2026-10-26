@@ -20,7 +20,7 @@ export interface UnifiedFeedItem {
   rollerId?: string;
   isDm?: boolean;
   message: string;
-  playerMessage?: string;
+  playerMessage?: string; // Obfuscated or generic message for player view (e.g. FoW damage or masked secret roll)
   isSecretRoll?: boolean;
   isSecret?: boolean;
   secretSender?: string;
@@ -56,8 +56,6 @@ export interface UnifiedFeedItem {
 }
 
 export const FEED_EVENT_KEY = 'com.ashtapor.companion/feed-event';
-export const FEED_BROADCAST_CHANNEL = 'com.ashtapor.companion/feed-broadcast';
-export const FEED_HISTORY_KEY = 'com.ashtapor.companion/feed-history';
 
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
 
@@ -73,7 +71,6 @@ class LiveFeedSyncManager {
   private currentName = 'Adventurer';
   private currentRoleIsGm = false;
   private currentId = '';
-  private obrReady = false;
 
   constructor() {
     this.init();
@@ -83,6 +80,7 @@ class LiveFeedSyncManager {
     if (this.initialized) return;
     this.initialized = true;
 
+    // Load saved items from localStorage
     try {
       const saved = localStorage.getItem('ttrpg_ashtapor_feed');
       if (saved) {
@@ -105,84 +103,39 @@ class LiveFeedSyncManager {
       ];
     }
 
-    if (typeof window !== 'undefined') {
-      OBR.onReady(async () => {
-        this.obrReady = true;
+    // Listen for OBR room metadata changes for shared feed events
+    try {
+      if (typeof window !== 'undefined') {
+        OBR.onReady(() => {
+          OBR.player.getId().then((id) => {
+            if (id) {
+              this.currentId = id;
+              try { localStorage.setItem('ashtapor_player_id', id); } catch {}
+            }
+          }).catch(() => {});
+          OBR.player.getName().then((n) => {
+            if (n) this.currentName = n;
+          }).catch(() => {});
+          OBR.player.getRole().then((r) => {
+            this.currentRoleIsGm = r === 'GM';
+          }).catch(() => {});
 
-        try {
-          const id = await OBR.player.getId();
-          if (id) {
-            this.currentId = id;
-            try { localStorage.setItem('ashtapor_player_id', id); } catch {}
-          }
-        } catch {}
+          OBR.player.onChange((player) => {
+            if (player.id) this.currentId = player.id;
+            if (player.name) this.currentName = player.name;
+            if (player.role) this.currentRoleIsGm = player.role === 'GM';
+          });
 
-        try {
-          const n = await OBR.player.getName();
-          if (n) this.currentName = n;
-        } catch {}
-
-        try {
-          const r = await OBR.player.getRole();
-          this.currentRoleIsGm = r === 'GM';
-        } catch {}
-
-        OBR.player.onChange((player) => {
-          if (player.id) this.currentId = player.id;
-          if (player.name) this.currentName = player.name;
-          if (player.role) this.currentRoleIsGm = player.role === 'GM';
-        });
-
-        try {
-          const meta = await OBR.room.getMetadata();
-          const history = meta[FEED_HISTORY_KEY] as UnifiedFeedItem[] | undefined;
-          if (Array.isArray(history) && history.length > 0) {
-            this.mergeHistory(history);
-          } else {
-            const feedPayload = meta[FEED_EVENT_KEY] as { item: UnifiedFeedItem } | undefined;
-            if (feedPayload?.item) {
+          OBR.room.onMetadataChange((metadata) => {
+            const feedPayload = metadata[FEED_EVENT_KEY] as { item: UnifiedFeedItem } | undefined;
+            if (feedPayload && feedPayload.item) {
               this.handleIncomingItem(feedPayload.item);
             }
-          }
-        } catch (e) {
-          console.warn('OBR initial feed load error:', e);
-        }
-
-        OBR.broadcast.onMessage(FEED_BROADCAST_CHANNEL, (event) => {
-          const data = event.data as { type: string; item?: UnifiedFeedItem };
-          if (!data) return;
-
-          if (data.type === 'item' && data.item) {
-            this.handleIncomingItem(data.item);
-          } else if (data.type === 'clear') {
-            this.handleRemoteClear();
-          }
+          });
         });
-
-        OBR.room.onMetadataChange((metadata) => {
-          if (
-            metadata[FEED_HISTORY_KEY] &&
-            Array.isArray(metadata[FEED_HISTORY_KEY]) &&
-            metadata[FEED_HISTORY_KEY].length === 0 &&
-            metadata[FEED_EVENT_KEY] === null
-          ) {
-            if (this.items.length > 0) {
-              this.handleRemoteClear();
-            }
-            return;
-          }
-
-          const feedPayload = metadata[FEED_EVENT_KEY] as { item: UnifiedFeedItem } | undefined;
-          if (feedPayload?.item) {
-            this.handleIncomingItem(feedPayload.item);
-          }
-
-          const history = metadata[FEED_HISTORY_KEY] as UnifiedFeedItem[] | undefined;
-          if (Array.isArray(history) && history.length > 0) {
-            this.mergeHistory(history);
-          }
-        });
-      });
+      }
+    } catch (e) {
+      console.warn('OBR feed listener init:', e);
     }
   }
 
@@ -222,44 +175,15 @@ class LiveFeedSyncManager {
     return this.currentRoleIsGm;
   }
 
-  private mergeHistory(remoteItems: UnifiedFeedItem[]) {
-    let changed = false;
-    const existingIds = new Set(this.items.map((i) => i.id));
-    const rollerId = this.getPlayerId();
-
-    for (const item of remoteItems) {
-      if (!existingIds.has(item.id)) {
-        const visibility = item.rollDetails?.visibility || (item.isSecretRoll ? 'gm_only' : 'public');
-        const itemRollerId = item.rollerId || item.rollDetails?.rollerId;
-        const isRoller = (itemRollerId && itemRollerId === rollerId) || item.sender === this.currentName;
-
-        if (visibility === 'self' && !isRoller) {
-          continue;
-        }
-
-        this.items.push(item);
-        existingIds.add(item.id);
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      this.items.sort((a, b) => a.timestamp - b.timestamp);
-      if (this.items.length > 100) {
-        this.items = this.items.slice(this.items.length - 100);
-      }
-      this.persistFeed();
-      this.notifyListeners();
-    }
-  }
-
   private handleIncomingItem(item: UnifiedFeedItem) {
+    // Prevent duplicate entries
     if (this.items.some((it) => it.id === item.id)) return;
 
     const visibility = item.rollDetails?.visibility || (item.isSecretRoll ? 'gm_only' : 'public');
     const rollerId = item.rollerId || item.rollDetails?.rollerId;
     const isRoller = (rollerId && rollerId === this.getPlayerId()) || item.sender === this.currentName;
 
+    // Visibility rules: don't show self-only rolls from other players
     if (visibility === 'self' && !isRoller) {
       return;
     }
@@ -270,12 +194,6 @@ class LiveFeedSyncManager {
     }
     this.persistFeed();
     this.notifyListeners(item);
-  }
-
-  private handleRemoteClear() {
-    this.items = [];
-    this.persistFeed();
-    this.notifyListeners();
   }
 
   private persistFeed() {
@@ -304,41 +222,19 @@ class LiveFeedSyncManager {
     return [...this.items];
   }
 
-  public async clearFeed(broadcast: boolean = true): Promise<void> {
+  public clearFeed(): void {
     this.items = [];
     this.persistFeed();
     this.notifyListeners();
-
-    if (broadcast) {
-      try {
-        await OBR.broadcast.sendMessage(FEED_BROADCAST_CHANNEL, { type: 'clear' });
-        await OBR.room.setMetadata({
-          [FEED_HISTORY_KEY]: [],
-          [FEED_EVENT_KEY]: null,
-        });
-      } catch (e) {
-        console.warn('Could not clear feed in OBR:', e);
-      }
-    }
   }
 
   private async broadcastFeedItem(item: UnifiedFeedItem) {
     try {
-      await OBR.broadcast.sendMessage(FEED_BROADCAST_CHANNEL, {
-        type: 'item',
-        item,
-      });
-
-      const nonSelfItems = this.items.filter((it) => {
-        const vis = it.rollDetails?.visibility || (it.isSecretRoll ? 'gm_only' : 'public');
-        return vis !== 'self';
-      });
-      const rollingHistory = nonSelfItems.slice(-40);
-
-      await OBR.room.setMetadata({
-        [FEED_EVENT_KEY]: { item, timestamp: Date.now() },
-        [FEED_HISTORY_KEY]: rollingHistory,
-      });
+      if (OBR.isReady) {
+        await OBR.room.setMetadata({
+          [FEED_EVENT_KEY]: { item, timestamp: Date.now() },
+        });
+      }
     } catch (e) {
       console.warn('Could not broadcast feed item to OBR room:', e);
     }
@@ -392,6 +288,7 @@ class LiveFeedSyncManager {
 
     const total = isIndividual ? null : roll.total;
 
+    // Mask secret roll for other players
     const playerMessage = isSecretRoll
       ? `${rollerName} made a secret roll to the DM 🔒`
       : message;
@@ -442,6 +339,7 @@ class LiveFeedSyncManager {
     this.persistFeed();
     this.notifyListeners(feedItem);
 
+    // If visibility === 'self': Only render on the roller's local client; do not broadcast to room metadata.
     if (broadcast && !isSelfRoll) {
       this.broadcastFeedItem(feedItem);
     }
@@ -489,8 +387,11 @@ class LiveFeedSyncManager {
     this.persistFeed();
     this.notifyListeners(feedItem);
 
+    // OBR native in-table notification for all participants
     try {
-      OBR.notification.show(announcement, 'INFO').catch(() => {});
+      if (OBR.isReady) {
+        OBR.notification.show(announcement, 'INFO').catch(() => {});
+      }
     } catch {}
 
     if (broadcast) {
