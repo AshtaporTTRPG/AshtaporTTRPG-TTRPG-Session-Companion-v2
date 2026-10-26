@@ -29,6 +29,7 @@ const QUICK_CONDITIONS = ['Concentrating', 'Prone', 'Poisoned', 'Bless', 'Bane']
 
 export interface WhiteboardTrackerProps {
   isGM?: boolean;
+  isReady?: boolean;
 }
 
 interface CombatantRowProps {
@@ -385,7 +386,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
   );
 };
 
-export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = false }) => {
+export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = false, isReady = true }) => {
   const [combatants, setCombatants] = useState<WhiteboardCombatant[]>([]);
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -438,14 +439,16 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     }
   }, []);
 
-  // Robust mount: No isMounted blocker; fetches immediately and attaches live listener
+  // Executes immediately when parent App says isReady without waiting on an orphaned onReady
   useEffect(() => {
+    if (!isReady) return;
+
     let unsub: (() => void) | undefined;
 
-    OBR.onReady(async () => {
+    const initTracker = async () => {
       try {
-        const initialMeta = await OBR.room.getMetadata();
-        syncFromMetadata(initialMeta);
+        const meta = await OBR.room.getMetadata();
+        syncFromMetadata(meta);
       } catch (e) {
         console.warn('Failed to load initial combat metadata:', e);
       }
@@ -453,12 +456,14 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       unsub = OBR.room.onMetadataChange((meta) => {
         syncFromMetadata(meta);
       });
-    });
+    };
+
+    initTracker();
 
     return () => {
       if (unsub) unsub();
     };
-  }, [syncFromMetadata]);
+  }, [isReady, syncFromMetadata]);
 
   useEffect(() => {
     if (isAddStripOpen) {
