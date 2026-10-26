@@ -17,6 +17,7 @@ import {
 import { WhiteboardCombatant, WhiteboardState } from '../../types/whiteboard';
 
 const WHITEBOARD_KEY = 'ashtapor/whiteboard';
+const PLAYER_UPDATE_CHANNEL = 'ashtapor/player_update_combatant';
 
 const DEFAULT_STATE: WhiteboardState = {
   round: 1,
@@ -58,7 +59,6 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
   const [localName, setLocalName] = useState(combatant.name);
   const [localInit, setLocalInit] = useState(String(combatant.initiative));
   const [localNote, setLocalNote] = useState(combatant.note || '');
-
   const [isTagPickerOpen, setIsTagPickerOpen] = useState(false);
   const [customTag, setCustomTag] = useState('');
 
@@ -144,7 +144,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
           {isGM && (
             <span
               className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-300 shrink-0"
-              title="Drag to reorder initiative"
+              title="Drag to reorder"
             >
               <GripVertical className="w-3.5 h-3.5" />
             </span>
@@ -153,6 +153,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
           <input
             type="number"
             value={localInit}
+            disabled={!isGM}
             onFocus={() => { isInitFocusedRef.current = true; }}
             onChange={(e) => setLocalInit(e.target.value)}
             onBlur={() => {
@@ -160,7 +161,9 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
               commitInit();
             }}
             onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-            className="w-10 px-1 py-0.5 text-center text-xs font-mono font-bold bg-slate-950 border border-slate-700 rounded text-amber-300 focus:outline-none focus:border-amber-400 shrink-0"
+            className={`w-10 px-1 py-0.5 text-center text-xs font-mono font-bold bg-slate-950 border border-slate-700 rounded text-amber-300 focus:outline-none focus:border-amber-400 shrink-0 ${
+              !isGM ? 'cursor-default opacity-90' : ''
+            }`}
             title="Initiative Score"
           />
 
@@ -184,7 +187,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             <button
               type="button"
               onClick={() => setIsTagPickerOpen(true)}
-              className="text-[10px] text-slate-500 hover:text-amber-300 px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center gap-0.5 shrink-0"
+              className="text-[10px] text-slate-500 hover:text-amber-300 px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center gap-0.5 shrink-0 cursor-pointer"
               title="Add Condition Tag or Note"
             >
               <Tag className="w-2.5 h-2.5" />
@@ -194,18 +197,25 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <label
-            className="relative w-4 h-4 rounded-full cursor-pointer border border-white/30 shadow-sm hover:scale-110 transition-transform shrink-0 flex items-center justify-center"
-            style={{ backgroundColor: combatant.color || '#3B82F6' }}
-            title="Change Marker Color"
-          >
-            <input
-              type="color"
-              value={combatant.color || '#3B82F6'}
-              onChange={(e) => onUpdate(combatant.id, { color: e.target.value })}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          {isGM ? (
+            <label
+              className="relative w-4 h-4 rounded-full cursor-pointer border border-white/30 shadow-sm hover:scale-110 transition-transform shrink-0 flex items-center justify-center"
+              style={{ backgroundColor: combatant.color || '#3B82F6' }}
+              title="Change Color"
+            >
+              <input
+                type="color"
+                value={combatant.color || '#3B82F6'}
+                onChange={(e) => onUpdate(combatant.id, { color: e.target.value })}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </label>
+          ) : (
+            <div
+              className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
+              style={{ backgroundColor: combatant.color || '#3B82F6' }}
             />
-          </label>
+          )}
 
           <button
             type="button"
@@ -234,7 +244,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
               <button
                 type="button"
                 onClick={() => onDelete(combatant.id)}
-                title="Remove from board"
+                title="Remove"
                 className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -255,8 +265,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
               <button
                 type="button"
                 onClick={() => handleRemoveTag(tIdx)}
-                className="text-slate-400 hover:text-rose-400 transition"
-                title={`Remove ${tag}`}
+                className="text-slate-400 hover:text-rose-400 transition cursor-pointer"
               >
                 <X className="w-2.5 h-2.5" />
               </button>
@@ -267,7 +276,7 @@ const CombatantRow: React.FC<CombatantRowProps> = ({
             <button
               type="button"
               onClick={() => setIsTagPickerOpen(!isTagPickerOpen)}
-              className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-amber-300 bg-slate-800/80 hover:bg-slate-700 rounded border border-slate-700/80 transition-colors flex items-center gap-1"
+              className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-amber-300 bg-slate-800/80 hover:bg-slate-700 rounded border border-slate-700/80 transition-colors flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-2.5 h-2.5" />
               <span>Tag</span>
@@ -364,7 +373,12 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const [board, setBoard] = useState<WhiteboardState>(DEFAULT_STATE);
   const boardRef = useRef<WhiteboardState>(DEFAULT_STATE);
   boardRef.current = board;
-  const hasLoadedRoomRef = useRef<boolean>(false);
+
+  const isGmRef = useRef<boolean>(isGM);
+  isGmRef.current = isGM;
+
+  // Mutex promise queue ensuring zero dropped/rate-limited commits
+  const commitQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -372,10 +386,12 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const [newColor, setNewColor] = useState('#3B82F6');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  // 1. Initial Mount & Live Room Sync
   useEffect(() => {
-    let unsub: (() => void) | undefined;
+    let unsubMeta: (() => void) | undefined;
+    let unsubBroadcast: (() => void) | undefined;
 
-    const attach = async () => {
+    const setup = async () => {
       try {
         if (typeof OBR !== 'undefined' && OBR.isReady) {
           const meta = await OBR.room.getMetadata();
@@ -383,31 +399,49 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
           if (existing && Array.isArray(existing.combatants)) {
             setBoard(existing);
           }
-          hasLoadedRoomRef.current = true;
 
-          unsub = OBR.room.onMetadataChange((incomingMeta) => {
+          unsubMeta = OBR.room.onMetadataChange((incomingMeta) => {
             const live = incomingMeta[WHITEBOARD_KEY] as WhiteboardState | undefined;
             if (live && Array.isArray(live.combatants)) {
               setBoard(live);
             }
           });
+
+          // GM listens to player patch broadcasts and commits them to room metadata
+          const obrAny = OBR as any;
+          if (obrAny.broadcast) {
+            unsubBroadcast = obrAny.broadcast.onMessage(
+              PLAYER_UPDATE_CHANNEL,
+              (event: any) => {
+                if (!isGmRef.current) return;
+                const data = event.data as { id: string; patch: Partial<WhiteboardCombatant> } | undefined;
+                if (data && data.id && data.patch) {
+                  const current = boardRef.current;
+                  const updated = current.combatants.map((c) =>
+                    c.id === data.id ? { ...c, ...data.patch } : c
+                  );
+                  commitBoardDirect({ ...current, combatants: updated });
+                }
+              }
+            );
+          }
         }
       } catch (err) {
         console.warn('Could not initialize whiteboard room sync:', err);
-        hasLoadedRoomRef.current = true;
       }
     };
 
     if (typeof OBR !== 'undefined') {
       if (OBR.isReady) {
-        attach();
+        setup();
       } else {
-        OBR.onReady(() => attach());
+        OBR.onReady(() => setup());
       }
     }
 
     return () => {
-      if (unsub) unsub();
+      if (unsubMeta) unsubMeta();
+      if (unsubBroadcast) unsubBroadcast();
     };
   }, []);
 
@@ -428,25 +462,26 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddStripOpen]);
 
-  const commitBoard = useCallback(async (newState: WhiteboardState) => {
+  // Guaranteed sequential, non-dropped commit to OBR
+  const commitBoardDirect = useCallback((newState: WhiteboardState) => {
     setBoard(newState);
-    try {
-      localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(newState));
-    } catch {}
+    if (!isGmRef.current) return;
 
-    try {
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        await OBR.room.setMetadata({ [WHITEBOARD_KEY]: newState });
+    commitQueueRef.current = commitQueueRef.current.then(async () => {
+      try {
+        if (typeof OBR !== 'undefined' && OBR.isReady) {
+          await OBR.room.setMetadata({ [WHITEBOARD_KEY]: newState });
+        }
+      } catch (err) {
+        console.error('Failed to commit whiteboard metadata:', err);
       }
-    } catch (err) {
-      console.error('Failed to commit whiteboard metadata:', err);
-    }
+    });
   }, []);
 
   const handleSort = () => {
     if (!isGM) return;
     const sorted = [...boardRef.current.combatants].sort((a, b) => b.initiative - a.initiative);
-    commitBoard({ ...boardRef.current, combatants: sorted });
+    commitBoardDirect({ ...boardRef.current, combatants: sorted });
   };
 
   const handleNextTurn = () => {
@@ -472,7 +507,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       }
     }
 
-    commitBoard({ ...boardRef.current, activeIndex: nextIndex, round: nextRound });
+    commitBoardDirect({ ...boardRef.current, activeIndex: nextIndex, round: nextRound });
   };
 
   const handlePrevTurn = () => {
@@ -485,29 +520,31 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       prevRound = Math.max(1, prevRound - 1);
     }
 
-    commitBoard({ ...boardRef.current, activeIndex: prevIndex, round: prevRound });
+    commitBoardDirect({ ...boardRef.current, activeIndex: prevIndex, round: prevRound });
   };
 
   const handleRewind = () => {
     if (!isGM) return;
-    commitBoard({ ...boardRef.current, round: 1, activeIndex: 0 });
+    commitBoardDirect({ ...boardRef.current, round: 1, activeIndex: 0 });
   };
 
   const handleClearBoard = () => {
     if (!isGM) return;
     if (window.confirm('Clear all combatants from the Whiteboard?')) {
-      commitBoard(DEFAULT_STATE);
+      commitBoardDirect(DEFAULT_STATE);
     }
   };
 
-  // Fixed: Guaranteed fresh state via functional update
+  // Add Combatant (GM Only - Infinite capacity)
   const handleConfirmAddCombatant = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isGM || !newName.trim()) return;
 
     const parsedInit = parseFloat(newInit) || 0;
     const newCombatant: WhiteboardCombatant = {
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       name: newName.trim(),
       initiative: parsedInit,
       color: newColor,
@@ -515,84 +552,74 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       isDowned: false,
     };
 
-    setBoard((prev) => {
-      const nextState = { ...prev, combatants: [...prev.combatants, newCombatant] };
-      try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
-      }
-      return nextState;
-    });
+    const nextState = {
+      ...boardRef.current,
+      combatants: [...boardRef.current.combatants, newCombatant],
+    };
+    commitBoardDirect(nextState);
 
     setNewName('');
     setNewInit('');
     setIsAddStripOpen(false);
   };
 
+  // Update Combatant: GM commits directly; Player broadcasts patch to GM
   const handleUpdateCombatant = useCallback((id: string, patch: Partial<WhiteboardCombatant>) => {
-    setBoard((prev) => {
-      const updated = prev.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
-      const nextState = { ...prev, combatants: updated };
+    if (isGmRef.current) {
+      const updated = boardRef.current.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
+      commitBoardDirect({ ...boardRef.current, combatants: updated });
+    } else {
+      // Optimistic local update for instantaneous player typing response
+      setBoard((prev) => ({
+        ...prev,
+        combatants: prev.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      }));
+
+      // Broadcast to GM client to write to room metadata
       try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
+        const obrAny = OBR as any;
+        if (obrAny.broadcast) {
+          obrAny.broadcast.sendMessage(PLAYER_UPDATE_CHANNEL, { id, patch });
+        }
+      } catch (err) {
+        console.warn('Could not broadcast player edit:', err);
       }
-      return nextState;
-    });
-  }, []);
+    }
+  }, [commitBoardDirect]);
 
   const handleDuplicateCombatant = useCallback((id: string) => {
     if (!isGM) return;
-    setBoard((prev) => {
-      const target = prev.combatants.find((c) => c.id === id);
-      if (!target) return prev;
+    const target = boardRef.current.combatants.find((c) => c.id === id);
+    if (!target) return;
 
-      const newId = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `wb-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-      const clone: WhiteboardCombatant = {
-        ...target,
-        id: newId,
-        name: `${target.name} (Copy)`,
-        conditions: [...target.conditions],
-        isDowned: false,
-      };
+    const clone: WhiteboardCombatant = {
+      ...target,
+      id: newId,
+      name: `${target.name} (Copy)`,
+      conditions: [...target.conditions],
+      isDowned: false,
+    };
 
-      const updated = [...prev.combatants, clone];
-      const nextState = { ...prev, combatants: updated };
-      try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
-      }
-      return nextState;
-    });
-  }, [isGM]);
+    const updated = [...boardRef.current.combatants, clone];
+    commitBoardDirect({ ...boardRef.current, combatants: updated });
+  }, [isGM, commitBoardDirect]);
 
   const handleDeleteCombatant = useCallback((id: string) => {
     if (!isGM) return;
-    setBoard((prev) => {
-      const updated = prev.combatants.filter((c) => c.id !== id);
-      const newActiveIndex =
-        prev.activeIndex >= updated.length ? Math.max(0, updated.length - 1) : prev.activeIndex;
-      const nextState = { ...prev, combatants: updated, activeIndex: newActiveIndex };
-      try {
-        localStorage.setItem('ashtapor_whiteboard_state', JSON.stringify(nextState));
-      } catch {}
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        OBR.room.setMetadata({ [WHITEBOARD_KEY]: nextState }).catch(console.error);
-      }
-      return nextState;
-    });
-  }, [isGM]);
+    const updated = boardRef.current.combatants.filter((c) => c.id !== id);
+    const newActiveIndex =
+      boardRef.current.activeIndex >= updated.length
+        ? Math.max(0, updated.length - 1)
+        : boardRef.current.activeIndex;
 
-  // Drag and Drop: Local state update only during drag, commits once on DragEnd
+    commitBoardDirect({ ...boardRef.current, combatants: updated, activeIndex: newActiveIndex });
+  }, [isGM, commitBoardDirect]);
+
+  // Drag and drop: purely local state during drag, commits once on drop
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const handleDragStart = (idx: number) => {
@@ -615,7 +642,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const handleDragEnd = () => {
     setDraggedIdx(null);
     if (isGM) {
-      commitBoard(boardRef.current);
+      commitBoardDirect(boardRef.current);
     }
   };
 
@@ -623,6 +650,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-950 text-slate-100 select-text">
+      {/* 1. TOP HEADER CASSETTE BAR */}
       <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-slate-800 bg-slate-900/95 shrink-0 min-h-[38px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded shrink-0">
@@ -702,6 +730,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
         </div>
       </div>
 
+      {/* 2. ADD COMBATANT TOP STRIP (GM Only) */}
       {isGM && isAddStripOpen && (
         <form
           onSubmit={handleConfirmAddCombatant}
@@ -756,6 +785,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
         </form>
       )}
 
+      {/* 3. COMBATANT TILES LIST */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
         {board.combatants.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs text-center p-4">
