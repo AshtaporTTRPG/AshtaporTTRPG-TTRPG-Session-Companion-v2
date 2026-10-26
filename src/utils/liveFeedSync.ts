@@ -73,6 +73,7 @@ class LiveFeedSyncManager {
   private currentName = 'Adventurer';
   private currentRoleIsGm = false;
   private currentId = '';
+  private obrReady = false;
 
   constructor() {
     this.init();
@@ -82,7 +83,6 @@ class LiveFeedSyncManager {
     if (this.initialized) return;
     this.initialized = true;
 
-    // Load saved items from localStorage as fallback
     try {
       const saved = localStorage.getItem('ttrpg_ashtapor_feed');
       if (saved) {
@@ -107,6 +107,8 @@ class LiveFeedSyncManager {
 
     if (typeof window !== 'undefined') {
       OBR.onReady(async () => {
+        this.obrReady = true;
+
         try {
           const id = await OBR.player.getId();
           if (id) {
@@ -131,7 +133,6 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // 1. Load room feed history on startup so late joiners and refreshed tabs sync immediately
         try {
           const meta = await OBR.room.getMetadata();
           const history = meta[FEED_HISTORY_KEY] as UnifiedFeedItem[] | undefined;
@@ -147,7 +148,6 @@ class LiveFeedSyncManager {
           console.warn('OBR initial feed load error:', e);
         }
 
-        // 2. Real-time broadcast channel (zero debounce, direct WebSocket delivery to all peers)
         OBR.broadcast.onMessage(FEED_BROADCAST_CHANNEL, (event) => {
           const data = event.data as { type: string; item?: UnifiedFeedItem };
           if (!data) return;
@@ -159,7 +159,6 @@ class LiveFeedSyncManager {
           }
         });
 
-        // 3. Metadata listener fallback
         OBR.room.onMetadataChange((metadata) => {
           if (
             metadata[FEED_HISTORY_KEY] &&
@@ -310,7 +309,7 @@ class LiveFeedSyncManager {
     this.persistFeed();
     this.notifyListeners();
 
-    if (broadcast && typeof OBR !== 'undefined' && OBR.isReady) {
+    if (broadcast) {
       try {
         await OBR.broadcast.sendMessage(FEED_BROADCAST_CHANNEL, { type: 'clear' });
         await OBR.room.setMetadata({
@@ -325,25 +324,21 @@ class LiveFeedSyncManager {
 
   private async broadcastFeedItem(item: UnifiedFeedItem) {
     try {
-      if (OBR.isReady) {
-        // 1. Instant delivery via broadcast to all online players
-        await OBR.broadcast.sendMessage(FEED_BROADCAST_CHANNEL, {
-          type: 'item',
-          item,
-        });
+      await OBR.broadcast.sendMessage(FEED_BROADCAST_CHANNEL, {
+        type: 'item',
+        item,
+      });
 
-        // 2. Persist recent rolls to room metadata for late joiners and refreshes
-        const nonSelfItems = this.items.filter((it) => {
-          const vis = it.rollDetails?.visibility || (it.isSecretRoll ? 'gm_only' : 'public');
-          return vis !== 'self';
-        });
-        const rollingHistory = nonSelfItems.slice(-40);
+      const nonSelfItems = this.items.filter((it) => {
+        const vis = it.rollDetails?.visibility || (it.isSecretRoll ? 'gm_only' : 'public');
+        return vis !== 'self';
+      });
+      const rollingHistory = nonSelfItems.slice(-40);
 
-        await OBR.room.setMetadata({
-          [FEED_EVENT_KEY]: { item, timestamp: Date.now() },
-          [FEED_HISTORY_KEY]: rollingHistory,
-        });
-      }
+      await OBR.room.setMetadata({
+        [FEED_EVENT_KEY]: { item, timestamp: Date.now() },
+        [FEED_HISTORY_KEY]: rollingHistory,
+      });
     } catch (e) {
       console.warn('Could not broadcast feed item to OBR room:', e);
     }
@@ -495,9 +490,7 @@ class LiveFeedSyncManager {
     this.notifyListeners(feedItem);
 
     try {
-      if (OBR.isReady) {
-        OBR.notification.show(announcement, 'INFO').catch(() => {});
-      }
+      OBR.notification.show(announcement, 'INFO').catch(() => {});
     } catch {}
 
     if (broadcast) {
