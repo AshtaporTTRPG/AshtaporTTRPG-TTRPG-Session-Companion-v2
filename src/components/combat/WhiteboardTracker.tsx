@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { WhiteboardCombatant, WhiteboardState } from '../../types/whiteboard';
 
-export const COMBAT_KEY = 'ashtapor/combat_state';
+export const COMBAT_KEY = 'com.ashtapor.companion/combat_state';
 export const COMBAT_STATE_KEY = COMBAT_KEY;
 
 const DEFAULT_STATE: WhiteboardState = {
