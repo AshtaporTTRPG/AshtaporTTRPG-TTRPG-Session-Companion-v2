@@ -397,13 +397,14 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
 
+  const obrReadyRef = useRef(false);
+
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newInit, setNewInit] = useState('');
   const [newColor, setNewColor] = useState('#3B82F6');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper to sync state while supporting both 'round' and 'currentRound' symmetrically
   const syncFromMetadata = useCallback((meta: any) => {
     const raw = meta?.[COMBAT_KEY];
     if (!raw) return;
@@ -420,34 +421,40 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     }
   }, []);
 
-  // Centralized writer ensuring both 'round' and 'currentRound' are populated
   const commitCombatState = useCallback(async (
     newCombatants: WhiteboardCombatant[],
     round: number,
     activeIdx: number
   ) => {
-    if (typeof OBR === 'undefined' || !OBR.isReady) return;
-    await OBR.room.setMetadata({
-      [COMBAT_KEY]: {
-        combatants: newCombatants,
-        round,
-        currentRound: round,
-        activeIndex: activeIdx,
-      },
-    });
+    try {
+      await OBR.room.setMetadata({
+        [COMBAT_KEY]: {
+          combatants: newCombatants,
+          round,
+          currentRound: round,
+          activeIndex: activeIdx,
+        },
+      });
+    } catch (e) {
+      console.warn('Failed to commit combat state to OBR:', e);
+    }
   }, []);
 
-  // 1. Lifecycle-safe mount & Room Sync
   useEffect(() => {
     let unsub: (() => void) | undefined;
     let isMounted = true;
 
     OBR.onReady(async () => {
       if (!isMounted) return;
+      obrReadyRef.current = true;
 
-      const initialMeta = await OBR.room.getMetadata();
-      if (!isMounted) return;
-      syncFromMetadata(initialMeta);
+      try {
+        const initialMeta = await OBR.room.getMetadata();
+        if (!isMounted) return;
+        syncFromMetadata(initialMeta);
+      } catch (e) {
+        console.warn('Failed to load initial combat metadata:', e);
+      }
 
       unsub = OBR.room.onMetadataChange((meta) => {
         if (!isMounted) return;
@@ -480,7 +487,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddStripOpen]);
 
-  // Turn management (GM only)
   const handleSort = async () => {
     if (!isGM) return;
     const sorted = [...combatantsRef.current].sort((a, b) => b.initiative - a.initiative);
@@ -573,19 +579,19 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     setIsAddStripOpen(false);
   };
 
-  // Combatant update: preserves current room round & turn index rather than stale local refs
   const handleUpdateCombatant = useCallback(async (id: string, patch: Partial<WhiteboardCombatant>) => {
     const updatedCombatants = combatantsRef.current.map((c) => (c.id === id ? { ...c, ...patch } : c));
     setCombatants(updatedCombatants);
 
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      // Fetch latest metadata to avoid rewinding an in-flight round/turn advance
+    try {
       const currentMeta = await OBR.room.getMetadata();
       const raw = currentMeta?.[COMBAT_KEY] as Record<string, any> | undefined;
       const latestRound = raw?.currentRound ?? raw?.round ?? currentRoundRef.current;
       const latestIndex = raw?.activeIndex ?? activeIndexRef.current;
 
       await commitCombatState(updatedCombatants, latestRound, latestIndex);
+    } catch {
+      await commitCombatState(updatedCombatants, currentRoundRef.current, activeIndexRef.current);
     }
   }, [commitCombatState]);
 
@@ -621,7 +627,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     await commitCombatState(updatedCombatants, currentRoundRef.current, nextActiveIndex);
   }, [isGM, commitCombatState]);
 
-  // Drag and Drop: Local reorder during drag, SINGLE commit on drag end
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const handleDragStart = (idx: number) => {
@@ -638,13 +643,12 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     list.splice(idx, 0, moved);
 
     setDraggedIdx(idx);
-    setCombatants(list); // Updates local DOM UI only - NO WebSocket call here
+    setCombatants(list);
   };
 
   const handleDragEnd = async () => {
     setDraggedIdx(null);
     if (isGM) {
-      // Single atomic commit to OBR when user releases mouse
       await commitCombatState(combatantsRef.current, currentRoundRef.current, activeIndexRef.current);
     }
   };
