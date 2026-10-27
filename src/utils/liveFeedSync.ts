@@ -56,7 +56,6 @@ export interface UnifiedFeedItem {
 }
 
 export const FEED_EVENT_KEY = 'ashtapor/feed_event';
-export const BROADCAST_CHANNEL = 'ashtapor/dice_broadcast';
 
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
 
@@ -81,7 +80,6 @@ class LiveFeedSyncManager {
     if (this.initialized) return;
     this.initialized = true;
 
-    // Load locally persisted feed
     try {
       const saved = localStorage.getItem('ttrpg_ashtapor_feed');
       if (saved) {
@@ -106,13 +104,6 @@ class LiveFeedSyncManager {
 
     if (typeof window !== 'undefined') {
       OBR.onReady(() => {
-        // One-time room cleanup: delete any legacy persistent feed_event key from cloud metadata
-        OBR.room.getMetadata().then((metadata) => {
-          if (FEED_EVENT_KEY in metadata) {
-            OBR.room.setMetadata({ [FEED_EVENT_KEY]: undefined }).catch(() => {});
-          }
-        }).catch(() => {});
-
         OBR.player.getId().then((id) => {
           if (id) {
             this.currentId = id;
@@ -132,17 +123,26 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // Listen for real-time peer-to-peer broadcasts
-        try {
-          OBR.broadcast.onMessage(BROADCAST_CHANNEL, (event) => {
-            const incomingItem = event.data as UnifiedFeedItem;
-            if (incomingItem && incomingItem.id) {
-              this.handleIncomingItem(incomingItem);
+        // Listen for live room events
+        OBR.room.onMetadataChange((metadata) => {
+          const feedPayload = metadata[FEED_EVENT_KEY] as { raw?: string; item?: UnifiedFeedItem } | undefined;
+          if (!feedPayload) return;
+
+          let incomingItem: UnifiedFeedItem | undefined;
+          if (typeof feedPayload.raw === 'string') {
+            try {
+              incomingItem = JSON.parse(feedPayload.raw);
+            } catch (err) {
+              console.warn('Could not parse feed event JSON:', err);
             }
-          });
-        } catch (err) {
-          console.warn('Could not attach broadcast listener:', err);
-        }
+          } else if (feedPayload.item) {
+            incomingItem = feedPayload.item;
+          }
+
+          if (incomingItem && incomingItem.id) {
+            this.handleIncomingItem(incomingItem);
+          }
+        });
       });
     }
   }
@@ -184,7 +184,6 @@ class LiveFeedSyncManager {
   }
 
   private handleIncomingItem(item: UnifiedFeedItem) {
-    // Prevent duplicate entries if received back
     if (this.items.some((it) => it.id === item.id)) return;
 
     const visibility = item.rollDetails?.visibility || (item.isSecretRoll ? 'gm_only' : 'public');
@@ -229,26 +228,24 @@ class LiveFeedSyncManager {
     return [...this.items];
   }
 
-  public clearFeed(): void {
+  public async clearFeed(): Promise<void> {
     this.items = [];
     this.persistFeed();
     this.notifyListeners();
-
-    try {
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        OBR.room.setMetadata({ [FEED_EVENT_KEY]: undefined }).catch(() => {});
-      }
-    } catch {}
   }
 
   private async broadcastFeedItem(item: UnifiedFeedItem) {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        // Native real-time broadcast: bypasses OBR.room.setMetadata and cleanRawMetadata entirely
-        await OBR.broadcast.sendMessage(BROADCAST_CHANNEL, item);
+        await OBR.room.setMetadata({
+          [FEED_EVENT_KEY]: {
+            raw: JSON.stringify(item),
+            timestamp: Date.now(),
+          },
+        });
       }
     } catch (e) {
-      console.warn('Could not broadcast feed item:', e);
+      console.warn('Could not broadcast feed item to OBR room:', e);
     }
   }
 
