@@ -67,6 +67,7 @@ export default function App() {
           try {
             // Room Metadata Audit (ReadOnly)
             const meta = await OBR.room.getMetadata();
+            console.log('RAW ROOM METADATA:', meta);
             console.log('=== ROOM METADATA AUDIT ===');
             let totalBytes = 0;
             for (const [key, value] of Object.entries(meta)) {
