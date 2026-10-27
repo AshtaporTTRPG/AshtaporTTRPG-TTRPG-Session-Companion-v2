@@ -10,7 +10,7 @@ import { isAudioEnabled, toggleAudio } from './utils/audio';
 import { copyToClipboard } from './utils/clipboard';
 import { runBootSanitizerOnce } from './utils/notesSanitizer';
 import { WhiteboardTracker } from './components/combat/WhiteboardTracker';
-import { DiceChamber } from './components/DiceChamber';
+import { DiceChamber } from './components/dice/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
