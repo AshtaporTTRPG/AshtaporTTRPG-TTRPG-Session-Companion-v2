@@ -260,43 +260,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  const handleReroll = (roll: RollResult, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    let pool = roll.poolBreakdown?.map((pb) => ({
-      diceType: pb.dieType,
-      count: pb.rolls.length,
-    }));
-
-    if (!pool || pool.length === 0) {
-      if (roll.formula) {
-        const parsed = parseDiceFormula(roll.formula);
-        if (parsed) pool = parsed.pool;
-      }
-    }
-
-    const currentUserId = liveFeedSync.getPlayerId();
-    const result = executeDiceRoll({
-      pool,
-      diceType: roll.diceType,
-      count: roll.count,
-      modifier: roll.modifier,
-      advantageMode: roll.advantageMode || 'normal',
-      displayMode: roll.displayMode || 'sum',
-      sender: rollerName,
-      rollerName,
-      rollerId: currentUserId,
-      isDm,
-      visibility: roll.visibility || 'public',
-      label: roll.label,
-      macroName: roll.macroName,
-    });
-
-    liveFeedSync.recordDiceRoll(result, true);
-  };
-
-  // Evaluates a single macro evaluation returning formatted output and metadata
+  // Evaluates a single macro returning formatted output and metadata
   const evaluateMacro = (macro: CustomMacro) => {
     let activeAdvMode: 'normal' | 'advantage' | 'disadvantage' = 'normal';
     const rawMode = (macro as any).rollMode || macro.advantageMode;
@@ -800,7 +764,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
           </button>
 
           <div className="flex items-center gap-1.5">
-            {/* Mode Switch: 1-Click vs Queue */}
             <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 text-[10px] shrink-0">
               <button
                 type="button"
@@ -920,7 +883,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
           </div>
         )}
 
-        {/* Staging Combo Bar (Active when macros are queued) */}
         {stagedQueue.length > 0 && (
           <div className="mt-1.5 pt-1.5 border-t border-slate-800 flex flex-col gap-1.5 bg-slate-950/70 p-2 rounded-lg border border-amber-500/40 animate-fadeIn">
             <div className="flex items-center justify-between text-[11px]">
@@ -976,7 +938,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         )}
       </div>
 
-      {/* 5. ROLL FEED */}
+      {/* 5. ROLL FEED (Immutable Audit Log) */}
       <div className="flex-1 min-h-[220px] rounded-xl border border-slate-800/90 bg-slate-950/60 p-2 flex flex-col gap-2">
         <div className="flex items-center justify-between pb-1 border-b border-slate-800/80 shrink-0">
           <div className="flex items-center gap-1.5">
@@ -1046,7 +1008,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                 <RollFeedCard
                   key={roll.id}
                   roll={roll}
-                  onReroll={handleReroll}
                   isDm={isDm}
                   playerName={rollerName}
                 />
