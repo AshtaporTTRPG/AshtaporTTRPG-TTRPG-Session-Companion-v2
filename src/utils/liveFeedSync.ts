@@ -64,6 +64,27 @@ function formatFormula(count: number, die: string, mod: number): string {
   return `${count}${die}${modStr}`;
 }
 
+/**
+ * Strips all undefined and null values from an object tree
+ * to prevent Owlbear's host transformLoadingValues from throwing.
+ */
+function sanitizeMetadataPayload<T>(obj: T): T {
+  if (obj === null || obj === undefined) return undefined as any;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeMetadataPayload(item)) as any;
+  }
+  if (typeof obj === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj as Record<string, any>)) {
+      if (val !== undefined && val !== null) {
+        cleaned[key] = typeof val === 'object' ? sanitizeMetadataPayload(val) : val;
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
 class LiveFeedSyncManager {
   private items: UnifiedFeedItem[] = [];
   private listeners: Set<FeedListener> = new Set();
@@ -123,9 +144,9 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // Listen for live room events
+        // Listen for live room events (supports both clean object structure and legacy string fallback)
         OBR.room.onMetadataChange((metadata) => {
-          const feedPayload = metadata[FEED_EVENT_KEY] as { raw?: string; item?: UnifiedFeedItem } | undefined;
+          const feedPayload = metadata[FEED_EVENT_KEY] as any;
           if (!feedPayload) return;
 
           let incomingItem: UnifiedFeedItem | undefined;
@@ -133,10 +154,12 @@ class LiveFeedSyncManager {
             try {
               incomingItem = JSON.parse(feedPayload.raw);
             } catch (err) {
-              console.warn('Could not parse feed event JSON:', err);
+              console.warn('Could not parse legacy feed event JSON:', err);
             }
           } else if (feedPayload.item) {
             incomingItem = feedPayload.item;
+          } else if (feedPayload.id && feedPayload.type) {
+            incomingItem = feedPayload as UnifiedFeedItem;
           }
 
           if (incomingItem && incomingItem.id) {
@@ -237,9 +260,10 @@ class LiveFeedSyncManager {
   private async broadcastFeedItem(item: UnifiedFeedItem) {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
+        const sanitizedItem = sanitizeMetadataPayload(item);
         await OBR.room.setMetadata({
           [FEED_EVENT_KEY]: {
-            raw: JSON.stringify(item),
+            item: sanitizedItem,
             timestamp: Date.now(),
           },
         });
