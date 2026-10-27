@@ -21,23 +21,6 @@ import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
 
-const KEYS_TO_PURGE = [
-  'ashtapor/feed',
-  'com.ashtapor.session-companion/table-notes',
-  'com.ashtapor.companion/feed-event',
-  'com.ashtapor.companion/table-notes',
-  'ashtapor/turn',
-  'com.ashtapor.companion/combat-state',
-  'ashtapor/roster',
-  'com.motw.companion/keeper-mystery',
-  'com.motw.companion/table-notes',
-  'com.motw.companion/hunters',
-  'com.motw.companion/roll-feed',
-  'com.bitperfect-software.hp-tracker/metadata',
-  'com.dddice/roomSlug',
-  'com.dddice/9c7c11a3-20c5-4ab7-8973-86fb8b5b798f',
-];
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('combat');
   const [isReady, setIsReady] = useState<boolean>(false);
@@ -82,40 +65,21 @@ export default function App() {
 
         if (isGmRole) {
           try {
+            // Room Metadata Audit (ReadOnly)
             const meta = await OBR.room.getMetadata();
-            const cleanupPatch: Record<string, undefined> = {};
-            let needsCleanup = false;
-
-            for (const key of KEYS_TO_PURGE) {
-              if (key in meta) {
-                cleanupPatch[key] = undefined;
-                needsCleanup = true;
+            console.log('=== ROOM METADATA AUDIT ===');
+            let totalBytes = 0;
+            for (const [key, value] of Object.entries(meta)) {
+              if (value !== undefined && value !== null) {
+                const keyBytes = JSON.stringify(value).length;
+                totalBytes += keyBytes;
+                console.log(`Key: "${key}" | Size: ${keyBytes} bytes`);
               }
             }
-
-            // Purge poisonous null stored in ashtapor/broadcast_note
-            if (meta[OBR_BROADCAST_NOTE_KEY] === null) {
-              cleanupPatch[OBR_BROADCAST_NOTE_KEY] = undefined;
-              needsCleanup = true;
-            }
-
-            if (needsCleanup) {
-              await OBR.room.setMetadata(cleanupPatch);
-            }
-
-            // Post-Purge Audit
-            const updatedMeta = await OBR.room.getMetadata();
-            console.log('=== POST-PURGE ROOM METADATA AUDIT ===');
-            let totalBytes = 0;
-            for (const [key, value] of Object.entries(updatedMeta)) {
-              const keyBytes = JSON.stringify(value).length;
-              totalBytes += keyBytes;
-              console.log(`Key: "${key}" | Size: ${keyBytes} bytes`);
-            }
             console.log(`TOTAL ROOM USAGE: ${totalBytes} / 16384 bytes`);
-            console.log('======================================');
-          } catch (cleanupErr) {
-            console.error('Metadata purge failed:', cleanupErr);
+            console.log('===========================');
+          } catch (auditErr) {
+            console.error('Metadata audit failed:', auditErr);
           }
         }
 
@@ -187,7 +151,7 @@ export default function App() {
   const handleStopRevealing = async () => {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: undefined });
+        await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: {} });
       }
       setBroadcastNote(null);
       setDismissedBroadcastId(null);
