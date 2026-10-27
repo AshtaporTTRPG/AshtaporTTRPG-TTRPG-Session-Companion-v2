@@ -38,6 +38,8 @@ import {
   ChevronUp,
   X,
   Calculator,
+  Zap,
+  Layers,
 } from 'lucide-react';
 import { AddCustomMacroModal } from './AddCustomMacroModal';
 import { EditCustomMacroModal } from './EditCustomMacroModal';
@@ -50,6 +52,11 @@ export interface DiceChamberProps {
   isGM?: boolean;
   isDm?: boolean;
   playerName?: string;
+}
+
+interface StagedMacroItem {
+  macro: CustomMacro;
+  count: number;
 }
 
 const INTERACTIVE_DICE: DieType[] = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
@@ -67,11 +74,13 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
   // Inline Docked Calculator State
   const [calcMode, setCalcMode] = useState<CalcViewMode>('closed');
 
-  // Custom Macros State
+  // Custom Macros & Queue State
   const [macros, setMacros] = useState<CustomMacro[]>(() => loadCustomMacros());
   const [isMacrosOpen, setIsMacrosOpen] = useState<boolean>(false);
   const [editingMacro, setEditingMacro] = useState<CustomMacro | null>(null);
   const [isAddMacroOpen, setIsAddMacroOpen] = useState<boolean>(false);
+  const [macroMode, setMacroMode] = useState<'instant' | 'queue'>('instant');
+  const [stagedQueue, setStagedQueue] = useState<StagedMacroItem[]>([]);
 
   // Active Roll Feed State
   const [rollFeed, setRollFeed] = useState<RollResult[]>([]);
@@ -287,10 +296,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  const handleRollMacro = (macro: CustomMacro, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
+  // Evaluates a single macro evaluation returning formatted output and metadata
+  const evaluateMacro = (macro: CustomMacro) => {
     let activeAdvMode: 'normal' | 'advantage' | 'disadvantage' = 'normal';
     const rawMode = (macro as any).rollMode || macro.advantageMode;
     if (rawMode === 'advantage' || rawMode === 'Adv' || rawMode === 'adv') {
@@ -300,13 +307,12 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     }
 
     const expr = macro.formula.trim();
-    if (!expr) return;
-
     const currentUserId = liveFeedSync.getPlayerId();
     const parsedMacro = parseMacroFormula(expr);
 
     if (parsedMacro) {
-      const { count, sides, modifier: macroMod, dieType } = parsedMacro;
+      const { count, sides, modifier: macroMod } = parsedMacro;
+      const isD20 = sides === 20;
 
       if (activeAdvMode === 'advantage' || activeAdvMode === 'disadvantage') {
         const valA = rollSingleDie(sides);
@@ -315,55 +321,24 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         const winningFace = isAdv ? Math.max(valA, valB) : Math.min(valA, valB);
         const discardedFace = isAdv ? Math.min(valA, valB) : Math.max(valA, valB);
         const total = winningFace + macroMod;
-        const isCrit = sides === 20 && winningFace === 20;
-        const isFumble = sides === 20 && winningFace === 1;
+        const isCrit = isD20 && winningFace === 20;
+        const isFumble = isD20 && winningFace === 1;
 
         const modStr = macroMod !== 0 ? (macroMod > 0 ? ` + ${macroMod}` : ` - ${Math.abs(macroMod)}`) : '';
-        const breakdownLine = `${count}d${sides} (${isAdv ? 'Adv' : 'Dis'}): [${winningFace}, ~~${discardedFace}~~]${modStr} = ${total}`;
+        const breakdownLine = `${macro.name} (${count}d${sides} ${isAdv ? 'Adv' : 'Dis'}): [${winningFace}, ~~${discardedFace}~~]${modStr} = ${total}`;
 
-        const result: RollResult = {
-          id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          timestamp: Date.now(),
-          sender: rollerName,
-          rollerName,
-          rollerId: currentUserId,
-          isDm,
-          visibility,
-          rollType: 'Straight roll',
-          diceType: dieType || 'd20',
-          count: 1,
-          modifier: macroMod,
-          rolls: [winningFace],
-          rawRolls: [valA, valB],
-          pairedRolls: [
-            {
-              pairIndex: 1,
-              die1: valA,
-              die2: valB,
-              selected: winningFace,
-              discarded: discardedFace,
-              modifier: macroMod,
-              totalWithModifier: total,
-              lineItem: `[${winningFace}, ~~${discardedFace}~~]${modStr}`,
-            },
-          ],
+        return {
           total,
-          advantageMode: activeAdvMode,
-          breakdown: [breakdownLine],
-          formula: `${expr} (${isAdv ? 'Advantage' : 'Disadvantage'})`,
-          label: macro.name,
-          macroName: macro.name,
+          breakdownLine,
           isCrit,
           isFumble,
-          displayMode: 'sum',
+          isD20,
+          label: macro.name,
         };
-
-        liveFeedSync.recordDiceRoll(result, true);
-        return;
       }
 
-      const result = executeDiceRoll({
-        diceType: dieType || 'd20',
+      const res = executeDiceRoll({
+        diceType: parsedMacro.dieType || 'd20',
         count,
         modifier: macroMod,
         advantageMode: 'normal',
@@ -374,17 +349,22 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         isDm,
         visibility,
         label: macro.name,
-        macroName: macro.name,
       });
 
-      liveFeedSync.recordDiceRoll(result, true);
-      return;
+      const line = `${macro.name}: ${res.breakdown && res.breakdown.length > 0 ? res.breakdown[0] : `${res.total}`}`;
+      return {
+        total: res.total,
+        breakdownLine: line,
+        isCrit: res.isCrit,
+        isFumble: res.isFumble,
+        isD20,
+        label: macro.name,
+      };
     }
 
     const parsed = parseDiceFormula(expr);
     const finalMacroModifier = parsed ? parsed.modifier : 0;
-
-    const result = executeDiceRoll({
+    const res = executeDiceRoll({
       pool: parsed?.pool,
       modifier: finalMacroModifier,
       advantageMode: activeAdvMode,
@@ -395,10 +375,152 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       isDm,
       visibility,
       label: macro.name || expr,
-      macroName: macro.name,
     });
 
+    const isD20 = (parsed?.pool?.some((p) => p.diceType === 'd20')) || expr.includes('d20');
+    const line = `${macro.name}: ${res.breakdown && res.breakdown.length > 0 ? res.breakdown.join(' | ') : `${res.total}`}`;
+
+    return {
+      total: res.total,
+      breakdownLine: line,
+      isCrit: res.isCrit,
+      isFumble: res.isFumble,
+      isD20,
+      label: macro.name,
+    };
+  };
+
+  const handleRollMacro = (macro: CustomMacro, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const evaluated = evaluateMacro(macro);
+    const currentUserId = liveFeedSync.getPlayerId();
+
+    const result: RollResult = {
+      id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: Date.now(),
+      sender: rollerName,
+      rollerName,
+      rollerId: currentUserId,
+      isDm,
+      visibility,
+      rollType: 'Straight roll',
+      diceType: evaluated.isD20 ? 'd20' : 'd6',
+      count: 1,
+      modifier: 0,
+      rolls: [evaluated.total],
+      rawRolls: [evaluated.total],
+      total: evaluated.total,
+      advantageMode: 'normal',
+      breakdown: [evaluated.breakdownLine],
+      formula: macro.formula,
+      label: macro.name,
+      macroName: macro.name,
+      isCrit: evaluated.isCrit,
+      isFumble: evaluated.isFumble,
+      displayMode: 'sum',
+    };
+
     liveFeedSync.recordDiceRoll(result, true);
+  };
+
+  // Queue Handling Functions
+  const handleStageMacro = (macro: CustomMacro, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    setStagedQueue((prev) => {
+      const idx = prev.findIndex((item) => item.macro.id === macro.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], count: next[idx].count + 1 };
+        return next;
+      }
+      return [...prev, { macro, count: 1 }];
+    });
+  };
+
+  const handleRemoveStagedMacro = (macroId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    setStagedQueue((prev) => {
+      const target = prev.find((item) => item.macro.id === macroId);
+      if (!target) return prev;
+      if (target.count > 1) {
+        return prev.map((item) =>
+          item.macro.id === macroId ? { ...item, count: item.count - 1 } : item
+        );
+      }
+      return prev.filter((item) => item.macro.id !== macroId);
+    });
+  };
+
+  const handleClearQueue = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setStagedQueue([]);
+  };
+
+  const handleExecuteComboRoll = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (stagedQueue.length === 0) return;
+
+    const currentUserId = liveFeedSync.getPlayerId();
+    const breakdowns: string[] = [];
+    const rollTotals: number[] = [];
+    let hasD20 = false;
+    let hasCrit = false;
+    let hasFumble = false;
+    let totalSum = 0;
+    const comboNames: string[] = [];
+
+    stagedQueue.forEach((item) => {
+      for (let i = 0; i < item.count; i++) {
+        const evalRes = evaluateMacro(item.macro);
+        breakdowns.push(evalRes.breakdownLine);
+        rollTotals.push(evalRes.total);
+        totalSum += evalRes.total;
+        if (evalRes.isD20) hasD20 = true;
+        if (evalRes.isCrit) hasCrit = true;
+        if (evalRes.isFumble) hasFumble = true;
+      }
+      comboNames.push(item.count > 1 ? `${item.macro.name} ×${item.count}` : item.macro.name);
+    });
+
+    const isIndividual = hasD20;
+    const totalRollsCount = stagedQueue.reduce((acc, curr) => acc + curr.count, 0);
+
+    const comboResult: RollResult = {
+      id: `roll-combo-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: Date.now(),
+      sender: rollerName,
+      rollerName,
+      rollerId: currentUserId,
+      isDm,
+      visibility,
+      rollType: 'Straight roll',
+      diceType: hasD20 ? 'd20' : 'd6',
+      count: totalRollsCount,
+      modifier: 0,
+      rolls: rollTotals,
+      rawRolls: rollTotals,
+      total: totalSum,
+      advantageMode: 'normal',
+      breakdown: breakdowns,
+      formula: `Combo (${comboNames.join(', ')})`,
+      label: `Combo (${totalRollsCount} rolls)`,
+      macroName: `Combo (${totalRollsCount})`,
+      isCrit: hasCrit,
+      isFumble: hasFumble,
+      displayMode: isIndividual ? 'individual' : 'sum',
+    };
+
+    liveFeedSync.recordDiceRoll(comboResult, true);
+    triggerRollFlash('sum');
+    setStagedQueue([]);
   };
 
   const handleOpenAddMacro = () => {
@@ -416,6 +538,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     e.stopPropagation();
     const updated = deleteCustomMacro(id);
     setMacros(updated);
+    setStagedQueue((prev) => prev.filter((item) => item.macro.id !== id));
   };
 
   const handleClearFeed = (e: React.MouseEvent) => {
@@ -424,6 +547,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     liveFeedSync.clearFeed();
     setRollFeed([]);
   };
+
+  const totalQueuedCount = stagedQueue.reduce((acc, item) => acc + item.count, 0);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto min-h-0 pr-1 select-text scrollbar-thin scrollbar-thumb-slate-800 bg-[#0b0f17] p-2 gap-2 text-slate-100">
@@ -653,7 +778,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         />
       )}
 
-      {/* 4. CUSTOM MACROS DRAWER */}
+      {/* 4. CUSTOM MACROS DRAWER & QUEUE TRAY */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
         <div className="flex items-center justify-between">
           <button
@@ -663,7 +788,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
           >
             <Bookmark className="w-3.5 h-3.5 text-amber-400" />
             <span>Custom Macros</span>
-            <span className="text-[10px] text-slate-500 font-mono">({macros.length})</span>
+            <span className="text-[10px] text-slate-500 font-mono">
+              ({macros.length}
+              {totalQueuedCount > 0 && ` · ${totalQueuedCount} staged`})
+            </span>
             {isMacrosOpen ? (
               <ChevronUp className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
             ) : (
@@ -671,66 +799,179 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
             )}
           </button>
 
-          <button
-            type="button"
-            onClick={handleOpenAddMacro}
-            className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-500/40 transition cursor-pointer flex items-center gap-1"
-          >
-            <Plus className="w-3 h-3" />
-            <span>Add Macro</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Mode Switch: 1-Click vs Queue */}
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 text-[10px] shrink-0">
+              <button
+                type="button"
+                onClick={() => setMacroMode('instant')}
+                className={`px-1.5 py-0.5 rounded font-semibold transition cursor-pointer flex items-center gap-1 ${
+                  macroMode === 'instant'
+                    ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="1-Click Mode: Tap any macro to roll immediately"
+              >
+                <Zap className="w-2.5 h-2.5" />
+                <span>1-Click</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMacroMode('queue');
+                  if (!isMacrosOpen) setIsMacrosOpen(true);
+                }}
+                className={`px-1.5 py-0.5 rounded font-semibold transition cursor-pointer flex items-center gap-1 ${
+                  macroMode === 'queue'
+                    ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Queue Mode: Tap macros to stage combo attacks and roll them together"
+              >
+                <Layers className="w-2.5 h-2.5" />
+                <span>Queue</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenAddMacro}
+              className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-500/40 transition cursor-pointer flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Add</span>
+            </button>
+          </div>
         </div>
 
         {isMacrosOpen && (
-          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pt-0.5">
+          <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pt-0.5">
             {macros.length === 0 ? (
               <div className="text-[11px] text-slate-500 italic py-1">
-                No custom macros. Click "+ Add Macro" to save one.
+                No custom macros. Click "+ Add" to save one.
               </div>
             ) : (
-              macros.map((m) => (
+              macros.map((m) => {
+                const stagedItem = stagedQueue.find((item) => item.macro.id === m.id);
+                const isStaged = Boolean(stagedItem);
+
+                return (
+                  <div
+                    key={m.id}
+                    onClick={(e) => (macroMode === 'queue' ? handleStageMacro(m, e) : handleRollMacro(m, e))}
+                    className={`group flex items-center gap-1.5 px-2 py-1 rounded-lg border transition cursor-pointer shadow-sm text-xs ${
+                      isStaged
+                        ? 'bg-amber-950/40 border-amber-500 text-amber-200 ring-1 ring-amber-500/40'
+                        : macroMode === 'queue'
+                        ? 'bg-slate-950 hover:bg-amber-950/20 border-slate-700 hover:border-amber-400/60'
+                        : 'bg-slate-950 hover:bg-slate-800 border-slate-800 hover:border-amber-400/80'
+                    }`}
+                    title={
+                      macroMode === 'queue'
+                        ? `Tap to stage "${m.name}" for combo roll`
+                        : `1-Click Roll: ${m.name} (${m.formula})`
+                    }
+                  >
+                    <span className="font-semibold text-slate-200 group-hover:text-amber-300 truncate max-w-[90px]">
+                      {m.name}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">{m.formula}</span>
+
+                    {m.advantageMode && m.advantageMode !== 'normal' && (
+                      <span
+                        className={`text-[9px] px-1 rounded font-bold ${
+                          m.advantageMode === 'advantage'
+                            ? 'bg-emerald-950 text-emerald-300'
+                            : 'bg-rose-950 text-rose-300'
+                        }`}
+                      >
+                        {m.advantageMode === 'advantage' ? 'Adv' : 'Dis'}
+                      </span>
+                    )}
+
+                    {isStaged && stagedItem && (
+                      <span className="px-1 py-0.2 bg-amber-500 text-slate-950 rounded font-black text-[9px]">
+                        ×{stagedItem.count}
+                      </span>
+                    )}
+
+                    <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 ml-0.5">
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenEditMacro(m, e)}
+                        className="p-0.5 text-slate-400 hover:text-amber-300 rounded hover:bg-slate-700"
+                        title="Edit macro"
+                      >
+                        <Edit2 className="w-2.5 h-2.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteMacro(m.id, e)}
+                        className="p-0.5 text-slate-400 hover:text-rose-400 rounded hover:bg-slate-700"
+                        title="Delete macro"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Staging Combo Bar (Active when macros are queued) */}
+        {stagedQueue.length > 0 && (
+          <div className="mt-1.5 pt-1.5 border-t border-slate-800 flex flex-col gap-1.5 bg-slate-950/70 p-2 rounded-lg border border-amber-500/40 animate-fadeIn">
+            <div className="flex items-center justify-between text-[11px]">
+              <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                <Layers className="w-3.5 h-3.5 text-amber-400" />
+                <span>Staged Combo ({totalQueuedCount})</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearQueue}
+                className="text-[10px] text-slate-400 hover:text-rose-400 transition cursor-pointer"
+                title="Clear all staged macros"
+              >
+                Clear Queue
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+              {stagedQueue.map((item) => (
                 <div
-                  key={m.id}
-                  onClick={(e) => handleRollMacro(m, e)}
-                  className="group flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-400/80 transition cursor-pointer shadow-sm text-xs"
-                  title={`1-Click Roll: ${m.name} (${m.formula})`}
+                  key={item.macro.id}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900 border border-amber-500/40 text-[11px] text-slate-200"
                 >
-                  <span className="font-semibold text-slate-200 group-hover:text-amber-300 truncate max-w-[90px]">
-                    {m.name}
+                  <span className="font-semibold text-amber-300 truncate max-w-[100px]">
+                    {item.macro.name}
                   </span>
-                  <span className="text-[10px] font-mono text-slate-400">{m.formula}</span>
-                  {m.advantageMode && m.advantageMode !== 'normal' && (
-                    <span
-                      className={`text-[9px] px-1 rounded font-bold ${
-                        m.advantageMode === 'advantage'
-                          ? 'bg-emerald-950 text-emerald-300'
-                          : 'bg-rose-950 text-rose-300'
-                      }`}
-                    >
-                      {m.advantageMode === 'advantage' ? 'Adv' : 'Dis'}
+                  {item.count > 1 && (
+                    <span className="px-1 py-0.2 bg-amber-500/30 text-amber-200 rounded font-bold text-[9px]">
+                      ×{item.count}
                     </span>
                   )}
-                  <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 ml-0.5">
-                    <button
-                      type="button"
-                      onClick={(e) => handleOpenEditMacro(m, e)}
-                      className="p-0.5 text-slate-400 hover:text-amber-300 rounded hover:bg-slate-700"
-                      title="Edit macro"
-                    >
-                      <Edit2 className="w-2.5 h-2.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteMacro(m.id, e)}
-                      className="p-0.5 text-slate-400 hover:text-rose-400 rounded hover:bg-slate-700"
-                      title="Delete macro"
-                    >
-                      <Trash2 className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleRemoveStagedMacro(item.macro.id, e)}
+                    className="p-0.5 text-slate-400 hover:text-rose-400 rounded cursor-pointer"
+                    title="Remove one from queue"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 </div>
-              ))
-            )}
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExecuteComboRoll}
+              className="w-full h-8 bg-amber-500 hover:bg-amber-400 active:scale-[0.99] text-slate-950 font-bold text-xs rounded-lg shadow-md flex items-center justify-center gap-1.5 transition uppercase tracking-wider cursor-pointer"
+            >
+              <span>🎲</span>
+              <span>ROLL COMBO ({totalQueuedCount})</span>
+            </button>
           </div>
         )}
       </div>
