@@ -50,7 +50,7 @@ function safeEvaluateMath(expr: string): number {
     }
   }
 
-  // Normalize unary minus (e.g. -5 + 10 or 10 * -2)
+  // Normalize unary minus
   const normalized: string[] = [];
   for (let j = 0; j < tokens.length; j++) {
     const t = tokens[j];
@@ -67,7 +67,7 @@ function safeEvaluateMath(expr: string): number {
     }
   }
 
-  // Shunting-Yard algorithm: convert to Reverse Polish Notation (RPN)
+  // Shunting-Yard algorithm (RPN)
   const precedence: Record<string, number> = { '+': 1, '-': 1, '*': 2, '/': 2 };
   const outputQueue: string[] = [];
   const opStack: string[] = [];
@@ -153,7 +153,7 @@ export const CalculatorDock: React.FC<CalculatorDockProps> = ({
 
   return (
     <div className="bg-slate-900/90 border border-cyan-800/50 hover:border-cyan-700/60 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm transition-colors">
-      {/* 1. DOCKED MINI MATH BAR */}
+      {/* 1. SINGLE DOCKED MATH BAR (The Universal Display & Input) */}
       <div className="flex items-center gap-1.5 h-7">
         {/* Leading Micro-Badge */}
         <div className="flex items-center gap-1 shrink-0 select-none">
@@ -196,7 +196,7 @@ export const CalculatorDock: React.FC<CalculatorDockProps> = ({
           <span className="font-bold text-cyan-300">{evaluatedResult}</span>
         </div>
 
-        {/* Apply Button */}
+        {/* Single Universal Apply Button */}
         <button
           type="button"
           onClick={handleApplyClick}
@@ -224,166 +224,159 @@ export const CalculatorDock: React.FC<CalculatorDockProps> = ({
         </button>
       </div>
 
-      {/* 2. EXPANDED FULL NUMERIC KEYPAD */}
+      {/* 2. COMPACT NUMERIC KEYPAD (Redundant Display Bar & Duplicate Apply Removed) */}
       {isExpanded && (
-        <div className="pt-1.5 border-t border-slate-800 space-y-1.5 animate-fadeIn">
-          {/* Keypad Display */}
-          <div className="h-8 px-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between font-mono">
-            <span className="text-xs text-slate-400 truncate max-w-[280px]">
-              {expression || '0'}
-            </span>
-            <span className="text-sm font-bold text-cyan-300 tabular-nums">
-              = {evaluatedResult}
-            </span>
-          </div>
-
-          {/* Keypad Grid */}
-          <div className="grid grid-cols-5 gap-1 text-xs font-mono">
+        <div className="pt-1.5 border-t border-slate-800 space-y-1 animate-fadeIn">
+          <div className="grid grid-cols-4 gap-1 text-xs font-mono">
             {/* Row 1 */}
             <button
               type="button"
+              onClick={() => handleKeypadPress('C')}
+              className="h-7 rounded bg-rose-950/70 hover:bg-rose-900/80 border border-rose-800/70 text-rose-300 font-bold transition active:scale-95 cursor-pointer"
+            >
+              C
+            </button>
+            <button
+              type="button"
+              onClick={() => handleKeypadPress('(')}
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 font-bold transition active:scale-95 cursor-pointer"
+            >
+              (
+            </button>
+            <button
+              type="button"
+              onClick={() => handleKeypadPress(')')}
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 font-bold transition active:scale-95 cursor-pointer"
+            >
+              )
+            </button>
+            <button
+              type="button"
+              onClick={() => handleKeypadPress('/')}
+              className="h-7 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
+            >
+              /
+            </button>
+
+            {/* Row 2 */}
+            <button
+              type="button"
               onClick={() => handleKeypadPress('7')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               7
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('8')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               8
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('9')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               9
             </button>
             <button
               type="button"
-              onClick={() => handleKeypadPress('/')}
-              className="h-8 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
+              onClick={() => handleKeypadPress('*')}
+              className="h-7 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
             >
-              /
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKeypadPress('C')}
-              className="h-8 rounded bg-rose-950/70 hover:bg-rose-900/80 border border-rose-800/70 text-rose-300 font-bold transition active:scale-95 cursor-pointer"
-            >
-              C
+              *
             </button>
 
-            {/* Row 2 */}
+            {/* Row 3 */}
             <button
               type="button"
               onClick={() => handleKeypadPress('4')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               4
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('5')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               5
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('6')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               6
             </button>
             <button
               type="button"
-              onClick={() => handleKeypadPress('*')}
-              className="h-8 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
+              onClick={() => handleKeypadPress('-')}
+              className="h-7 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
             >
-              *
-            </button>
-            <button
-              type="button"
-              onClick={() => handleKeypadPress('BACK')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-rose-400 font-bold flex items-center justify-center transition active:scale-95 cursor-pointer"
-              title="Backspace"
-            >
-              <Delete className="w-3.5 h-3.5" />
+              -
             </button>
 
-            {/* Row 3 & 4 */}
+            {/* Row 4 */}
             <button
               type="button"
               onClick={() => handleKeypadPress('1')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               1
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('2')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               2
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('3')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               3
             </button>
             <button
               type="button"
-              onClick={() => handleKeypadPress('-')}
-              className="h-8 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
+              onClick={() => handleKeypadPress('+')}
+              className="h-7 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
             >
-              -
+              +
             </button>
 
-            {/* Spanning Apply Button in Grid */}
-            <button
-              type="button"
-              onClick={handleApplyClick}
-              className="row-span-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-slate-950 font-bold text-xs p-1 shadow-md transition-transform flex flex-col items-center justify-center gap-0.5 cursor-pointer"
-            >
-              <span>➔ Apply</span>
-              <span className="font-mono text-[10px] font-semibold opacity-90">
-                ({evaluatedResult >= 0 ? `+${evaluatedResult}` : evaluatedResult})
-              </span>
-            </button>
-
-            {/* Row 4 Bottom */}
+            {/* Row 5 */}
             <button
               type="button"
               onClick={() => handleKeypadPress('0')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               0
             </button>
             <button
               type="button"
               onClick={() => handleKeypadPress('.')}
-              className="h-8 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold transition active:scale-95 cursor-pointer"
             >
               .
             </button>
             <button
               type="button"
-              onClick={() => handleKeypadPress('=')}
-              className="h-8 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition active:scale-95 cursor-pointer"
+              onClick={() => handleKeypadPress('BACK')}
+              className="h-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-rose-400 font-bold flex items-center justify-center transition active:scale-95 cursor-pointer"
+              title="Backspace"
             >
-              =
+              <Delete className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => handleKeypadPress('+')}
-              className="h-8 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 text-cyan-300 font-bold transition active:scale-95 cursor-pointer"
+              onClick={() => handleKeypadPress('=')}
+              className="h-7 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition active:scale-95 cursor-pointer"
             >
-              +
+              =
             </button>
           </div>
         </div>
