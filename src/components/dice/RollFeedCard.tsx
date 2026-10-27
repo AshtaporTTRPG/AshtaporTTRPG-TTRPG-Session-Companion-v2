@@ -4,12 +4,10 @@
  */
 
 import React from 'react';
-import { RotateCcw } from 'lucide-react';
 import { DiceRollResult } from '../../types/ttrpg';
 
 export interface RollFeedCardProps {
   roll: DiceRollResult;
-  onReroll: (roll: DiceRollResult, e: React.MouseEvent) => void;
   isGM?: boolean;
   isDm?: boolean;
   playerName?: string;
@@ -32,7 +30,6 @@ const renderFormattedBreakdown = (text: string) => {
 
 export const RollFeedCard: React.FC<RollFeedCardProps> = ({
   roll,
-  onReroll,
   isGM,
   isDm = false,
 }) => {
@@ -80,7 +77,7 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center shrink-0">
           <span className="font-mono font-bold text-amber-300 text-xs tabular-nums">
             {roll.displayMode === 'individual'
               ? `Results: ${
@@ -90,15 +87,6 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                 }`
               : `Total: ${roll.total}`}
           </span>
-
-          <button
-            type="button"
-            onClick={(e) => onReroll(roll, e)}
-            className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
-            title="Reroll"
-          >
-            <RotateCcw className="w-3 h-3" />
-          </button>
         </div>
       </div>
 
