@@ -37,7 +37,6 @@ import {
   ChevronDown,
   ChevronUp,
   X,
-  Calculator,
   Zap,
   Layers,
 } from 'lucide-react';
@@ -71,8 +70,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
   const [modifier, setModifier] = useState<number>(0);
   const [visibility, setVisibility] = useState<RollVisibility>('public');
 
-  // Inline Docked Calculator State
-  const [calcMode, setCalcMode] = useState<CalcViewMode>('closed');
+  // Permanently Docked Calculator State (defaults to compact 'docked' mini-bar)
+  const [calcMode, setCalcMode] = useState<CalcViewMode>('docked');
 
   // Custom Macros & Queue State
   const [macros, setMacros] = useState<CustomMacro[]>(() => loadCustomMacros());
@@ -591,7 +590,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         </div>
       </div>
 
-      {/* 2. FORMULA BAR & CONTROLS */}
+      {/* 2. FORMULA BAR & CONTROLS (Calculator icon removed to maximize formula space) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
         <div className="relative flex items-center h-9 w-full gap-1.5">
           <div className="relative flex-1 h-full flex items-center min-w-0">
@@ -607,33 +606,18 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                 }
               }}
               placeholder="e.g. 1d20+5, 5d20+1d4+15, 8d6"
-              className="w-full h-9 px-2.5 pr-14 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition placeholder:text-slate-600"
+              className="w-full h-9 px-2.5 pr-7 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition placeholder:text-slate-600"
             />
-            <div className="absolute right-1 flex items-center gap-0.5">
-              {formulaInput && (
-                <button
-                  type="button"
-                  onClick={handleClearFormula}
-                  className="p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
-                  title="Clear expression & modifier"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+            {formulaInput && (
               <button
                 type="button"
-                onClick={() => setCalcMode((prev) => (prev === 'closed' ? 'expanded' : 'closed'))}
-                className={`p-1 rounded transition cursor-pointer ${
-                  calcMode !== 'closed'
-                    ? 'text-amber-400 bg-slate-800 ring-1 ring-amber-400/50'
-                    : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
-                }`}
-                title={calcMode === 'closed' ? 'Open Quick Math Calculator' : 'Close Quick Math Calculator'}
-                aria-label="Toggle Quick Math Calculator"
+                onClick={handleClearFormula}
+                className="absolute right-1.5 p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
+                title="Clear expression & modifier"
               >
-                <Calculator className="w-3.5 h-3.5" />
+                <X className="w-3.5 h-3.5" />
               </button>
-            </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
@@ -731,16 +715,13 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         </div>
       </div>
 
-      {/* 3. DOCKED CALCULATOR */}
-      {calcMode !== 'closed' && (
-        <CalculatorDock
-          viewMode={calcMode}
-          onChangeViewMode={setCalcMode}
-          isOpen={true}
-          onClose={() => setCalcMode('closed')}
-          onApply={handleApplyFromCalculator}
-        />
-      )}
+      {/* 3. PERMANENTLY DOCKED MINI-CALCULATOR */}
+      <CalculatorDock
+        viewMode={calcMode === 'closed' ? 'docked' : calcMode}
+        onChangeViewMode={(mode) => setCalcMode(mode)}
+        isOpen={true}
+        onApply={handleApplyFromCalculator}
+      />
 
       {/* 4. CUSTOM MACROS DRAWER & QUEUE TRAY */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
