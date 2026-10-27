@@ -257,6 +257,7 @@ class LiveFeedSyncManager {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
         const safePayload = sanitizeMetadataPayload({ item, timestamp: Date.now() });
+        console.log('[DICE PAYLOAD TELEMETRY]:', JSON.stringify(safePayload, null, 2));
         await OBR.room.setMetadata({
           [FEED_EVENT_KEY]: safePayload,
         });
