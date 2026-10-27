@@ -32,7 +32,7 @@ export interface UnifiedFeedItem {
     visibility: 'public' | 'gm_only' | 'self';
     formula: string;
     breakdown: string[];
-    total: number | null;
+    total?: number;
     timestamp?: number;
     rolls?: number[];
     rawRolls?: number[];
@@ -64,6 +64,31 @@ function formatFormula(count: number, die: string, mod: number): string {
   return `${count}${die}${modStr}`;
 }
 
+/**
+ * Strips raw `null` values recursively to prevent Owlbear's
+ * `TypeError: Cannot convert undefined or null to object` in cleanRawMetadata.
+ */
+function sanitizeMetadataPayload<T>(val: T): T {
+  if (val === null || val === undefined) {
+    return undefined as unknown as T;
+  }
+  if (Array.isArray(val)) {
+    return val
+      .filter((item) => item !== null && item !== undefined)
+      .map(sanitizeMetadataPayload) as unknown as T;
+  }
+  if (typeof val === 'object') {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== null && v !== undefined) {
+        clean[k] = sanitizeMetadataPayload(v);
+      }
+    }
+    return clean as unknown as T;
+  }
+  return val;
+}
+
 class LiveFeedSyncManager {
   private items: UnifiedFeedItem[] = [];
   private listeners: Set<FeedListener> = new Set();
@@ -80,17 +105,12 @@ class LiveFeedSyncManager {
     if (this.initialized) return;
     this.initialized = true;
 
-    // Purge cached ghost 1d4 roll on startup
     try {
       const saved = localStorage.getItem('ttrpg_ashtapor_feed');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          this.items = parsed.filter((it: any) => {
-            const str = JSON.stringify(it);
-            return !str.includes('1d4 [4] = 4') && !str.includes('1d4') && !str.includes('Total: 4');
-          });
-          localStorage.setItem('ttrpg_ashtapor_feed', JSON.stringify(this.items));
+          this.items = parsed;
         }
       }
     } catch {}
@@ -236,8 +256,9 @@ class LiveFeedSyncManager {
   private async broadcastFeedItem(item: UnifiedFeedItem) {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
+        const safePayload = sanitizeMetadataPayload({ item, timestamp: Date.now() });
         await OBR.room.setMetadata({
-          [FEED_EVENT_KEY]: { item, timestamp: Date.now() },
+          [FEED_EVENT_KEY]: safePayload,
         });
       }
     } catch (e) {
@@ -291,7 +312,7 @@ class LiveFeedSyncManager {
         ? roll.pairedRolls.map((p) => p.lineItem || `[${p.selected}, ~~${p.discarded}~~]`)
         : roll.rolls.map((r) => String(r));
 
-    const total = isIndividual ? null : roll.total;
+    const total = isIndividual ? undefined : roll.total;
 
     const playerMessage = isSecretRoll
       ? `${rollerName} made a secret roll to the DM 🔒`
