@@ -29,7 +29,6 @@ import {
   LOCAL_TABLE_NOTES_KEY,
   LOCAL_DM_NOTES_KEY,
 } from '../../types/notes';
-import { ROOM_METADATA_KEY } from '../../utils/obrCombatSync';
 import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
 import { DmNotesVault } from '../DmNotesVault';
 import { CreateNoteModal } from './CreateNoteModal';
@@ -117,9 +116,6 @@ const DEFAULT_DM_NOTES: DmSecretNote[] = [
   },
 ];
 
-/**
- * Helper to read stored expanded IDs from localStorage
- */
 function loadExpandedIdsFromStorage(): Set<string> | null {
   try {
     const raw = localStorage.getItem(LOCAL_EXPANDED_NOTES_KEY);
@@ -135,9 +131,6 @@ function loadExpandedIdsFromStorage(): Set<string> | null {
   return null;
 }
 
-/**
- * Helper to save expanded IDs to localStorage
- */
 function persistExpandedIdsToStorage(ids: Set<string>): void {
   try {
     localStorage.setItem(LOCAL_EXPANDED_NOTES_KEY, JSON.stringify(Array.from(ids)));
@@ -146,9 +139,6 @@ function persistExpandedIdsToStorage(ids: Set<string>): void {
   }
 }
 
-/**
- * Migration helper: converts legacy data (string, old object, or array) into NoteItem[]
- */
 function migrateToNoteCards(
   raw: any,
   fallbackDefaults: NoteItem[],
@@ -156,7 +146,6 @@ function migrateToNoteCards(
 ): NoteItem[] {
   if (!raw) return fallbackDefaults;
 
-  // Case 1: Raw string note (from legacy single textarea)
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
     if (!trimmed) return fallbackDefaults;
@@ -175,7 +164,6 @@ function migrateToNoteCards(
     ];
   }
 
-  // Case 2: Array of items
   if (Array.isArray(raw)) {
     if (raw.length === 0) return fallbackDefaults;
     return raw.map((item, index) => {
@@ -209,7 +197,6 @@ function migrateToNoteCards(
     });
   }
 
-  // Case 3: Legacy Player Object { general, npcs, loot, clues }
   if (typeof raw === 'object') {
     const cards: NoteItem[] = [];
     if (raw.general && typeof raw.general === 'string' && raw.general.trim()) {
@@ -279,20 +266,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 }) => {
   const isReady =
     propIsReady !== undefined ? propIsReady : typeof OBR !== 'undefined' && OBR.isReady;
-  // Standardize role check to use isGM (with fallback for legacy callers)
   const isGameMaster = isGM !== undefined ? isGM : Boolean(isDm);
 
-  // 1. Active Sub-Tab State ('myNotes' | 'tableNotes' | 'gm')
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('myNotes');
-
-  // Reader View State (In-place viewport takeover)
   const [activeReaderNoteId, setActiveReaderNoteId] = useState<string | null>(null);
 
-  // Author details
   const currentRole: 'GM' | 'PLAYER' = isGM ? 'GM' : 'PLAYER';
   const authorName = playerName || (isGM ? 'Game Master' : 'Player');
 
-  // Per-sub-tab Search & Category Filter state (retained across sub-tab switches & reader returns)
   const [searchByTab, setSearchByTab] = useState<Record<string, string>>({
     myNotes: '',
     tableNotes: '',
@@ -306,12 +287,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     dmNotes: 'All',
   });
 
-  // Maintenance Dropdown (`⋮`) state & ref
   const [isMaintenanceMenuOpen, setIsMaintenanceMenuOpen] = useState(false);
   const maintenanceMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Create / Edit Note Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteItem | DmSecretNote | null>(null);
 
@@ -329,11 +308,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMaintenanceMenuOpen]);
 
-  // Mount guard to block table notes writes before room metadata resolves
-  const [isRoomReady, setIsRoomReady] = useState<boolean>(false);
-  const isRoomReadyRef = useRef<boolean>(false);
-
-  // 2. "My Notes" State (Strictly Local)
+  // "My Notes" State (Strictly Local)
   const [myNotes, setMyNotes] = useState<NoteItem[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_MY_NOTES_KEY);
@@ -357,14 +332,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return DEFAULT_MY_NOTES;
   });
 
-  // 3. "Table Notes" State (Disconnected from localStorage; initialized to [] and synced exclusively via OBR Room Metadata)
+  // "Table Notes" State (Synced via OBR Room Metadata)
   const [tableNotes, setTableNotes] = useState<NoteItem[]>([]);
   const tableNotesRef = useRef<NoteItem[]>([]);
   tableNotesRef.current = tableNotes;
-  const hasLoadedTableNotesRef = useRef<boolean>(false);
-  const tableNotesUpdateQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-  // 4. "DM Notes" State (Secret Vault)
+  // "DM Notes" State (Strictly Local)
   const [dmNotes, setDmNotes] = useState<DmSecretNote[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_DM_NOTES_KEY);
@@ -378,7 +351,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return sanitizeNotesList(DEFAULT_DM_NOTES);
   });
 
-  // 5. Single Source of Truth for Broadcast State: derived in memory
+  // Active Broadcast State
   const [activeBroadcast, setActiveBroadcast] = useState<BroadcastNotePayload | null>(() => {
     try {
       const cached = localStorage.getItem('ashtapor_broadcast_note');
@@ -387,7 +360,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return null;
   });
 
-  // 6. Persistent Expansion State: Loaded from ashtapor_notes_expanded_ids in localStorage
+  // Expansion State
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(() => {
     const stored = loadExpandedIdsFromStorage();
     if (stored !== null) {
@@ -401,12 +374,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return initial;
   });
 
-  // Ensure expandedNoteIds is continually locked in localStorage under ashtapor_notes_expanded_ids
   useEffect(() => {
     persistExpandedIdsToStorage(expandedNoteIds);
   }, [expandedNoteIds]);
 
-  // Derive active note for Reader View
   const activeReaderNote = useMemo(() => {
     if (!activeReaderNoteId) return null;
     return (
@@ -417,21 +388,18 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     );
   }, [activeReaderNoteId, myNotes, tableNotes, dmNotes]);
 
-  // Graceful fallback if active reader note is deleted
   useEffect(() => {
     if (activeReaderNoteId && !activeReaderNote) {
       setActiveReaderNoteId(null);
     }
   }, [activeReaderNoteId, activeReaderNote]);
 
-  // Active sub-tab guard: only redirect to 'tableNotes' or 'myNotes' if (!isGM && (activeSubTab === 'gm' || activeSubTab === 'dmNotes'))
   useEffect(() => {
     if (!isGM && (activeSubTab === 'gm' || (activeSubTab as string) === 'dmNotes')) {
       setActiveSubTab('myNotes');
     }
   }, [isGM, activeSubTab]);
 
-  // Persist My Notes to localStorage
   const saveMyNotes = useCallback((updated: NoteItem[]) => {
     setMyNotes(updated);
     try {
@@ -441,21 +409,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   }, []);
 
-  // Individual Card Expansion Toggle
   const handleToggleExpandNote = useCallback((id: string) => {
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       persistExpandedIdsToStorage(next);
       return next;
     });
   }, []);
 
-  // Expand / Collapse All for My Notes
   const handleExpandAllMyNotes = useCallback(() => {
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
@@ -474,7 +437,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     });
   }, [myNotes]);
 
-  // Expand / Collapse All for Table Notes
   const handleExpandAllTableNotes = useCallback(() => {
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
@@ -493,7 +455,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     });
   }, [tableNotes]);
 
-  // Expand / Collapse All for DM Notes
   const handleExpandAllDmNotes = useCallback(() => {
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
@@ -555,7 +516,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     saveMyNotes(updated);
   };
 
-  // Safe Merge Import for My Notes: matching IDs update existing notes; new IDs append
   const handleImportMyNotes = (imported: NoteItem[]) => {
     const mergedMap = new Map<string, NoteItem>();
     myNotes.forEach((n) => mergedMap.set(n.id, n));
@@ -570,7 +530,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     });
   };
 
-  // 1. TABLE NOTES REAL-TIME OBR METADATA SYNCHRONIZATION
+  // TABLE NOTES REAL-TIME OBR METADATA SYNCHRONIZATION
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
@@ -590,7 +550,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     };
   }, []);
 
-  // Room Metadata Writer for Table Notes (Immediately committed, disconnected from localStorage)
   const commitTableNotes = useCallback(async (updatedTableNotes: NoteItem[]) => {
     tableNotesRef.current = updatedTableNotes;
     setTableNotes(updatedTableNotes);
@@ -644,7 +603,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   }, []);
 
-  // DM Notes State Operations (No independent note.isRevealed flag stored)
+  // DM Notes State Operations
   const saveDmNotes = (updated: DmSecretNote[]) => {
     setDmNotes(updated);
     try {
@@ -686,17 +645,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     saveDmNotes(updated);
   };
 
-  // Atomic 1-Click Broadcast Teardown
+  // Fixed: Delete key using undefined instead of null to prevent TypeError
   const handleStopBroadcast = async () => {
     setActiveBroadcast(null);
     if (typeof OBR !== 'undefined' && OBR.isReady) {
       await OBR.room.setMetadata({
-        [BROADCAST_KEY]: null,
+        [BROADCAST_KEY]: undefined,
       });
     }
   };
 
-  // 2. GM BROADCAST ROOM METADATA FIX
   const handleBroadcast = async (note: any) => {
     const payload: BroadcastNotePayload = {
       id: note.id,
@@ -709,22 +667,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
     setActiveBroadcast(payload);
 
-    // Write directly to room metadata under dedicated key BROADCAST_KEY
     if (typeof OBR !== 'undefined' && OBR.isReady) {
       await OBR.room.setMetadata({
-        [BROADCAST_KEY]: {
-          id: note.id,
-          title: note.title,
-          content: note.content,
-          theme: note.theme || 'slate',
-          author: note.author || 'GM',
-          timestamp: Date.now(),
-        },
+        [BROADCAST_KEY]: payload,
       });
     }
   };
 
-  // Toggle reveal for any note (derived from activeBroadcast single source of truth)
   const handleToggleRevealNote = async (note: any) => {
     const isCurrentlyRevealed = activeBroadcast !== null && activeBroadcast.id === note.id;
 
@@ -735,7 +684,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
-  // Listen for remote OBR broadcast note metadata changes
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
@@ -762,7 +710,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     };
   }, []);
 
-  // Active sub-tab notes list for category counts
   const activeNotesList = useMemo<Array<{ category?: NoteCategory }>>(() => {
     if (activeSubTab === 'myNotes') return myNotes;
     if (activeSubTab === 'tableNotes') return tableNotes;
@@ -789,7 +736,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return counts;
   }, [activeNotesList]);
 
-  // Only show categories with count > 0 (always keep All visible at index 0)
   const visibleCategories = useMemo(() => {
     const list = ['All'];
     CATEGORY_ORDER.forEach((cat) => {
@@ -826,7 +772,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     setCategoryByTab((prev) => ({ ...prev, [activeSubTab]: 'All' }));
   };
 
-  // Auto-fallback to 'All' if selected category count drops to 0
   useEffect(() => {
     if (activeSelectedCategory !== 'All' && (categoryCounts[activeSelectedCategory] || 0) === 0) {
       setCategoryByTab((prev) => ({
@@ -836,7 +781,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   }, [activeSelectedCategory, categoryCounts, activeSubTab]);
 
-  // JSON Export Backup (`⋮` Maintenance Dropdown)
   const handleExportJSON = () => {
     setIsMaintenanceMenuOpen(false);
     const now = new Date();
@@ -878,7 +822,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // JSON Import Backup (`⋮` Maintenance Dropdown)
   const handleTriggerImport = () => {
     setIsMaintenanceMenuOpen(false);
     fileInputRef.current?.click();
@@ -901,9 +844,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         rawNotes = Object.values(parsed);
       }
 
-      if (!Array.isArray(rawNotes) || rawNotes.length === 0) {
-        return;
-      }
+      if (!Array.isArray(rawNotes) || rawNotes.length === 0) return;
 
       const validList: NoteItem[] = [];
       for (const item of rawNotes) {
@@ -940,7 +881,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
-  // Disaster Backup Check
   const disasterBackupNotes = useMemo(() => {
     try {
       const saved = localStorage.getItem('ashtapor_table_notes_backup');
@@ -963,7 +903,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     commitTableNotes(disasterBackupNotes);
   };
 
-  // Note Transfer (Move & Copy Across Vaults for Players & GM)
   const handleTransferNote = useCallback((
     noteId: string,
     action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm',
@@ -1071,26 +1010,22 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     handleSaveMyNote,
   ]);
 
-  // Open Create Modal (`+` button)
   const handleOpenCreateModal = () => {
     setEditingNote(null);
     setIsCreateModalOpen(true);
   };
 
-  // Open Edit Modal from NoteCard or DmNotesVault
   const handleOpenEditNote = (note: NoteItem | DmSecretNote, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingNote(note);
     setIsCreateModalOpen(true);
   };
 
-  // Open Edit Modal directly from Reader View
   const handleOpenEditFromReader = (note: NoteItem | DmSecretNote) => {
     setEditingNote(note);
     setIsCreateModalOpen(true);
   };
 
-  // Open In-Place Reader View
   const handleOpenReader = (id: string) => {
     setActiveReaderNoteId(id);
   };
@@ -1160,7 +1095,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-1.5 gap-1.5 relative">
-      {/* Hidden File Input for JSON Import */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1169,7 +1103,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         onChange={handleFileChange}
       />
 
-      {/* CONDITIONAL IN-PLACE VIEWPORT TAKEOVER: READER VIEW */}
       {activeReaderNoteId !== null && activeReaderNote ? (
         <NoteReaderView
           note={activeReaderNote}
@@ -1196,9 +1129,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         />
       ) : (
         <>
-          {/* 1. COMPACT SUB-TAB NAVIGATION BAR (h-7 Segmented Pill Control) */}
           <div className="h-7 shrink-0 flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
-            {/* My Notes Trigger */}
             <button
               type="button"
               onClick={() => setActiveSubTab('myNotes')}
@@ -1216,7 +1147,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               </span>
             </button>
 
-            {/* Table Notes Trigger */}
             <button
               type="button"
               onClick={() => setActiveSubTab('tableNotes')}
@@ -1234,7 +1164,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               </span>
             </button>
 
-            {/* GM Notes Trigger (GM Only) */}
             {isGM && (
               <button
                 type="button"
@@ -1258,9 +1187,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             )}
           </div>
 
-          {/* 2. STREAMLINED UTILITY BAR & MAINTENANCE DROPDOWN (`⋮`) */}
           <div className="shrink-0 flex items-center gap-1.5">
-            {/* Search Input (h-7 text-xs) */}
             <div className="relative flex-1 min-w-0">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -1282,7 +1209,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               )}
             </div>
 
-            {/* Compact Icon Utilities: Expand All, Collapse All, Maintenance Menu (`⋮`), + New Note */}
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
@@ -1304,7 +1230,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 <ChevronsDownUp className="w-3.5 h-3.5" />
               </button>
 
-              {/* Maintenance Dropdown (`⋮`) for JSON Export & JSON Import */}
               <div className="relative" ref={maintenanceMenuRef}>
                 <button
                   type="button"
@@ -1349,7 +1274,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 )}
               </div>
 
-              {/* Compact `+` New Note Icon Button */}
               <button
                 type="button"
                 onClick={handleOpenCreateModal}
@@ -1361,7 +1285,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             </div>
           </div>
 
-          {/* 3. HIGH-DENSITY CATEGORY MICRO-PILLS STRIP (Zero Parentheses, 440px Interior Fit) */}
           <div className="h-6 shrink-0 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5">
             {visibleCategories.map((cat) => {
               const isSelected = activeSelectedCategory === cat;
@@ -1388,7 +1311,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             })}
           </div>
 
-          {/* 4. SUB-TAB 1: "MY NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
           <div className={activeSubTab === 'myNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
             <NoteCardList
               notes={myNotes}
@@ -1418,7 +1340,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             />
           </div>
 
-          {/* 5. SUB-TAB 2: "TABLE NOTES" VIEW (KEEP-ALIVE STATE RETENTION) */}
           <div className={activeSubTab === 'tableNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
             <NoteCardList
               notes={tableNotes}
@@ -1448,7 +1369,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             />
           </div>
 
-          {/* 6. SUB-TAB 3: "GM NOTES" VIEW (GM ONLY, KEEP-ALIVE STATE RETENTION) */}
           {isGM && (
             <div className={activeSubTab === 'gm' || activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
               <DmNotesVault
@@ -1475,7 +1395,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         </>
       )}
 
-      {/* 7. UNIFIED CREATE / EDIT NOTE MODAL (GM-Gated Scene & Hook Categories) */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
         isGM={isGM}
