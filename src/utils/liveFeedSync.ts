@@ -64,31 +64,6 @@ function formatFormula(count: number, die: string, mod: number): string {
   return `${count}${die}${modStr}`;
 }
 
-/**
- * Strips raw `null` values recursively to prevent Owlbear's
- * `TypeError: Cannot convert undefined or null to object` in cleanRawMetadata.
- */
-function sanitizeMetadataPayload<T>(val: T): T {
-  if (val === null || val === undefined) {
-    return undefined as unknown as T;
-  }
-  if (Array.isArray(val)) {
-    return val
-      .filter((item) => item !== null && item !== undefined)
-      .map(sanitizeMetadataPayload) as unknown as T;
-  }
-  if (typeof val === 'object') {
-    const clean: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(val)) {
-      if (v !== null && v !== undefined) {
-        clean[k] = sanitizeMetadataPayload(v);
-      }
-    }
-    return clean as unknown as T;
-  }
-  return val;
-}
-
 class LiveFeedSyncManager {
   private items: UnifiedFeedItem[] = [];
   private listeners: Set<FeedListener> = new Set();
@@ -148,18 +123,24 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // Load initial metadata on connect so player windows get current rolls
-        OBR.room.getMetadata().then((metadata) => {
-          const feedPayload = metadata[FEED_EVENT_KEY] as { item: UnifiedFeedItem } | undefined;
-          if (feedPayload && feedPayload.item) {
-            this.handleIncomingItem(feedPayload.item);
-          }
-        }).catch(() => {});
-
+        // Listen for live room events. Opaque string payload protects OBR cleanRawMetadata.
         OBR.room.onMetadataChange((metadata) => {
-          const feedPayload = metadata[FEED_EVENT_KEY] as { item: UnifiedFeedItem } | undefined;
-          if (feedPayload && feedPayload.item) {
-            this.handleIncomingItem(feedPayload.item);
+          const feedPayload = metadata[FEED_EVENT_KEY] as { raw?: string; item?: UnifiedFeedItem } | undefined;
+          if (!feedPayload) return;
+
+          let incomingItem: UnifiedFeedItem | undefined;
+          if (typeof feedPayload.raw === 'string') {
+            try {
+              incomingItem = JSON.parse(feedPayload.raw);
+            } catch (err) {
+              console.warn('Could not parse feed event JSON:', err);
+            }
+          } else if (feedPayload.item) {
+            incomingItem = feedPayload.item;
+          }
+
+          if (incomingItem && incomingItem.id) {
+            this.handleIncomingItem(incomingItem);
           }
         });
       });
@@ -247,19 +228,32 @@ class LiveFeedSyncManager {
     return [...this.items];
   }
 
-  public clearFeed(): void {
+  public async clearFeed(): Promise<void> {
     this.items = [];
     this.persistFeed();
     this.notifyListeners();
+
+    // Reset cloud room metadata to prevent past rolls from re-appearing on refresh
+    try {
+      if (typeof OBR !== 'undefined' && OBR.isReady) {
+        await OBR.room.setMetadata({
+          [FEED_EVENT_KEY]: undefined,
+        });
+      }
+    } catch (e) {
+      console.warn('Could not clear room feed metadata:', e);
+    }
   }
 
   private async broadcastFeedItem(item: UnifiedFeedItem) {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        const safePayload = sanitizeMetadataPayload({ item, timestamp: Date.now() });
-        console.log('[DICE PAYLOAD TELEMETRY]:', JSON.stringify(safePayload, null, 2));
+        // Encapsulate payload as an opaque JSON string to protect Owlbear cleanRawMetadata
         await OBR.room.setMetadata({
-          [FEED_EVENT_KEY]: safePayload,
+          [FEED_EVENT_KEY]: {
+            raw: JSON.stringify(item),
+            timestamp: Date.now(),
+          },
         });
       }
     } catch (e) {
@@ -320,7 +314,7 @@ class LiveFeedSyncManager {
       : message;
 
     const feedItem: UnifiedFeedItem = {
-      id: roll.id || `roll-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: roll.id || `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       type: 'dice',
       sender: rollerName,
       rollerName,
@@ -331,7 +325,7 @@ class LiveFeedSyncManager {
       isSecretRoll,
       timestamp: roll.timestamp || Date.now(),
       rollDetails: {
-        id: roll.id || `roll-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        id: roll.id || `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         rollerName,
         rollerId,
         visibility,
@@ -377,7 +371,7 @@ class LiveFeedSyncManager {
     isSecret?: boolean
   ) {
     const feedItem: UnifiedFeedItem = {
-      id: `combat-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: `combat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       type: 'combat',
       sender: this.currentRoleIsGm ? 'Game Master' : this.currentName,
       isDm: this.currentRoleIsGm,
@@ -399,7 +393,7 @@ class LiveFeedSyncManager {
 
   public recordTurnAnnouncement(announcement: string, broadcast: boolean = true) {
     const feedItem: UnifiedFeedItem = {
-      id: `turn-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: `turn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       type: 'turn',
       sender: 'Initiative Tracker',
       isDm: true,
@@ -425,7 +419,7 @@ class LiveFeedSyncManager {
 
   public recordChat(sender: string, isDm: boolean, message: string, broadcast: boolean = true) {
     const feedItem: UnifiedFeedItem = {
-      id: `chat-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: `chat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       type: 'chat',
       sender,
       isDm,
