@@ -21,9 +21,7 @@ import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip
 
 export type ActiveTab = 'combat' | 'dice' | 'range' | 'grimoire' | 'notes';
 
-// Verified keys to purge based on console audit
 const KEYS_TO_PURGE = [
-  // Category A: Dead Ashtapor keys from previous versions
   'ashtapor/feed',
   'com.ashtapor.session-companion/table-notes',
   'com.ashtapor.companion/feed-event',
@@ -31,7 +29,6 @@ const KEYS_TO_PURGE = [
   'ashtapor/turn',
   'com.ashtapor.companion/combat-state',
   'ashtapor/roster',
-  // Category C: Dead/unneeded extension keys in this room
   'com.motw.companion/keeper-mystery',
   'com.motw.companion/table-notes',
   'com.motw.companion/hunters',
@@ -67,7 +64,6 @@ export default function App() {
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
   const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
-  // Initialize OBR Lifecycle, Purge Dead Keys, and Audit
   useEffect(() => {
     runBootSanitizerOnce();
     OBR.onReady(async () => {
@@ -84,23 +80,27 @@ export default function App() {
         setPlayerName(name);
         liveFeedSync.setIdentity(name, isGmRole, playerId);
 
-        // GM Room Purge & Verification
         if (isGmRole) {
           try {
             const meta = await OBR.room.getMetadata();
             const cleanupPatch: Record<string, undefined> = {};
-            let keysFound = 0;
+            let needsCleanup = false;
 
             for (const key of KEYS_TO_PURGE) {
               if (key in meta) {
                 cleanupPatch[key] = undefined;
-                keysFound++;
+                needsCleanup = true;
               }
             }
 
-            if (keysFound > 0) {
+            // Purge poisonous null stored in ashtapor/broadcast_note
+            if (meta[OBR_BROADCAST_NOTE_KEY] === null) {
+              cleanupPatch[OBR_BROADCAST_NOTE_KEY] = undefined;
+              needsCleanup = true;
+            }
+
+            if (needsCleanup) {
               await OBR.room.setMetadata(cleanupPatch);
-              console.log(`Successfully purged ${keysFound} dead keys from room metadata.`);
             }
 
             // Post-Purge Audit
@@ -147,7 +147,6 @@ export default function App() {
     return () => clearTimeout(fallbackTimer);
   }, []);
 
-  // Listen for native OBR player identity changes
   useEffect(() => {
     if (!isReady || !OBR.isReady) return;
     const unsub = OBR.player.onChange((player) => {
@@ -159,7 +158,6 @@ export default function App() {
     return () => unsub();
   }, [isReady, isGM, playerName]);
 
-  // Listen for remote OBR Broadcast Note updates
   useEffect(() => {
     if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
