@@ -17,7 +17,6 @@ import {
 import { WhiteboardCombatant, WhiteboardState } from '../../types/whiteboard';
 
 const WHITEBOARD_KEY = 'ashtapor/whiteboard';
-const PLAYER_UPDATE_CHANNEL = 'ashtapor/player_update_combatant';
 
 const DEFAULT_STATE: WhiteboardState = {
   round: 1,
@@ -374,9 +373,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const boardRef = useRef<WhiteboardState>(DEFAULT_STATE);
   boardRef.current = board;
 
-  const isGmRef = useRef<boolean>(isGM);
-  isGmRef.current = isGM;
-
   const commitQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
@@ -388,7 +384,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   // 1. Initial Mount & Live Room Sync
   useEffect(() => {
     let unsubMeta: (() => void) | undefined;
-    let unsubBroadcast: (() => void) | undefined;
 
     const setup = async () => {
       try {
@@ -405,38 +400,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
               setBoard(live);
             }
           });
-
-          // GM listens to player patch broadcasts and commits them to room metadata
-          const obrAny = OBR as any;
-          if (obrAny.broadcast) {
-            unsubBroadcast = obrAny.broadcast.onMessage(
-              PLAYER_UPDATE_CHANNEL,
-              (event: any) => {
-                // OBSERVATIONAL TELEMETRY: Log incoming event on the GM side
-                console.log('[COMBAT GM TELEMETRY] Broadcast received on GM client:', {
-                  rawEvent: event,
-                  isGmFlag: isGmRef.current,
-                });
-
-                if (!isGmRef.current) return;
-
-                // Support both event.data and direct payload structures
-                const data = (event && event.data !== undefined ? event.data : event) as
-                  | { id: string; patch: Partial<WhiteboardCombatant> }
-                  | undefined;
-
-                console.log('[COMBAT GM TELEMETRY] Parsed player update data:', data);
-
-                if (data && data.id && data.patch) {
-                  const current = boardRef.current;
-                  const updated = current.combatants.map((c) =>
-                    c.id === data.id ? { ...c, ...data.patch } : c
-                  );
-                  commitBoardDirect({ ...current, combatants: updated });
-                }
-              }
-            );
-          }
         }
       } catch (err) {
         console.warn('Could not initialize whiteboard room sync:', err);
@@ -453,7 +416,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
 
     return () => {
       if (unsubMeta) unsubMeta();
-      if (unsubBroadcast) unsubBroadcast();
     };
   }, []);
 
@@ -474,10 +436,9 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddStripOpen]);
 
-  // Guaranteed sequential, non-dropped commit to OBR
+  // Guaranteed sequential, non-dropped commit to OBR (Used by both GM and Players)
   const commitBoardDirect = useCallback((newState: WhiteboardState) => {
     setBoard(newState);
-    if (!isGmRef.current) return;
 
     commitQueueRef.current = commitQueueRef.current.then(async () => {
       try {
@@ -490,12 +451,14 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     });
   }, []);
 
+  // GM Action: Sort
   const handleSort = () => {
     if (!isGM) return;
     const sorted = [...boardRef.current.combatants].sort((a, b) => b.initiative - a.initiative);
     commitBoardDirect({ ...boardRef.current, combatants: sorted });
   };
 
+  // GM Action: Next Turn
   const handleNextTurn = () => {
     if (!isGM || boardRef.current.combatants.length === 0) return;
     let nextIndex = boardRef.current.activeIndex + 1;
@@ -522,6 +485,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     commitBoardDirect({ ...boardRef.current, activeIndex: nextIndex, round: nextRound });
   };
 
+  // GM Action: Prev Turn
   const handlePrevTurn = () => {
     if (!isGM || boardRef.current.combatants.length === 0) return;
     let prevIndex = boardRef.current.activeIndex - 1;
@@ -535,11 +499,13 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     commitBoardDirect({ ...boardRef.current, activeIndex: prevIndex, round: prevRound });
   };
 
+  // GM Action: Rewind
   const handleRewind = () => {
     if (!isGM) return;
     commitBoardDirect({ ...boardRef.current, round: 1, activeIndex: 0 });
   };
 
+  // GM Action: Clear Board
   const handleClearBoard = () => {
     if (!isGM) return;
     if (window.confirm('Clear all combatants from the Whiteboard?')) {
@@ -547,7 +513,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     }
   };
 
-  // Add Combatant (GM Only)
+  // GM Action: Add Combatant
   const handleConfirmAddCombatant = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isGM || !newName.trim()) return;
@@ -575,38 +541,13 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     setIsAddStripOpen(false);
   };
 
-  // Update Combatant: GM commits directly; Player broadcasts patch to GM
+  // Shared Action: Update Combatant (GM or Player editing Name, Tag, Note, Downed, Color)
   const handleUpdateCombatant = useCallback((id: string, patch: Partial<WhiteboardCombatant>) => {
-    if (isGmRef.current) {
-      const updated = boardRef.current.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
-      commitBoardDirect({ ...boardRef.current, combatants: updated });
-    } else {
-      // Optimistic local update for instantaneous player typing response
-      setBoard((prev) => ({
-        ...prev,
-        combatants: prev.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-      }));
-
-      // Broadcast to GM client to write to room metadata
-      try {
-        const obrAny = OBR as any;
-        if (obrAny.broadcast) {
-          // OBSERVATIONAL TELEMETRY: Log dispatch from Player client
-          console.log('[COMBAT PLAYER TELEMETRY] Dispatching update via broadcast:', {
-            channel: PLAYER_UPDATE_CHANNEL,
-            payload: { id, patch },
-          });
-
-          obrAny.broadcast.sendMessage(PLAYER_UPDATE_CHANNEL, { id, patch });
-        } else {
-          console.warn('[COMBAT PLAYER TELEMETRY] OBR.broadcast is undefined on player client');
-        }
-      } catch (err) {
-        console.error('[COMBAT PLAYER TELEMETRY] Error dispatching player broadcast:', err);
-      }
-    }
+    const updated = boardRef.current.combatants.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    commitBoardDirect({ ...boardRef.current, combatants: updated });
   }, [commitBoardDirect]);
 
+  // GM Action: Duplicate
   const handleDuplicateCombatant = useCallback((id: string) => {
     if (!isGM) return;
     const target = boardRef.current.combatants.find((c) => c.id === id);
@@ -628,6 +569,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     commitBoardDirect({ ...boardRef.current, combatants: updated });
   }, [isGM, commitBoardDirect]);
 
+  // GM Action: Delete
   const handleDeleteCombatant = useCallback((id: string) => {
     if (!isGM) return;
     const updated = boardRef.current.combatants.filter((c) => c.id !== id);
@@ -639,7 +581,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     commitBoardDirect({ ...boardRef.current, combatants: updated, activeIndex: newActiveIndex });
   }, [isGM, commitBoardDirect]);
 
-  // Drag and drop: local state during drag, commits once on drop
+  // Drag and drop: local state during drag, commits once on drop (GM Only)
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const handleDragStart = (idx: number) => {
