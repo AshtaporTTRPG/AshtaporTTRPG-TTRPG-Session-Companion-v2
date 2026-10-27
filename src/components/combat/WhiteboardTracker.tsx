@@ -377,7 +377,6 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   const isGmRef = useRef<boolean>(isGM);
   isGmRef.current = isGM;
 
-  // Mutex promise queue ensuring zero dropped/rate-limited commits
   const commitQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const [isAddStripOpen, setIsAddStripOpen] = useState(false);
@@ -413,8 +412,21 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
             unsubBroadcast = obrAny.broadcast.onMessage(
               PLAYER_UPDATE_CHANNEL,
               (event: any) => {
+                // OBSERVATIONAL TELEMETRY: Log incoming event on the GM side
+                console.log('[COMBAT GM TELEMETRY] Broadcast received on GM client:', {
+                  rawEvent: event,
+                  isGmFlag: isGmRef.current,
+                });
+
                 if (!isGmRef.current) return;
-                const data = event.data as { id: string; patch: Partial<WhiteboardCombatant> } | undefined;
+
+                // Support both event.data and direct payload structures
+                const data = (event && event.data !== undefined ? event.data : event) as
+                  | { id: string; patch: Partial<WhiteboardCombatant> }
+                  | undefined;
+
+                console.log('[COMBAT GM TELEMETRY] Parsed player update data:', data);
+
                 if (data && data.id && data.patch) {
                   const current = boardRef.current;
                   const updated = current.combatants.map((c) =>
@@ -535,7 +547,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     }
   };
 
-  // Add Combatant (GM Only - Infinite capacity)
+  // Add Combatant (GM Only)
   const handleConfirmAddCombatant = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isGM || !newName.trim()) return;
@@ -579,10 +591,18 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
       try {
         const obrAny = OBR as any;
         if (obrAny.broadcast) {
+          // OBSERVATIONAL TELEMETRY: Log dispatch from Player client
+          console.log('[COMBAT PLAYER TELEMETRY] Dispatching update via broadcast:', {
+            channel: PLAYER_UPDATE_CHANNEL,
+            payload: { id, patch },
+          });
+
           obrAny.broadcast.sendMessage(PLAYER_UPDATE_CHANNEL, { id, patch });
+        } else {
+          console.warn('[COMBAT PLAYER TELEMETRY] OBR.broadcast is undefined on player client');
         }
       } catch (err) {
-        console.warn('Could not broadcast player edit:', err);
+        console.error('[COMBAT PLAYER TELEMETRY] Error dispatching player broadcast:', err);
       }
     }
   }, [commitBoardDirect]);
@@ -619,7 +639,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
     commitBoardDirect({ ...boardRef.current, combatants: updated, activeIndex: newActiveIndex });
   }, [isGM, commitBoardDirect]);
 
-  // Drag and drop: purely local state during drag, commits once on drop
+  // Drag and drop: local state during drag, commits once on drop
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const handleDragStart = (idx: number) => {
