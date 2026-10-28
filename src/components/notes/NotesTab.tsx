@@ -16,7 +16,6 @@ import {
   Download,
   Upload,
   X,
-  Shield,
   Radio,
   EyeOff,
 } from 'lucide-react';
@@ -261,7 +260,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         }
       }
 
-      // Check legacy DM storage key
       const legacySaved = localStorage.getItem(LOCAL_DM_NOTES_KEY);
       if (legacySaved) {
         const parsed = JSON.parse(legacySaved);
@@ -534,7 +532,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     saveGmNotes(updated);
   };
 
-  // Broadcast handlers (Dispatches undefined to cleanly clear room metadata)
   const handleStopBroadcast = async () => {
     setActiveBroadcast(null);
     if (typeof OBR !== 'undefined' && OBR.isReady) {
@@ -573,7 +570,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
-  // Real-time listener for broadcasts
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
@@ -770,29 +766,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
-  const disasterBackupNotes = useMemo(() => {
-    try {
-      const saved = localStorage.getItem('ashtapor_table_notes_backup');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return sanitizeNotesList(migrateToNoteCards(parsed, [], {
-            role: currentRole,
-            name: authorName,
-          }));
-        }
-      }
-    } catch {}
-    return [];
-  }, [currentRole, authorName, isMaintenanceMenuOpen]);
-
-  const handleRestoreDisasterBackup = () => {
-    setIsMaintenanceMenuOpen(false);
-    if (disasterBackupNotes.length === 0) return;
-    commitTableNotes(disasterBackupNotes);
-  };
-
-  // Centralized Note Transfer across all vaults
   const handleTransferNote = useCallback((
     noteId: string,
     action: NoteTransferAction,
@@ -974,16 +947,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     setEditingNote(null);
   };
 
-  // Find currently revealed broadcast note (if any)
-  const activeRevealedNote = useMemo(() => {
-    if (!activeBroadcast) return null;
-    return (
-      gmNotes.find((n) => n.id === activeBroadcast.id) ||
-      tableNotes.find((n) => n.id === activeBroadcast.id) ||
-      null
-    );
-  }, [gmNotes, tableNotes, activeBroadcast]);
-
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-1.5 gap-1.5 relative">
       <input
@@ -1158,17 +1121,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
                 {isMaintenanceMenuOpen && (
                   <div className="absolute right-0 mt-1 w-52 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
-                    {disasterBackupNotes.length > 0 && activeSubTab === 'tableNotes' && (
-                      <button
-                        type="button"
-                        onClick={handleRestoreDisasterBackup}
-                        className="px-3 py-1.5 text-left text-emerald-300 hover:bg-slate-800 hover:text-emerald-200 flex items-center gap-2 transition cursor-pointer border-b border-slate-800/80"
-                        title="Restore shared table notes from local disaster mirror"
-                      >
-                        <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>🛡️ Restore Backup ({disasterBackupNotes.length})</span>
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={handleExportJSON}
@@ -1283,12 +1235,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               isGM={isGameMaster}
               currentVault="tableNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
-              onBroadcastNote={isGameMaster ? handleToggleRevealNote : undefined}
               activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>
 
-          {/* 3. GM Notes View (Unified NoteCardList, Strictly Local) */}
+          {/* 3. GM Notes View */}
           {isGameMaster && (
             <div className={activeSubTab === 'gmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
               <NoteCardList
