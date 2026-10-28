@@ -13,8 +13,6 @@ import {
   Minus,
   List,
   CheckSquare,
-  Maximize2,
-  Minimize2,
 } from 'lucide-react';
 import {
   NoteCategory,
@@ -72,7 +70,6 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
   const [content, setContent] = useState('');
   const [isPinned, setIsPinned] = useState(false);
   const [theme, setTheme] = useState<NoteTheme>('slate');
-  const [isMaximized, setIsMaximized] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -127,11 +124,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/75 backdrop-blur-sm animate-fadeIn">
       <div
-        className={`w-full flex flex-col overflow-hidden rounded-xl shadow-2xl border transition-all ${
-          isMaximized
-            ? 'h-[96vh] max-h-[96vh] max-w-full'
-            : 'max-w-2xl max-h-[85vh]'
-        } ${currentThemeConfig.cardClasses}`}
+        className={`w-full h-[96vh] max-h-[96vh] flex flex-col overflow-hidden rounded-xl shadow-2xl border transition-all ${currentThemeConfig.cardClasses}`}
       >
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Header */}
@@ -160,17 +153,6 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
                 </option>
               ))}
             </select>
-
-            {/* Maximize / Expand Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsMaximized((prev) => !prev)}
-              className="p-1.5 rounded-lg opacity-70 hover:opacity-100 hover:bg-black/20 text-inherit transition cursor-pointer shrink-0"
-              title={isMaximized ? 'Restore standard view' : 'Maximize editor view'}
-              aria-label={isMaximized ? 'Restore standard view' : 'Maximize editor view'}
-            >
-              {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </button>
 
             {/* Close Button */}
             <button
