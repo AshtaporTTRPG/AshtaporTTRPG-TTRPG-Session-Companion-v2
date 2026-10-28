@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
 import {
@@ -12,6 +17,8 @@ import {
   Upload,
   X,
   Shield,
+  Radio,
+  EyeOff,
 } from 'lucide-react';
 import {
   Note,
@@ -19,102 +26,59 @@ import {
   NoteCategory,
   NOTE_CATEGORIES,
   NotesExportPayload,
-  DmSecretNote,
   BroadcastNotePayload,
   NotesScope,
   NoteTheme,
-  OBR_LEGACY_TABLE_NOTES_KEY,
+  NoteTransferAction,
+  OBR_TABLE_NOTES_KEY as SDK_TABLE_NOTES_KEY,
+  OBR_BROADCAST_NOTE_KEY as SDK_BROADCAST_NOTE_KEY,
   LOCAL_MY_NOTES_KEY,
   LOCAL_LEGACY_PLAYER_NOTES_KEY,
-  LOCAL_TABLE_NOTES_KEY,
+  LOCAL_GM_NOTES_KEY,
   LOCAL_DM_NOTES_KEY,
+  LOCAL_EXPANDED_NOTES_KEY,
 } from '../../types/notes';
 import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
-import { DmNotesVault } from '../DmNotesVault';
 import { CreateNoteModal } from './CreateNoteModal';
-import { EditNoteModal } from './EditNoteModal';
 import { NoteReaderView } from './NoteReaderView';
 import { sanitizeNotesList } from '../../utils/notesSanitizer';
 
 // Constants for Room Metadata Synchronization
-export const TABLE_NOTES_KEY = 'ashtapor/table_notes';
-export const BROADCAST_KEY = 'ashtapor/broadcast_note';
+export const TABLE_NOTES_KEY = SDK_TABLE_NOTES_KEY;
+export const BROADCAST_KEY = SDK_BROADCAST_NOTE_KEY;
 
 // Re-export for App.tsx and external consumers
 export type { BroadcastNotePayload, NotesScope, Note } from '../../types/notes';
 export const OBR_TABLE_NOTES_KEY = TABLE_NOTES_KEY;
 export const OBR_BROADCAST_NOTE_KEY = BROADCAST_KEY;
 
-export const LOCAL_EXPANDED_NOTES_KEY = 'ashtapor_notes_expanded_ids';
-
 const CATEGORY_ORDER: NoteCategory[] = [
   'General',
-  'NPC',
-  'Quest',
-  'Combat',
   'Loot',
+  'NPC',
   'Location',
+  'Combat',
   'Scene',
   'Hook',
+  'Clue',
 ];
 
 export const CATEGORY_ABBREVIATIONS: Record<string, string> = {
   All: 'All',
   General: 'Gen',
-  NPC: 'NPC',
-  Quest: 'Qst',
-  Combat: 'Cbt',
   Loot: 'Loot',
+  NPC: 'NPC',
   Location: 'Loc',
+  Combat: 'Cbt',
   Scene: 'Scene',
   Hook: 'Hook',
+  Clue: 'Clue',
+  Quest: 'Qst',
 };
 
 const DEFAULT_MY_NOTES: NoteItem[] = [];
 const DEFAULT_TABLE_NOTES: NoteItem[] = [];
-
-const DEFAULT_DM_NOTES: DmSecretNote[] = [
-  {
-    id: 'dm-note-1',
-    title: 'Ambush at the Sunken Bridge',
-    content:
-      'Trigger: When the party advances past the broken gargoyle, 4 Shadow Archers fire from murder holes (AC 13, HP 14, +5 to hit, 1d8+3 piercing + 1d6 necrotic).\n\nTrap DC 15 Perception: Hidden pressure plate at bridge center trips a falling portcullis (DC 14 Dex save or 2d10 bludgeoning and pinned).',
-    category: 'Combat',
-    isPinned: true,
-    createdAt: Date.now() - 3600000,
-    updatedAt: Date.now() - 3600000,
-  },
-  {
-    id: 'dm-note-2',
-    title: 'The Inquisitor’s True Identity',
-    content:
-      'Inquisitor Vane is secretly a doppelganger working under the orders of the Crimson Veil. If inspected with True Seeing or Divine Sense, detects as Monstrosity (Shapechanger).\n\nIf captured alive, carries a silver ring bearing the serpent crest of House Ashtapor.',
-    category: 'NPC',
-    isPinned: false,
-    createdAt: Date.now() - 7200000,
-    updatedAt: Date.now() - 7200000,
-  },
-  {
-    id: 'dm-note-3',
-    title: 'Cathedral of Ashen Glass (Read-Aloud)',
-    content:
-      'Pillars of fused black obsidian arch into the gloom overhead. Pale violet braziers cast long, flickering shadows across a cracked mosaic of the Sun Father, while the faint chime of unseen censer bells echoes from the reliquary vault.',
-    category: 'Scene',
-    isPinned: false,
-    createdAt: Date.now() - 10800000,
-    updatedAt: Date.now() - 10800000,
-  },
-  {
-    id: 'dm-note-4',
-    title: 'The Missing Caravan Ledger',
-    content:
-      'A blood-stained manifest found in the wrecked wagon lists three crates of "Star-Iron Ingots" delivered to the Magistrate’s private estate—implicating the town council in smuggling arms to the cult.',
-    category: 'Hook',
-    isPinned: false,
-    createdAt: Date.now() - 14400000,
-    updatedAt: Date.now() - 14400000,
-  },
-];
+const DEFAULT_GM_NOTES: NoteItem[] = [];
 
 function loadExpandedIdsFromStorage(): Set<string> | null {
   try {
@@ -179,7 +143,7 @@ function migrateToNoteCards(
         };
       }
       const validCat: NoteCategory =
-        item.category && NOTE_CATEGORIES.includes(item.category)
+        item.category && (NOTE_CATEGORIES.includes(item.category) || item.category === 'Quest')
           ? item.category
           : 'General';
       return {
@@ -197,55 +161,6 @@ function migrateToNoteCards(
     });
   }
 
-  if (typeof raw === 'object') {
-    const cards: NoteItem[] = [];
-    if (raw.general && typeof raw.general === 'string' && raw.general.trim()) {
-      cards.push({
-        id: 'migrated-general',
-        title: 'General Notes',
-        category: 'General',
-        content: raw.general.trim(),
-        isPinned: true,
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-    }
-    if (raw.npcs && typeof raw.npcs === 'string' && raw.npcs.trim()) {
-      cards.push({
-        id: 'migrated-npcs',
-        title: 'NPC Contacts',
-        category: 'NPC',
-        content: raw.npcs.trim(),
-        isPinned: false,
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-    }
-    if (raw.loot && typeof raw.loot === 'string' && raw.loot.trim()) {
-      cards.push({
-        id: 'migrated-loot',
-        title: 'Purse & Loot',
-        category: 'Loot',
-        content: raw.loot.trim(),
-        isPinned: false,
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-    }
-    if (raw.clues && typeof raw.clues === 'string' && raw.clues.trim()) {
-      cards.push({
-        id: 'migrated-clues',
-        title: 'Clues & Rumors',
-        category: 'Quest',
-        content: raw.clues.trim(),
-        isPinned: false,
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-    }
-    if (cards.length > 0) return cards;
-  }
-
   return fallbackDefaults;
 }
 
@@ -256,7 +171,7 @@ export interface NotesTabProps {
   isReady?: boolean;
 }
 
-export type SubTabType = 'myNotes' | 'tableNotes' | 'gm' | 'dmNotes';
+export type SubTabType = 'myNotes' | 'tableNotes' | 'gmNotes';
 
 export const NotesTab: React.FC<NotesTabProps> = ({
   isGM,
@@ -271,20 +186,18 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('myNotes');
   const [activeReaderNoteId, setActiveReaderNoteId] = useState<string | null>(null);
 
-  const currentRole: 'GM' | 'PLAYER' = isGM ? 'GM' : 'PLAYER';
-  const authorName = playerName || (isGM ? 'Game Master' : 'Player');
+  const currentRole: 'GM' | 'PLAYER' = isGameMaster ? 'GM' : 'PLAYER';
+  const authorName = playerName || (isGameMaster ? 'Game Master' : 'Player');
 
-  const [searchByTab, setSearchByTab] = useState<Record<string, string>>({
+  const [searchByTab, setSearchByTab] = useState<Record<SubTabType, string>>({
     myNotes: '',
     tableNotes: '',
-    gm: '',
-    dmNotes: '',
+    gmNotes: '',
   });
-  const [categoryByTab, setCategoryByTab] = useState<Record<string, string>>({
+  const [categoryByTab, setCategoryByTab] = useState<Record<SubTabType, string>>({
     myNotes: 'All',
     tableNotes: 'All',
-    gm: 'All',
-    dmNotes: 'All',
+    gmNotes: 'All',
   });
 
   const [isMaintenanceMenuOpen, setIsMaintenanceMenuOpen] = useState(false);
@@ -292,7 +205,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [editingNote, setEditingNote] = useState<NoteItem | DmSecretNote | null>(null);
+  const [editingNote, setEditingNote] = useState<NoteItem | null>(null);
 
   useEffect(() => {
     if (!isMaintenanceMenuOpen) return;
@@ -337,28 +250,37 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   const tableNotesRef = useRef<NoteItem[]>([]);
   tableNotesRef.current = tableNotes;
 
-  // "DM Notes" State (Strictly Local)
-  const [dmNotes, setDmNotes] = useState<DmSecretNote[]>(() => {
+  // "GM Notes" State (Strictly Local with legacy DM migration)
+  const [gmNotes, setGmNotes] = useState<NoteItem[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_DM_NOTES_KEY);
+      const saved = localStorage.getItem(LOCAL_GM_NOTES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return sanitizeNotesList(parsed);
+        if (Array.isArray(parsed)) {
+          return sanitizeNotesList(migrateToNoteCards(parsed, DEFAULT_GM_NOTES));
         }
       }
-    } catch {}
-    return sanitizeNotesList(DEFAULT_DM_NOTES);
+
+      // Check legacy DM storage key
+      const legacySaved = localStorage.getItem(LOCAL_DM_NOTES_KEY);
+      if (legacySaved) {
+        const parsed = JSON.parse(legacySaved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const migrated = sanitizeNotesList(migrateToNoteCards(parsed, DEFAULT_GM_NOTES));
+          try {
+            localStorage.setItem(LOCAL_GM_NOTES_KEY, JSON.stringify(migrated));
+          } catch {}
+          return migrated;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load GM notes:', e);
+    }
+    return DEFAULT_GM_NOTES;
   });
 
   // Active Broadcast State
-  const [activeBroadcast, setActiveBroadcast] = useState<BroadcastNotePayload | null>(() => {
-    try {
-      const cached = localStorage.getItem('ashtapor_broadcast_note');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return null;
-  });
+  const [activeBroadcast, setActiveBroadcast] = useState<BroadcastNotePayload | null>(null);
 
   // Expansion State
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(() => {
@@ -369,7 +291,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     const initial = new Set<string>();
     myNotes.forEach((n) => initial.add(n.id));
     tableNotes.forEach((n) => initial.add(n.id));
-    dmNotes.forEach((n) => initial.add(n.id));
+    gmNotes.forEach((n) => initial.add(n.id));
     persistExpandedIdsToStorage(initial);
     return initial;
   });
@@ -383,10 +305,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return (
       myNotes.find((n) => n.id === activeReaderNoteId) ||
       tableNotes.find((n) => n.id === activeReaderNoteId) ||
-      dmNotes.find((n) => n.id === activeReaderNoteId) ||
+      gmNotes.find((n) => n.id === activeReaderNoteId) ||
       null
     );
-  }, [activeReaderNoteId, myNotes, tableNotes, dmNotes]);
+  }, [activeReaderNoteId, myNotes, tableNotes, gmNotes]);
 
   useEffect(() => {
     if (activeReaderNoteId && !activeReaderNote) {
@@ -395,10 +317,10 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   }, [activeReaderNoteId, activeReaderNote]);
 
   useEffect(() => {
-    if (!isGM && (activeSubTab === 'gm' || (activeSubTab as string) === 'dmNotes')) {
+    if (!isGameMaster && activeSubTab === 'gmNotes') {
       setActiveSubTab('myNotes');
     }
-  }, [isGM, activeSubTab]);
+  }, [isGameMaster, activeSubTab]);
 
   const saveMyNotes = useCallback((updated: NoteItem[]) => {
     setMyNotes(updated);
@@ -406,6 +328,15 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       localStorage.setItem(LOCAL_MY_NOTES_KEY, JSON.stringify(updated));
     } catch (e) {
       console.error('Failed saving my notes to localStorage:', e);
+    }
+  }, []);
+
+  const saveGmNotes = useCallback((updated: NoteItem[]) => {
+    setGmNotes(updated);
+    try {
+      localStorage.setItem(LOCAL_GM_NOTES_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.error('Failed saving GM notes to localStorage:', e);
     }
   }, []);
 
@@ -419,70 +350,34 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     });
   }, []);
 
-  const handleExpandAllMyNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      myNotes.forEach((n) => next.add(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [myNotes]);
-
-  const handleCollapseAllMyNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      myNotes.forEach((n) => next.delete(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [myNotes]);
-
-  const handleExpandAllTableNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      tableNotes.forEach((n) => next.add(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [tableNotes]);
-
-  const handleCollapseAllTableNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      tableNotes.forEach((n) => next.delete(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [tableNotes]);
-
-  const handleExpandAllDmNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      dmNotes.forEach((n) => next.add(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [dmNotes]);
-
-  const handleCollapseAllDmNotes = useCallback(() => {
-    setExpandedNoteIds((prev) => {
-      const next = new Set(prev);
-      dmNotes.forEach((n) => next.delete(n.id));
-      persistExpandedIdsToStorage(next);
-      return next;
-    });
-  }, [dmNotes]);
-
   const handleExpandAllActiveTab = () => {
-    if (activeSubTab === 'myNotes') handleExpandAllMyNotes();
-    else if (activeSubTab === 'tableNotes') handleExpandAllTableNotes();
-    else handleExpandAllDmNotes();
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      const targetList =
+        activeSubTab === 'myNotes'
+          ? myNotes
+          : activeSubTab === 'tableNotes'
+          ? tableNotes
+          : gmNotes;
+      targetList.forEach((n) => next.add(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
   };
 
   const handleCollapseAllActiveTab = () => {
-    if (activeSubTab === 'myNotes') handleCollapseAllMyNotes();
-    else if (activeSubTab === 'tableNotes') handleCollapseAllTableNotes();
-    else handleCollapseAllDmNotes();
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      const targetList =
+        activeSubTab === 'myNotes'
+          ? myNotes
+          : activeSubTab === 'tableNotes'
+          ? tableNotes
+          : gmNotes;
+      targetList.forEach((n) => next.delete(n.id));
+      persistExpandedIdsToStorage(next);
+      return next;
+    });
   };
 
   const handleSaveMyNote = (note: NoteItem) => {
@@ -516,12 +411,25 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     saveMyNotes(updated);
   };
 
-  const handleImportMyNotes = (imported: NoteItem[]) => {
-    const mergedMap = new Map<string, NoteItem>();
-    myNotes.forEach((n) => mergedMap.set(n.id, n));
-    imported.forEach((n) => mergedMap.set(n.id, n));
-    const merged = Array.from(mergedMap.values());
-    saveMyNotes(merged);
+  const handleImportNotes = (imported: NoteItem[]) => {
+    if (activeSubTab === 'tableNotes') {
+      const current = tableNotesRef.current;
+      const mergedMap = new Map<string, NoteItem>();
+      current.forEach((n) => mergedMap.set(n.id, n));
+      imported.forEach((n) => mergedMap.set(n.id, n));
+      commitTableNotes(Array.from(mergedMap.values()));
+    } else if (activeSubTab === 'gmNotes') {
+      const mergedMap = new Map<string, NoteItem>();
+      gmNotes.forEach((n) => mergedMap.set(n.id, n));
+      imported.forEach((n) => mergedMap.set(n.id, n));
+      saveGmNotes(Array.from(mergedMap.values()));
+    } else {
+      const mergedMap = new Map<string, NoteItem>();
+      myNotes.forEach((n) => mergedMap.set(n.id, n));
+      imported.forEach((n) => mergedMap.set(n.id, n));
+      saveMyNotes(Array.from(mergedMap.values()));
+    }
+
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       imported.forEach((n) => next.add(n.id));
@@ -563,60 +471,41 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     const current = tableNotesRef.current;
     const exists = current.some((n) => n.id === note.id);
     const updatedTableNotes = exists ? current.map((n) => (n.id === note.id ? note : n)) : [note, ...current];
-    setTableNotes(updatedTableNotes);
-    tableNotesRef.current = updatedTableNotes;
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
-    }
+    commitTableNotes(updatedTableNotes);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
       return next;
     });
-  }, []);
+  }, [commitTableNotes]);
 
   const handleDeleteTableNote = useCallback(async (id: string) => {
     const current = tableNotesRef.current;
     const updatedTableNotes = current.filter((n) => n.id !== id);
-    setTableNotes(updatedTableNotes);
-    tableNotesRef.current = updatedTableNotes;
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
-    }
+    commitTableNotes(updatedTableNotes);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
       persistExpandedIdsToStorage(next);
       return next;
     });
-  }, []);
+  }, [commitTableNotes]);
 
   const handleTogglePinTableNote = useCallback(async (id: string) => {
     const current = tableNotesRef.current;
     const updatedTableNotes = current.map((n) =>
       n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: new Date().toISOString() } : n
     );
-    setTableNotes(updatedTableNotes);
-    tableNotesRef.current = updatedTableNotes;
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
-    }
-  }, []);
+    commitTableNotes(updatedTableNotes);
+  }, [commitTableNotes]);
 
-  // DM Notes State Operations
-  const saveDmNotes = (updated: DmSecretNote[]) => {
-    setDmNotes(updated);
-    try {
-      localStorage.setItem(LOCAL_DM_NOTES_KEY, JSON.stringify(updated));
-    } catch {}
-  };
-
-  const handleSaveDmNote = (note: DmSecretNote) => {
-    const exists = dmNotes.some((n) => n.id === note.id);
+  // GM Notes State Operations
+  const handleSaveGmNote = (note: NoteItem) => {
+    const exists = gmNotes.some((n) => n.id === note.id);
     const updated = exists
-      ? dmNotes.map((n) => (n.id === note.id ? note : n))
-      : [note, ...dmNotes];
-    saveDmNotes(updated);
+      ? gmNotes.map((n) => (n.id === note.id ? note : n))
+      : [note, ...gmNotes];
+    saveGmNotes(updated);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
@@ -624,12 +513,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     });
   };
 
-  const handleDeleteDmNote = async (id: string) => {
+  const handleDeleteGmNote = async (id: string) => {
     if (activeBroadcast && activeBroadcast.id === id) {
       await handleStopBroadcast();
     }
-    const updated = dmNotes.filter((n) => n.id !== id);
-    saveDmNotes(updated);
+    const updated = gmNotes.filter((n) => n.id !== id);
+    saveGmNotes(updated);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -638,14 +527,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     });
   };
 
-  const handleTogglePinDmNote = (id: string) => {
-    const updated = dmNotes.map((n) =>
-      n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: Date.now() } : n
+  const handleTogglePinGmNote = (id: string) => {
+    const updated = gmNotes.map((n) =>
+      n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: new Date().toISOString() } : n
     );
-    saveDmNotes(updated);
+    saveGmNotes(updated);
   };
 
-  // Fixed: Delete key using undefined instead of null to prevent TypeError
+  // Broadcast handlers (Dispatches undefined to cleanly clear room metadata)
   const handleStopBroadcast = async () => {
     setActiveBroadcast(null);
     if (typeof OBR !== 'undefined' && OBR.isReady) {
@@ -655,13 +544,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
-  const handleBroadcast = async (note: any) => {
+  const handleBroadcast = async (note: NoteItem) => {
     const payload: BroadcastNotePayload = {
       id: note.id,
       title: note.title,
       content: note.content,
       theme: note.theme || 'slate',
-      author: note.author || 'GM',
+      author: note.authorName || 'Game Master',
       timestamp: Date.now(),
     };
 
@@ -674,7 +563,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
-  const handleToggleRevealNote = async (note: any) => {
+  const handleToggleRevealNote = async (note: NoteItem) => {
     const isCurrentlyRevealed = activeBroadcast !== null && activeBroadcast.id === note.id;
 
     if (isCurrentlyRevealed) {
@@ -684,21 +573,24 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   };
 
+  // Real-time listener for broadcasts
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
     OBR.onReady(() => {
       OBR.room.getMetadata().then((meta) => {
-        if (meta && meta[BROADCAST_KEY]) {
-          setActiveBroadcast(meta[BROADCAST_KEY] as BroadcastNotePayload);
+        const live = meta && (meta[BROADCAST_KEY] as BroadcastNotePayload | undefined);
+        if (live && live.id && live.title) {
+          setActiveBroadcast(live);
         } else {
           setActiveBroadcast(null);
         }
       });
 
       unsub = OBR.room.onMetadataChange((incomingMeta) => {
-        if (incomingMeta && incomingMeta[BROADCAST_KEY]) {
-          setActiveBroadcast(incomingMeta[BROADCAST_KEY] as BroadcastNotePayload);
+        const live = incomingMeta && (incomingMeta[BROADCAST_KEY] as BroadcastNotePayload | undefined);
+        if (live && live.id && live.title) {
+          setActiveBroadcast(live);
         } else {
           setActiveBroadcast(null);
         }
@@ -710,27 +602,30 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     };
   }, []);
 
-  const activeNotesList = useMemo<Array<{ category?: NoteCategory }>>(() => {
+  const activeNotesList = useMemo<NoteItem[]>(() => {
     if (activeSubTab === 'myNotes') return myNotes;
     if (activeSubTab === 'tableNotes') return tableNotes;
-    return dmNotes;
-  }, [activeSubTab, myNotes, tableNotes, dmNotes]);
+    return gmNotes;
+  }, [activeSubTab, myNotes, tableNotes, gmNotes]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {
       All: activeNotesList.length,
       General: 0,
-      NPC: 0,
-      Quest: 0,
-      Combat: 0,
       Loot: 0,
+      NPC: 0,
       Location: 0,
+      Combat: 0,
       Scene: 0,
       Hook: 0,
+      Clue: 0,
+      Quest: 0,
     };
     activeNotesList.forEach((n) => {
       const cat =
-        n.category && NOTE_CATEGORIES.includes(n.category) ? n.category : 'General';
+        n.category && (NOTE_CATEGORIES.includes(n.category) || n.category === 'Quest')
+          ? n.category
+          : 'General';
       counts[cat] = (counts[cat] || 0) + 1;
     });
     return counts;
@@ -743,6 +638,9 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         list.push(cat);
       }
     });
+    if ((categoryCounts.Quest || 0) > 0 && !list.includes('Quest')) {
+      list.push('Quest');
+    }
     return list;
   }, [categoryCounts]);
 
@@ -789,22 +687,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     const notesToExport: NoteItem[] =
       activeSubTab === 'tableNotes'
         ? tableNotes
-        : activeSubTab === 'dmNotes'
-        ? dmNotes.map((d) => ({
-            id: d.id,
-            title: d.title,
-            category: d.category || 'General',
-            content: d.content,
-            isPinned: !!d.isPinned,
-            updatedAt: new Date(d.updatedAt).toISOString(),
-            createdAt: new Date(d.createdAt).toISOString(),
-            authorRole: 'GM',
-            authorName,
-          }))
+        : activeSubTab === 'gmNotes'
+        ? gmNotes
         : myNotes;
 
     const payload: NotesExportPayload = {
-      version: '2.0.21',
+      version: '2.0.25',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes: notesToExport,
@@ -850,7 +738,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       for (const item of rawNotes) {
         if (item && (typeof item.title === 'string' || typeof item.content === 'string')) {
           const categoryVal: NoteCategory =
-            item.category && NOTE_CATEGORIES.includes(item.category)
+            item.category && (NOTE_CATEGORIES.includes(item.category) || item.category === 'Quest')
               ? item.category
               : 'General';
           validList.push({
@@ -860,6 +748,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             title: (item.title || 'Untitled Note').trim(),
             category: categoryVal,
             content: typeof item.content === 'string' ? item.content : '',
+            theme: item.theme,
             isPinned: !!item.isPinned,
             updatedAt: item.updatedAt || new Date().toISOString(),
             createdAt: item.createdAt || new Date().toISOString(),
@@ -870,7 +759,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       }
 
       if (validList.length > 0) {
-        handleImportMyNotes(validList);
+        handleImportNotes(validList);
       }
     } catch (err) {
       console.error('Failed to import JSON file:', err);
@@ -903,15 +792,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     commitTableNotes(disasterBackupNotes);
   };
 
+  // Centralized Note Transfer across all vaults
   const handleTransferNote = useCallback((
     noteId: string,
-    action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm',
+    action: NoteTransferAction,
     sourceVault: SubTabType = activeSubTab
   ) => {
-    let sourceNote: NoteItem | DmSecretNote | undefined;
+    let sourceNote: NoteItem | undefined;
     if (sourceVault === 'myNotes') sourceNote = myNotes.find((n) => n.id === noteId);
     else if (sourceVault === 'tableNotes') sourceNote = tableNotes.find((n) => n.id === noteId);
-    else sourceNote = dmNotes.find((n) => n.id === noteId);
+    else sourceNote = gmNotes.find((n) => n.id === noteId);
 
     if (!sourceNote) return;
 
@@ -949,7 +839,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       };
       handleSaveTableNote(moveItem);
       if (sourceVault === 'myNotes') handleDeleteMyNote(noteId);
-      else if (sourceVault === 'dmNotes') handleDeleteDmNote(noteId);
+      else if (sourceVault === 'gmNotes') handleDeleteGmNote(noteId);
     } else if (action === 'copy_to_my') {
       const copyMyItem: NoteItem = {
         id: newId,
@@ -964,20 +854,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         authorName,
       };
       handleSaveMyNote(copyMyItem);
-    } else if (action === 'move_to_dm') {
-      const dmItem: DmSecretNote = {
-        id: `dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
-        content: sourceNote.content,
-        theme: sourceNote.theme,
-        isPinned: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      handleSaveDmNote(dmItem);
-      if (sourceVault === 'myNotes') handleDeleteMyNote(noteId);
-      else if (sourceVault === 'tableNotes') handleDeleteTableNote(noteId);
     } else if (action === 'move_to_my') {
       const myItem: NoteItem = {
         id: newId,
@@ -992,20 +868,50 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         authorName,
       };
       handleSaveMyNote(myItem);
-      if (sourceVault === 'dmNotes') handleDeleteDmNote(noteId);
+      if (sourceVault === 'gmNotes') handleDeleteGmNote(noteId);
+      else if (sourceVault === 'tableNotes') handleDeleteTableNote(noteId);
+    } else if (action === 'copy_to_gm') {
+      const gmItem: NoteItem = {
+        id: newId,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        theme: sourceNote.theme,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        authorRole: 'GM',
+        authorName,
+      };
+      handleSaveGmNote(gmItem);
+    } else if (action === 'move_to_gm' || (action as string) === 'move_to_dm') {
+      const gmItem: NoteItem = {
+        id: newId,
+        title: sourceNote.title,
+        category: (sourceNote.category || 'General') as NoteCategory,
+        content: sourceNote.content,
+        theme: sourceNote.theme,
+        isPinned: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        authorRole: 'GM',
+        authorName,
+      };
+      handleSaveGmNote(gmItem);
+      if (sourceVault === 'myNotes') handleDeleteMyNote(noteId);
       else if (sourceVault === 'tableNotes') handleDeleteTableNote(noteId);
     }
   }, [
     activeSubTab,
     myNotes,
     tableNotes,
-    dmNotes,
+    gmNotes,
     authorName,
     currentRole,
     handleSaveTableNote,
     handleDeleteMyNote,
-    handleDeleteDmNote,
-    handleSaveDmNote,
+    handleDeleteGmNote,
+    handleSaveGmNote,
     handleDeleteTableNote,
     handleSaveMyNote,
   ]);
@@ -1015,13 +921,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     setIsCreateModalOpen(true);
   };
 
-  const handleOpenEditNote = (note: NoteItem | DmSecretNote, e: React.MouseEvent) => {
+  const handleOpenEditNote = (note: NoteItem, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingNote(note);
     setIsCreateModalOpen(true);
   };
 
-  const handleOpenEditFromReader = (note: NoteItem | DmSecretNote) => {
+  const handleOpenEditFromReader = (note: NoteItem) => {
     setEditingNote(note);
     setIsCreateModalOpen(true);
   };
@@ -1037,61 +943,46 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     isPinned: boolean;
     theme?: NoteTheme;
   }) => {
-    if (activeSubTab === 'gm' || activeSubTab === 'dmNotes') {
-      if (editingNote) {
-        const updatedDm: DmSecretNote = {
-          ...(editingNote as DmSecretNote),
-          title: data.title,
-          category: data.category,
-          content: data.content,
-          isPinned: data.isPinned,
-          theme: data.theme,
-          updatedAt: Date.now(),
-        };
-        handleSaveDmNote(updatedDm);
-      } else {
-        const createdDm: DmSecretNote = {
-          id: `dm-note-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          title: data.title,
-          category: data.category,
-          content: data.content,
-          isPinned: data.isPinned,
-          theme: data.theme,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        handleSaveDmNote(createdDm);
-      }
+    const id =
+      editingNote?.id ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+
+    const updatedNote: NoteItem = {
+      id,
+      title: data.title,
+      category: data.category,
+      content: data.content,
+      theme: data.theme,
+      isPinned: data.isPinned,
+      updatedAt: new Date().toISOString(),
+      createdAt: editingNote?.createdAt || new Date().toISOString(),
+      authorRole: editingNote?.authorRole || (activeSubTab === 'gmNotes' ? 'GM' : currentRole),
+      authorName: editingNote?.authorName || authorName,
+    };
+
+    if (activeSubTab === 'tableNotes') {
+      handleSaveTableNote(updatedNote);
+    } else if (activeSubTab === 'gmNotes') {
+      handleSaveGmNote(updatedNote);
     } else {
-      const id =
-        editingNote?.id ||
-        (typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
-
-      const updatedNote: NoteItem = {
-        id,
-        title: data.title,
-        category: data.category,
-        content: data.content,
-        theme: data.theme,
-        isPinned: data.isPinned,
-        updatedAt: new Date().toISOString(),
-        createdAt: editingNote?.createdAt || new Date().toISOString(),
-        authorRole: (editingNote as NoteItem)?.authorRole || currentRole,
-        authorName: (editingNote as NoteItem)?.authorName || authorName,
-      };
-
-      if (activeSubTab === 'tableNotes') {
-        handleSaveTableNote(updatedNote);
-      } else {
-        handleSaveMyNote(updatedNote);
-      }
+      handleSaveMyNote(updatedNote);
     }
 
     setIsCreateModalOpen(false);
     setEditingNote(null);
   };
+
+  // Find currently revealed broadcast note (if any)
+  const activeRevealedNote = useMemo(() => {
+    if (!activeBroadcast) return null;
+    return (
+      gmNotes.find((n) => n.id === activeBroadcast.id) ||
+      tableNotes.find((n) => n.id === activeBroadcast.id) ||
+      null
+    );
+  }, [gmNotes, tableNotes, activeBroadcast]);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-1.5 gap-1.5 relative">
@@ -1111,24 +1002,25 @@ export const NotesTab: React.FC<NotesTabProps> = ({
           onDelete={() => {
             if (activeSubTab === 'myNotes') handleDeleteMyNote(activeReaderNote.id);
             else if (activeSubTab === 'tableNotes') handleDeleteTableNote(activeReaderNote.id);
-            else handleDeleteDmNote(activeReaderNote.id);
+            else handleDeleteGmNote(activeReaderNote.id);
             setActiveReaderNoteId(null);
           }}
           onSaveNote={(updated) => {
-            if (activeSubTab === 'gm' || activeSubTab === 'dmNotes') {
-              handleSaveDmNote(updated as DmSecretNote);
+            if (activeSubTab === 'gmNotes') {
+              handleSaveGmNote(updated);
             } else if (activeSubTab === 'tableNotes') {
-              handleSaveTableNote(updated as NoteItem);
+              handleSaveTableNote(updated);
             } else {
-              handleSaveMyNote(updated as NoteItem);
+              handleSaveMyNote(updated);
             }
           }}
-          isGM={isGM}
-          currentVault={activeSubTab === 'gm' ? 'dmNotes' : activeSubTab}
+          isGM={isGameMaster}
+          currentVault={activeSubTab}
           onTransfer={(action) => handleTransferNote(activeReaderNote.id, action, activeSubTab)}
         />
       ) : (
         <>
+          {/* Sub-Tab Navigation Header */}
           <div className="h-7 shrink-0 flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
             <button
               type="button"
@@ -1164,12 +1056,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               </span>
             </button>
 
-            {isGM && (
+            {isGameMaster && (
               <button
                 type="button"
-                onClick={() => setActiveSubTab('gm')}
+                onClick={() => setActiveSubTab('gmNotes')}
                 className={
-                  activeSubTab === 'gm' || activeSubTab === 'dmNotes'
+                  activeSubTab === 'gmNotes'
                     ? 'text-xs font-bold bg-rose-600 text-white px-2.5 py-1 rounded-md shadow flex items-center justify-center flex-1 h-full cursor-pointer truncate'
                     : 'text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-md transition-colors flex items-center justify-center flex-1 h-full cursor-pointer truncate'
                 }
@@ -1178,7 +1070,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 <Lock className="w-3 h-3 mr-1 shrink-0" />
                 <span className="truncate">GM Notes</span>
                 <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
-                  {dmNotes.length}
+                  {gmNotes.length}
                 </span>
                 {activeBroadcast && (
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-1 shrink-0" />
@@ -1187,6 +1079,29 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             )}
           </div>
 
+          {/* Active Broadcast Announcement Banner (Visible to GM) */}
+          {isGameMaster && activeBroadcast && (
+            <div className="p-2 rounded-xl bg-amber-950/50 border border-amber-500/70 text-amber-200 text-xs flex items-center justify-between gap-2 shadow-sm shrink-0 animate-fadeIn">
+              <div className="flex items-center gap-2 min-w-0">
+                <Radio className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
+                <div className="truncate">
+                  <span className="font-bold text-slate-100">Live Broadcast: </span>
+                  <span className="text-amber-300 font-medium">"{activeBroadcast.title}"</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleStopBroadcast}
+                className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-rose-700 hover:bg-rose-600 text-white transition cursor-pointer shrink-0 flex items-center gap-1 shadow-sm"
+                title="Stop broadcasting this note to all player screens"
+              >
+                <EyeOff className="w-3 h-3" />
+                <span>Stop</span>
+              </button>
+            </div>
+          )}
+
+          {/* Search, Filter & Utility Bar */}
           <div className="shrink-0 flex items-center gap-1.5">
             <div className="relative flex-1 min-w-0">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -1243,7 +1158,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
                 {isMaintenanceMenuOpen && (
                   <div className="absolute right-0 mt-1 w-52 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
-                    {disasterBackupNotes.length > 0 && (
+                    {disasterBackupNotes.length > 0 && activeSubTab === 'tableNotes' && (
                       <button
                         type="button"
                         onClick={handleRestoreDisasterBackup}
@@ -1285,6 +1200,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             </div>
           </div>
 
+          {/* Category Filter Pills Strip */}
           <div className="h-6 shrink-0 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5">
             {visibleCategories.map((cat) => {
               const isSelected = activeSelectedCategory === cat;
@@ -1311,95 +1227,108 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             })}
           </div>
 
+          {/* 1. My Notes View */}
           <div className={activeSubTab === 'myNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
             <NoteCardList
               notes={myNotes}
               expandedIds={expandedNoteIds}
               onToggleExpand={handleToggleExpandNote}
-              onExpandAll={handleExpandAllMyNotes}
-              onCollapseAll={handleCollapseAllMyNotes}
+              onExpandAll={handleExpandAllActiveTab}
+              onCollapseAll={handleCollapseAllActiveTab}
               onSaveNote={handleSaveMyNote}
               onDeleteNote={handleDeleteMyNote}
               onTogglePin={handleTogglePinMyNote}
-              onImportNotes={handleImportMyNotes}
+              onImportNotes={handleImportNotes}
               allowImportExport={true}
               currentRole={currentRole}
               currentAuthorName={authorName}
               emptyMessage="No personal notes yet."
-              emptySubtitle="Click '+' above to create cards for quests, loot, NPCs, or scenes."
+              emptySubtitle="Click '+' above to create cards for clues, loot, NPCs, or reminders."
               hideControls={true}
               externalSearchQuery={searchByTab.myNotes}
               externalSelectedCategory={categoryByTab.myNotes}
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
-              isGM={isGM}
+              isGM={isGameMaster}
               currentVault="myNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'myNotes')}
               activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>
 
+          {/* 2. Table Notes View */}
           <div className={activeSubTab === 'tableNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
             <NoteCardList
               notes={tableNotes}
               expandedIds={expandedNoteIds}
               onToggleExpand={handleToggleExpandNote}
-              onExpandAll={handleExpandAllTableNotes}
-              onCollapseAll={handleCollapseAllTableNotes}
+              onExpandAll={handleExpandAllActiveTab}
+              onCollapseAll={handleCollapseAllActiveTab}
               onSaveNote={handleSaveTableNote}
               onDeleteNote={handleDeleteTableNote}
               onTogglePin={handleTogglePinTableNote}
-              allowImportExport={false}
+              onImportNotes={handleImportNotes}
+              allowImportExport={true}
               currentRole={currentRole}
               currentAuthorName={authorName}
               emptyMessage="No table notes shared yet."
-              emptySubtitle="Any player or GM can add shared quests, clues, or inventory."
+              emptySubtitle="Any player or GM can add shared clues, loot, or inventory."
               hideControls={true}
               externalSearchQuery={searchByTab.tableNotes}
               externalSelectedCategory={categoryByTab.tableNotes}
               onExternalResetFilters={handleResetActiveFilters}
               onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
-              isGM={isGM}
+              isGM={isGameMaster}
               currentVault="tableNotes"
               onTransfer={(id, action) => handleTransferNote(id, action, 'tableNotes')}
-              onBroadcastNote={isGM ? handleToggleRevealNote : undefined}
+              onBroadcastNote={isGameMaster ? handleToggleRevealNote : undefined}
               activeBroadcastId={activeBroadcast?.id || null}
             />
           </div>
 
-          {isGM && (
-            <div className={activeSubTab === 'gm' || activeSubTab === 'dmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-              <DmNotesVault
-                dmNotes={dmNotes}
-                activeBroadcast={activeBroadcast}
-                onSaveDmNote={handleSaveDmNote}
-                onDeleteDmNote={handleDeleteDmNote}
-                onToggleReveal={handleToggleRevealNote}
-                onTogglePinDmNote={handleTogglePinDmNote}
+          {/* 3. GM Notes View (Unified NoteCardList, Strictly Local) */}
+          {isGameMaster && (
+            <div className={activeSubTab === 'gmNotes' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+              <NoteCardList
+                notes={gmNotes}
                 expandedIds={expandedNoteIds}
                 onToggleExpand={handleToggleExpandNote}
-                onExpandAll={handleExpandAllDmNotes}
-                onCollapseAll={handleCollapseAllDmNotes}
+                onExpandAll={handleExpandAllActiveTab}
+                onCollapseAll={handleCollapseAllActiveTab}
+                onSaveNote={handleSaveGmNote}
+                onDeleteNote={handleDeleteGmNote}
+                onTogglePin={handleTogglePinGmNote}
+                onImportNotes={handleImportNotes}
+                allowImportExport={true}
+                currentRole="GM"
+                currentAuthorName={authorName}
+                emptyMessage="No secret GM notes yet."
+                emptySubtitle="Click '+' above to write secret scenes, encounter tactics, or riddles."
                 hideControls={true}
-                externalSearchQuery={searchByTab.gm || searchByTab.dmNotes || ''}
-                externalSelectedCategory={categoryByTab.gm || categoryByTab.dmNotes || 'All'}
+                externalSearchQuery={searchByTab.gmNotes}
+                externalSelectedCategory={categoryByTab.gmNotes}
                 onExternalResetFilters={handleResetActiveFilters}
-                onExternalEditDmNote={handleOpenEditNote}
+                onExternalEditNote={handleOpenEditNote}
                 onOpenReader={handleOpenReader}
-                onTransfer={(id, action) => handleTransferNote(id, action, 'dmNotes')}
+                isGM={true}
+                currentVault="gmNotes"
+                onTransfer={(id, action) => handleTransferNote(id, action, 'gmNotes')}
+                onBroadcastNote={handleToggleRevealNote}
+                activeBroadcastId={activeBroadcast?.id || null}
               />
             </div>
           )}
         </>
       )}
 
+      {/* Unified Note Editor Modal */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
-        isGM={isGM}
-        isGMSecretNote={activeSubTab === 'gm' || activeSubTab === 'dmNotes'}
-        currentVault={activeSubTab === 'gm' ? 'dmNotes' : activeSubTab}
+        isGM={isGameMaster}
+        isGMSecretNote={activeSubTab === 'gmNotes'}
+        currentVault={activeSubTab}
         editingNote={editingNote}
         defaultCategory={
           activeSelectedCategory !== 'All'
