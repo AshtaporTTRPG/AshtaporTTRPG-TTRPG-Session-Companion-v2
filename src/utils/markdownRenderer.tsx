@@ -26,7 +26,8 @@ export function toggleMarkdownTask(content: string, lineIndex: number): string {
  * Markdown Viewer Component that supports:
  * - Interactive task checkboxes
  * - Collapsible # and ## header sections
- * - Inline bold (**bold**) and italics (*italic*)
+ * - Horizontal rule dividers (---, ***, ___)
+ * - Inline bold (**bold**), italics (*italic*), and underline (__underline__ or <u>underline</u>)
  * - Bullet lists (- item)
  */
 export const MarkdownContent: React.FC<{
@@ -48,7 +49,6 @@ export const MarkdownContent: React.FC<{
     }));
   };
 
-  // Pre-calculate which lines belong to which header sections so headers can collapse encounter blocks
   let currentH1Id: string | null = null;
   let currentH2Id: string | null = null;
 
@@ -57,7 +57,6 @@ export const MarkdownContent: React.FC<{
       {lines.map((line, lineIndex) => {
         // Empty line
         if (!line.trim()) {
-          // If inside a collapsed section, hide the blank line
           if (
             collapsibleHeaders &&
             ((currentH1Id && collapsedHeaders[currentH1Id]) ||
@@ -68,12 +67,25 @@ export const MarkdownContent: React.FC<{
           return <div key={lineIndex} className="h-2" />;
         }
 
-        // 1. Level 1 Header: # Header
+        // 1. Horizontal Divider: ---, ***, or ___
+        const hrMatch = line.trim().match(/^([-*_])\1{2,}$/);
+        if (hrMatch) {
+          if (
+            collapsibleHeaders &&
+            ((currentH1Id && collapsedHeaders[currentH1Id]) ||
+              (currentH2Id && collapsedHeaders[currentH2Id]))
+          ) {
+            return null;
+          }
+          return <hr key={lineIndex} className="my-2 border-inherit/30" />;
+        }
+
+        // 2. Level 1 Header: # Header
         const h1Match = line.match(/^#\s+(.*)$/);
         if (h1Match) {
           const headerId = `h1-${lineIndex}`;
           currentH1Id = headerId;
-          currentH2Id = null; // Reset sub-header
+          currentH2Id = null;
 
           if (!collapsibleHeaders) {
             return (
@@ -119,13 +131,12 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 2. Level 2 Header: ## Sub-Header
+        // 3. Level 2 Header: ## Sub-Header
         const h2Match = line.match(/^##\s+(.*)$/);
         if (h2Match) {
           const headerId = `h2-${lineIndex}`;
           currentH2Id = headerId;
 
-          // If parent H1 is collapsed, hide this H2
           if (collapsibleHeaders && currentH1Id && collapsedHeaders[currentH1Id]) {
             return null;
           }
@@ -174,7 +185,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // Check if content line is hidden under collapsed H1 or H2
+        // Hidden content under collapsed header
         if (
           collapsibleHeaders &&
           ((currentH1Id && collapsedHeaders[currentH1Id]) ||
@@ -183,7 +194,7 @@ export const MarkdownContent: React.FC<{
           return null;
         }
 
-        // 3. Checkbox Task list item: - [ ] or - [x]
+        // 4. Checkbox Task list item: - [ ] or - [x]
         const taskMatch = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
         if (taskMatch) {
           const isChecked = taskMatch[2].toLowerCase() === 'x';
@@ -219,7 +230,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 4. Bullet list item: - item or * item
+        // 5. Bullet list item: - item or * item
         const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
         if (bulletMatch) {
           return (
@@ -230,7 +241,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 5. Standard text line
+        // 6. Standard text line
         return (
           <div key={lineIndex} className="leading-relaxed">
             {parseInlineFormatting(line)}
@@ -241,11 +252,6 @@ export const MarkdownContent: React.FC<{
   );
 };
 
-/**
- * Lightweight formatting parser for notes.
- * Converts bold (**text**), italics (*text*), interactive task checkboxes (- [ ] / - [x]),
- * bullet lists (- item), and collapsible headers (# / ##).
- */
 export function renderMarkdown(
   content: string,
   optionsOrToggleTask?: ((lineIndex: number) => void) | MarkdownRenderOptions
@@ -274,11 +280,11 @@ export function renderMarkdown(
 }
 
 /**
- * Inline formatting helper: parses **bold** and *italic*
+ * Inline formatting helper: parses **bold**, __underline__, <u>underline</u>, and *italic*
  */
 export function parseInlineFormatting(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
-  const regex = /(\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
+  const regex = /(\*\*([^*]+)\*\*|__([^_]+)__|<u>([^<]+)<\/u>|\*([^*]+)\*)/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -289,17 +295,31 @@ export function parseInlineFormatting(text: string): React.ReactNode[] {
     }
 
     if (match[2]) {
-      // Bold
+      // Bold (**text**)
       parts.push(
         <strong key={`b-${match.index}`} className="font-bold text-inherit brightness-110">
           {match[2]}
         </strong>
       );
     } else if (match[3]) {
-      // Italic
+      // Underline (__text__)
+      parts.push(
+        <span key={`u-${match.index}`} className="underline underline-offset-2 text-inherit">
+          {match[3]}
+        </span>
+      );
+    } else if (match[4]) {
+      // Underline (<u>text</u>)
+      parts.push(
+        <span key={`u-tag-${match.index}`} className="underline underline-offset-2 text-inherit">
+          {match[4]}
+        </span>
+      );
+    } else if (match[5]) {
+      // Italic (*text*)
       parts.push(
         <em key={`i-${match.index}`} className="italic text-inherit">
-          {match[3]}
+          {match[5]}
         </em>
       );
     }
@@ -319,7 +339,7 @@ export function parseInlineFormatting(text: string): React.ReactNode[] {
  */
 export function applyMarkdownSyntax(
   textarea: HTMLTextAreaElement | null,
-  type: 'bold' | 'italic' | 'list' | 'task',
+  type: 'bold' | 'italic' | 'underline' | 'list' | 'task' | 'divider',
   currentValue: string,
   setValue: (next: string) => void
 ) {
@@ -351,6 +371,15 @@ export function applyMarkdownSyntax(
         cursorOffset = 12;
       }
       break;
+    case 'underline':
+      if (selectedText) {
+        replacement = `__${selectedText}__`;
+        cursorOffset = replacement.length;
+      } else {
+        replacement = `__underlined text__`;
+        cursorOffset = 17;
+      }
+      break;
     case 'list': {
       const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
       const prefix = isStartOfLine ? '- ' : '\n- ';
@@ -365,12 +394,17 @@ export function applyMarkdownSyntax(
       cursorOffset = replacement.length;
       break;
     }
+    case 'divider': {
+      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
+      replacement = isStartOfLine ? '---\n' : '\n---\n';
+      cursorOffset = replacement.length;
+      break;
+    }
   }
 
   const nextValue = currentValue.substring(0, start) + replacement + currentValue.substring(end);
   setValue(nextValue);
 
-  // Restore focus and cursor
   setTimeout(() => {
     textarea.focus();
     const newCursor = start + cursorOffset;
