@@ -1,19 +1,31 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2 } from 'lucide-react';
-import { NoteItem, DmSecretNote, NoteCategory, NOTE_THEME_CONFIG } from '../../types/notes';
+import {
+  NoteItem,
+  DmSecretNote,
+  GmSecretNote,
+  NoteCategory,
+  NOTE_THEME_CONFIG,
+  NoteTransferAction,
+} from '../../types/notes';
 import { CATEGORY_STYLES } from './NoteCard';
 import { copyToClipboard } from '../../utils/clipboard';
 import { renderMarkdown, toggleMarkdownTask } from '../../utils/markdownRenderer';
 
 export interface NoteReaderViewProps {
-  note: NoteItem | DmSecretNote;
+  note: NoteItem | GmSecretNote | DmSecretNote;
   onBack: () => void;
   onEdit: () => void;
   onDelete?: () => void;
-  onSaveNote?: (note: NoteItem | DmSecretNote) => void;
+  onSaveNote?: (note: NoteItem | GmSecretNote | DmSecretNote) => void;
   isGM?: boolean;
-  currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
-  onTransfer?: (action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
+  currentVault?: 'myNotes' | 'tableNotes' | 'gmNotes' | 'dmNotes';
+  onTransfer?: (action: NoteTransferAction) => void;
 }
 
 export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
@@ -86,7 +98,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
 
   const wordCount = useMemo(() => {
     if (!note.content || !note.content.trim()) return 0;
-    return note.content.trim().split(/\s+/).length;
+    return note.content.trim().split(/\s+/).filter(Boolean).length;
   }, [note.content]);
 
   const author = useMemo(() => {
@@ -96,7 +108,9 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     return 'GM';
   }, [note]);
 
-  const themeCfg = note.theme ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate : NOTE_THEME_CONFIG.slate;
+  const themeCfg = note.theme
+    ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate
+    : NOTE_THEME_CONFIG.slate;
 
   const handleToggleTask = (lineIndex: number) => {
     const newContent = toggleMarkdownTask(note.content, lineIndex);
@@ -112,9 +126,8 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
 
   return (
     <div className={`flex flex-col h-full p-2.5 select-text overflow-hidden rounded-xl border ${themeCfg.cardClasses}`}>
-      {/* Sticky Utility Header: [ ← Back ] | Title & Badge | [ 📋 Copy ] [ ↗ Transfer ] [ ✏️ Edit ] [ 🗑️ Delete ] */}
+      {/* Utility Header */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-inherit/30 shrink-0 gap-1.5">
-        {/* Left: Back Button & Title & Category Pill */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <button
             type="button"
@@ -139,7 +152,6 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
 
         {/* Right Action Icons: Copy, Transfer, Edit & Delete */}
         <div className="flex items-center gap-1 shrink-0">
-          {/* 1-Click Copy */}
           <button
             type="button"
             onClick={handleCopyFullNote}
@@ -154,7 +166,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
             <span className="hidden xs:inline">{copied ? 'Copied' : 'Copy'}</span>
           </button>
 
-          {/* Transfer Menu for all users */}
+          {/* Transfer Menu */}
           {onTransfer && (
             <div className="relative" ref={transferRef}>
               <button
@@ -221,18 +233,31 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       <span>Move to My Notes</span>
                     </button>
                   )}
-                  {isGM && currentVault !== 'dmNotes' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTransferOpen(false);
-                        onTransfer('move_to_dm');
-                      }}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
-                    >
-                      <span>🔒</span>
-                      <span>Move to GM Notes</span>
-                    </button>
+                  {isGM && currentVault !== 'gmNotes' && currentVault !== 'dmNotes' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsTransferOpen(false);
+                          onTransfer('copy_to_gm');
+                        }}
+                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
+                      >
+                        <span>📋</span>
+                        <span>Copy to GM Notes</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsTransferOpen(false);
+                          onTransfer('move_to_gm');
+                        }}
+                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <span>🔒</span>
+                        <span>Move to GM Notes</span>
+                      </button>
+                    </>
                   )}
                 </div>
               )}
@@ -268,17 +293,17 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
         </div>
       </div>
 
-      {/* Reading Text Body with Lightweight Markdown Rendering */}
+      {/* Reading Text Body */}
       <div className={`flex-1 overflow-y-auto pr-1 text-sm leading-relaxed p-2.5 rounded-lg border selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
         {renderMarkdown(note.content, handleToggleTask)}
       </div>
 
-      {/* Footer Meta Strip */}
-      <div className="pt-2 mt-2 border-t border-slate-900 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+      {/* Footer */}
+      <div className="pt-2 mt-2 border-t border-inherit/30 flex items-center justify-between text-[11px] opacity-70 shrink-0">
         <span>
           {formattedDate} · {wordCount} {wordCount === 1 ? 'word' : 'words'} · {author}
         </span>
-        <span className="text-[10px] text-slate-600 font-mono select-none">
+        <span className="text-[10px] font-mono select-none">
           Esc to return
         </span>
       </div>
