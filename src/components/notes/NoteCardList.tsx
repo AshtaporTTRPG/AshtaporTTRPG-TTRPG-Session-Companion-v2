@@ -46,7 +46,6 @@ export interface NoteCardListProps {
   externalSearchQuery?: string;
   externalSelectedCategory?: string;
   onExternalResetFilters?: () => void;
-  onExternalEditNote?: (note: NoteItem, e: React.MouseEvent) => void;
   onOpenReader?: (id: string) => void;
   isGM?: boolean;
   currentVault?: 'myNotes' | 'tableNotes' | 'gmNotes' | 'dmNotes';
@@ -99,7 +98,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   externalSearchQuery,
   externalSelectedCategory,
   onExternalResetFilters,
-  onExternalEditNote,
   onOpenReader,
   isGM = currentRole === 'GM',
   currentVault = 'myNotes',
@@ -179,7 +177,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     const dateStr = now.toISOString().split('T')[0];
     const fileName = `ashtapor-notes-${dateStr}.json`;
     const payload: NotesExportPayload = {
-      version: '2.0.25',
+      version: '2.0.26',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes,
@@ -225,7 +223,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       for (const item of rawNotes) {
         if (item && (typeof item.title === 'string' || typeof item.content === 'string')) {
           const categoryVal: NoteCategory =
-            item.category && NOTE_CATEGORIES.includes(item.category)
+            item.category && (NOTE_CATEGORIES.includes(item.category) || item.category === 'Quest')
               ? item.category
               : 'General';
           validList.push({
@@ -259,16 +257,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
 
   const handleOpenCreateModal = () => {
     setEditingNote(null);
-    setIsEditorOpen(true);
-  };
-
-  const handleOpenEdit = (note: NoteItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onExternalEditNote) {
-      onExternalEditNote(note, e);
-      return;
-    }
-    setEditingNote(note);
     setIsEditorOpen(true);
   };
 
@@ -331,7 +319,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         list.push(cat);
       }
     });
-    // Append Quest if any legacy notes carry it
     if ((categoryCounts.Quest || 0) > 0 && !list.includes('Quest')) {
       list.push('Quest');
     }
@@ -501,7 +488,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         </div>
       )}
 
-      {/* Note Cards List */}
+      {/* Note Cards List (Cards handle their own inline edits) */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
         {filteredAndSortedNotes.length === 0 ? (
           <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
@@ -535,7 +522,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               onToggleExpand={(e) => toggleExpand(note.id, e)}
               onTogglePin={() => onTogglePin(note.id)}
               onDelete={() => onDeleteNote(note.id)}
-              onEdit={(e) => handleOpenEdit(note, e)}
               onSaveNote={onSaveNote}
               onOpenReader={onOpenReader}
               isGM={isGM}
