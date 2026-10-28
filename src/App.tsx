@@ -5,17 +5,16 @@
 
 import React, { useState, useEffect } from 'react';
 import OBR from '@owlbear-rodeo/sdk';
-import { Crown, Shield, Volume2, VolumeX, EyeOff, Radio, X, Copy, Check } from 'lucide-react';
+import { Crown, Shield, Volume2, VolumeX } from 'lucide-react';
 import { isAudioEnabled, toggleAudio } from './utils/audio';
-import { copyToClipboard } from './utils/clipboard';
 import { runBootSanitizerOnce } from './utils/notesSanitizer';
 import { WhiteboardTracker } from './components/combat/WhiteboardTracker';
 import { DiceChamber } from './components/dice/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
-import { NotesTab, BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './components/notes/NotesTab';
-import { NOTE_THEME_CONFIG } from './types/notes';
-import { renderMarkdown } from './utils/markdownRenderer';
+import { NotesTab } from './components/notes/NotesTab';
+import { BroadcastModal } from './components/notes/BroadcastModal';
+import { BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './types/notes';
 import { liveFeedSync } from './utils/liveFeedSync';
 import { ContextualHelpTooltip } from './components/common/ContextualHelpTooltip';
 
@@ -45,7 +44,6 @@ export default function App() {
   // Table Broadcast Note State
   const [broadcastNote, setBroadcastNote] = useState<BroadcastNotePayload | null>(null);
   const [dismissedBroadcastId, setDismissedBroadcastId] = useState<string | null>(null);
-  const [broadcastCopied, setBroadcastCopied] = useState<boolean>(false);
 
   useEffect(() => {
     runBootSanitizerOnce();
@@ -88,7 +86,7 @@ export default function App() {
         try {
           const meta = await OBR.room.getMetadata();
           const broadcast = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
-          if (broadcast && broadcast.title) {
+          if (broadcast && broadcast.id && broadcast.title) {
             setBroadcastNote(broadcast);
           }
         } catch {}
@@ -127,8 +125,15 @@ export default function App() {
     if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
       const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
-      setBroadcastNote(live || null);
-      if (!live) setDismissedBroadcastId(null);
+      // Strictly verify that live is a valid payload and not an empty object
+      if (live && live.id && live.title) {
+        setBroadcastNote(live);
+      } else {
+        setBroadcastNote(null);
+      }
+      if (!live || !live.id) {
+        setDismissedBroadcastId(null);
+      }
     });
     return () => unsub();
   }, [isReady]);
@@ -152,7 +157,8 @@ export default function App() {
   const handleStopRevealing = async () => {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: {} });
+        // Dispatches undefined to cleanly remove the key in OBR SDK standards
+        await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: undefined });
       }
       setBroadcastNote(null);
       setDismissedBroadcastId(null);
@@ -163,7 +169,8 @@ export default function App() {
     }
   };
 
-  const shouldShowBroadcastModal = broadcastNote && dismissedBroadcastId !== broadcastNote.id;
+  const shouldShowBroadcastModal =
+    broadcastNote && broadcastNote.id && dismissedBroadcastId !== broadcastNote.id;
 
   if (!isReady) {
     return (
@@ -329,103 +336,15 @@ export default function App() {
         </div>
       </main>
 
-      {shouldShowBroadcastModal && (() => {
-        const themeCfg = broadcastNote.theme
-          ? NOTE_THEME_CONFIG[broadcastNote.theme] || NOTE_THEME_CONFIG.slate
-          : NOTE_THEME_CONFIG.slate;
-
-        return (
-          <div className="absolute inset-0 z-50 bg-neutral-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
-            <div className={`w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3 border-2 ring-1 ring-amber-400/40 ${themeCfg.cardClasses}`}>
-              <div className="flex items-center justify-between pb-2 border-b border-inherit/30">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-                    <Radio className="w-4 h-4 animate-pulse" />
-                  </div>
-                  <div className="truncate">
-                    <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider block">
-                      Table Broadcast
-                    </span>
-                    <h3 className="text-xs font-bold truncate">
-                      {broadcastNote.title}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      const text = `${broadcastNote.title}\n\n${broadcastNote.content}`;
-                      const ok = await copyToClipboard(text);
-                      if (ok) {
-                        setBroadcastCopied(true);
-                        setTimeout(() => setBroadcastCopied(false), 1500);
-                      }
-                    }}
-                    className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-                      broadcastCopied
-                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
-                        : 'bg-black/30 hover:bg-black/50 text-inherit border-white/20 hover:border-amber-400/50'
-                    }`}
-                  >
-                    {broadcastCopied ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Copy</span>
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={isGM ? handleStopRevealing : () => setDismissedBroadcastId(broadcastNote.id)}
-                    className="opacity-70 hover:opacity-100 p-1 rounded-md hover:bg-white/10 transition cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className={`p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto select-text cursor-text selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
-                {renderMarkdown(broadcastNote.content)}
-              </div>
-
-              <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
-                <span className="text-[10px] opacity-60 font-mono">
-                  Revealed by Game Master (GM)
-                </span>
-
-                <div className="flex items-center gap-2">
-                  {isGM ? (
-                    <button
-                      type="button"
-                      onClick={handleStopRevealing}
-                      className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" /> Stop Revealing
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDismissedBroadcastId(broadcastNote.id)}
-                      className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
-                    >
-                      Dismiss
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* Unified Broadcast Modal */}
+      {shouldShowBroadcastModal && (
+        <BroadcastModal
+          broadcastNote={broadcastNote}
+          isGM={isGM}
+          onCloseOrDismiss={() => setDismissedBroadcastId(broadcastNote.id)}
+          onStopRevealing={handleStopRevealing}
+        />
+      )}
     </div>
   );
 }
