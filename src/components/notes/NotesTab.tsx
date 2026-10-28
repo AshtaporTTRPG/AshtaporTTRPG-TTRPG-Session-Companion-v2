@@ -688,7 +688,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         : myNotes;
 
     const payload: NotesExportPayload = {
-      version: '2.0.25',
+      version: '2.0.26',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes: notesToExport,
@@ -891,12 +891,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
 
   const handleOpenCreateModal = () => {
     setEditingNote(null);
-    setIsCreateModalOpen(true);
-  };
-
-  const handleOpenEditNote = (note: NoteItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingNote(note);
     setIsCreateModalOpen(true);
   };
 
@@ -1200,7 +1194,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               externalSearchQuery={searchByTab.myNotes}
               externalSelectedCategory={categoryByTab.myNotes}
               onExternalResetFilters={handleResetActiveFilters}
-              onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
               isGM={isGameMaster}
               currentVault="myNotes"
@@ -1230,7 +1223,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               externalSearchQuery={searchByTab.tableNotes}
               externalSelectedCategory={categoryByTab.tableNotes}
               onExternalResetFilters={handleResetActiveFilters}
-              onExternalEditNote={handleOpenEditNote}
               onOpenReader={handleOpenReader}
               isGM={isGameMaster}
               currentVault="tableNotes"
@@ -1261,7 +1253,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 externalSearchQuery={searchByTab.gmNotes}
                 externalSelectedCategory={categoryByTab.gmNotes}
                 onExternalResetFilters={handleResetActiveFilters}
-                onExternalEditNote={handleOpenEditNote}
                 onOpenReader={handleOpenReader}
                 isGM={true}
                 currentVault="gmNotes"
@@ -1274,7 +1265,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         </>
       )}
 
-      {/* Unified Note Editor Modal */}
+      {/* Large Note Modal (Exclusively for "+" and Reader View Edit) */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
         isGM={isGameMaster}
