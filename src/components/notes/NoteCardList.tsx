@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search,
@@ -14,6 +19,7 @@ import {
   NoteCategory,
   NOTE_CATEGORIES,
   NotesExportPayload,
+  NoteTransferAction,
 } from '../../types/notes';
 import { NoteCard, CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCard';
 import { CreateNoteModal } from './CreateNoteModal';
@@ -43,33 +49,34 @@ export interface NoteCardListProps {
   onExternalEditNote?: (note: NoteItem, e: React.MouseEvent) => void;
   onOpenReader?: (id: string) => void;
   isGM?: boolean;
-  currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
-  onTransfer?: (noteId: string, action: 'copy_to_table' | 'move_to_table' | 'copy_to_my' | 'move_to_my' | 'move_to_dm') => void;
+  currentVault?: 'myNotes' | 'tableNotes' | 'gmNotes' | 'dmNotes';
+  onTransfer?: (noteId: string, action: NoteTransferAction) => void;
   onBroadcastNote?: (note: NoteItem) => void;
   activeBroadcastId?: string | null;
 }
 
 const CATEGORY_ORDER: NoteCategory[] = [
   'General',
-  'NPC',
-  'Quest',
-  'Combat',
   'Loot',
+  'NPC',
   'Location',
+  'Combat',
   'Scene',
   'Hook',
+  'Clue',
 ];
 
 const CATEGORY_ABBREVIATIONS: Record<string, string> = {
   All: 'All',
   General: 'Gen',
-  NPC: 'NPC',
-  Quest: 'Qst',
-  Combat: 'Cbt',
   Loot: 'Loot',
+  NPC: 'NPC',
   Location: 'Loc',
+  Combat: 'Cbt',
   Scene: 'Scene',
   Hook: 'Hook',
+  Clue: 'Clue',
+  Quest: 'Qst',
 };
 
 export const NoteCardList: React.FC<NoteCardListProps> = ({
@@ -112,7 +119,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       ? externalSelectedCategory
       : internalSelectedCategory;
 
-  // Close overflow menu on outside click
   useEffect(() => {
     if (!isMenuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -124,7 +130,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMenuOpen]);
 
-  // Fallback internal expansion state if not provided externally
   const [internalExpandedIds, setInternalExpandedIds] = useState<Set<string>>(() => {
     return new Set(notes.map((n) => n.id));
   });
@@ -165,18 +170,16 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteItem | null>(null);
 
-  // Export Notes to JSON: ashtapor-notes-YYYY-MM-DD.json
   const handleExportJSON = () => {
     setIsMenuOpen(false);
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
     const fileName = `ashtapor-notes-${dateStr}.json`;
     const payload: NotesExportPayload = {
-      version: '2.0.18',
+      version: '2.0.25',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes,
@@ -194,13 +197,11 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Trigger hidden file input for JSON Import
   const handleTriggerImport = () => {
     setIsMenuOpen(false);
     fileInputRef.current?.click();
   };
 
-  // Handle JSON Import file selection and safe merge validation
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -218,9 +219,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         rawNotes = Object.values(parsed);
       }
 
-      if (!Array.isArray(rawNotes) || rawNotes.length === 0) {
-        return;
-      }
+      if (!Array.isArray(rawNotes) || rawNotes.length === 0) return;
 
       const validList: NoteItem[] = [];
       for (const item of rawNotes) {
@@ -236,6 +235,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             title: (item.title || 'Untitled Note').trim(),
             category: categoryVal,
             content: typeof item.content === 'string' ? item.content : '',
+            theme: item.theme,
             isPinned: !!item.isPinned,
             updatedAt: item.updatedAt || new Date().toISOString(),
             createdAt: item.createdAt || new Date().toISOString(),
@@ -301,28 +301,29 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     setEditingNote(null);
   };
 
-  // Category counts computation for dynamic badges
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {
       All: notes.length,
       General: 0,
-      NPC: 0,
-      Quest: 0,
-      Combat: 0,
       Loot: 0,
+      NPC: 0,
       Location: 0,
+      Combat: 0,
       Scene: 0,
       Hook: 0,
+      Clue: 0,
+      Quest: 0,
     };
     notes.forEach((n) => {
       const cat =
-        n.category && NOTE_CATEGORIES.includes(n.category) ? n.category : 'General';
+        n.category && (NOTE_CATEGORIES.includes(n.category) || n.category === 'Quest')
+          ? n.category
+          : 'General';
       counts[cat] = (counts[cat] || 0) + 1;
     });
     return counts;
   }, [notes]);
 
-  // Categories to display: 'All' is always visible at index 0; others only if count > 0
   const visibleCategories = useMemo(() => {
     const list = ['All'];
     CATEGORY_ORDER.forEach((cat) => {
@@ -330,6 +331,10 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         list.push(cat);
       }
     });
+    // Append Quest if any legacy notes carry it
+    if ((categoryCounts.Quest || 0) > 0 && !list.includes('Quest')) {
+      list.push('Quest');
+    }
     return list;
   }, [categoryCounts]);
 
@@ -341,9 +346,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     }
   };
 
-  // Filter and Sort Notes:
-  // Group 1: Pinned notes alphabetically by title
-  // Group 2: Unpinned notes alphabetically by title
   const filteredAndSortedNotes = useMemo(() => {
     return [...notes]
       .filter((note) => {
@@ -362,17 +364,14 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       .sort((a, b) => {
         const aPinned = !!a.isPinned;
         const bPinned = !!b.isPinned;
-
         if (aPinned && !bPinned) return -1;
         if (!aPinned && bPinned) return 1;
-
         return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
       });
   }, [notes, selectedCategory, searchQuery]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-1.5">
-      {/* Hidden File Input for JSON Import */}
       <input
         ref={fileInputRef}
         type="file"
@@ -383,10 +382,8 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
 
       {headerInfo && <div className="shrink-0">{headerInfo}</div>}
 
-      {/* Standalone Toolbar & Single-Row Category Filter Strip (hidden when managed by NotesTab) */}
       {!hideControls && (
         <div className="shrink-0 flex flex-col gap-1">
-          {/* Streamlined Utility Bar */}
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1 min-w-0">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -476,7 +473,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             </div>
           </div>
 
-          {/* High-Density Category Micro-Pills Strip */}
           <div className="h-6 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5 px-0.5">
             {visibleCategories.map((cat) => {
               const isSelected = selectedCategory === cat;
@@ -505,7 +501,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         </div>
       )}
 
-      {/* Note Cards List (Accordion & Scroll Container) */}
+      {/* Note Cards List */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
         {filteredAndSortedNotes.length === 0 ? (
           <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
@@ -551,7 +547,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         )}
       </div>
 
-      {/* Modal: Create or Edit Note (when used standalone) */}
       <CreateNoteModal
         isOpen={isEditorOpen}
         isGM={isGM}
