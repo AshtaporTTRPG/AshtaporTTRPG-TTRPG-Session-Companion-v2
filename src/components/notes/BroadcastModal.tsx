@@ -43,7 +43,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
       <div
         className={`w-full max-w-sm rounded-2xl p-4 shadow-2xl space-y-3 border-2 ring-1 ring-amber-400/40 transition-colors ${themeCfg.cardClasses}`}
       >
-        {/* Broadcast Banner Header */}
+        {/* Broadcast Header */}
         <div className="flex items-center justify-between pb-2 border-b border-inherit/30">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
@@ -60,39 +60,45 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
-            {/* 1-Click Copy Message Button */}
+            {/* 1-Click Copy */}
             <button
               type="button"
               onClick={handleCopy}
-              className="px-2 py-1 text-[11px] font-semibold rounded bg-black/30 hover:bg-black/50 text-inherit border border-white/20 hover:border-amber-400/50 flex items-center gap-1 transition cursor-pointer"
+              className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                copied
+                  ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                  : 'bg-black/30 hover:bg-black/50 text-inherit border-white/20 hover:border-amber-400/50'
+              }`}
               title={copied ? 'Copied to clipboard!' : 'Copy broadcast message to clipboard'}
               aria-label="Copy broadcast message"
             >
               {copied ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400 text-[10px]">Copied</span>
+                  <span className="text-[10px]">Copied</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" />
+                  <Copy className="w-3.5 h-3.5 text-amber-400" />
                   <span className="text-[10px]">Copy</span>
                 </>
               )}
             </button>
 
+            {/* Dismiss / Close (X) */}
             <button
               type="button"
               onClick={isGM && onStopRevealing ? onStopRevealing : onCloseOrDismiss}
               className="opacity-70 hover:opacity-100 p-1 rounded-md hover:bg-white/10 transition cursor-pointer"
               title={isGM ? 'Stop Revealing & Close' : 'Dismiss'}
+              aria-label="Close modal"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Note Text Content with themed styles and markdown rendering */}
+        {/* Note Content */}
         <div
           className={`select-text cursor-text p-3 rounded-xl border text-xs leading-relaxed max-h-56 overflow-y-auto selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}
         >
@@ -102,7 +108,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
         {/* Modal Actions */}
         <div className="flex items-center justify-between pt-1 border-t border-inherit/30">
           <span className="text-[10px] opacity-70 font-mono">
-            {broadcastNote.author ? `Revealed by ${broadcastNote.author}` : 'Revealed by Game Master'}
+            {broadcastNote.author ? `Revealed by ${broadcastNote.author}` : 'Revealed by Game Master (GM)'}
           </span>
 
           <div className="flex items-center gap-2">
@@ -112,7 +118,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
                 onClick={onStopRevealing || onCloseOrDismiss}
                 className="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 transition cursor-pointer shadow-sm"
               >
-                <EyeOff className="w-3.5 h-3.5" /> Stop Revealing & Close
+                <EyeOff className="w-3.5 h-3.5" /> Stop Revealing
               </button>
             ) : (
               <button
@@ -120,7 +126,7 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
                 onClick={onCloseOrDismiss}
                 className="px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow transition cursor-pointer"
               >
-                Dismiss / Close
+                Dismiss
               </button>
             )}
           </div>
