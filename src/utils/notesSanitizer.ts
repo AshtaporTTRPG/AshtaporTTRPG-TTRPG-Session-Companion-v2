@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NoteItem } from '../types/notes';
-
 export const DEMO_NOTE_TITLES = new Set([
   'campaign shared objectives',
   'party treasury & shared gear',
@@ -13,6 +11,9 @@ export const DEMO_NOTE_TITLES = new Set([
   'elara & town contacts',
   'purple rune clue',
   'purse & magic items',
+  'ambush at the sunken bridge',
+  'the inquisitor’s true identity',
+  'the missing caravan ledger',
 ]);
 
 /**
@@ -27,7 +28,7 @@ export function sanitizeNotesList<T extends { title?: string }>(notes: T[]): T[]
   });
 }
 
-const BOOT_SANITIZED_KEY = 'ashtapor_demo_notes_purged_v2_0_23';
+const BOOT_SANITIZED_KEY = 'ashtapor_demo_notes_purged_v2_0_24';
 
 /**
  * One-time boot sanitizer filtering out hardcoded demo titles from existing local storage.
@@ -40,6 +41,8 @@ export function runBootSanitizerOnce(): void {
     const storageKeys = [
       'ashtapor_my_notes',
       'ashtapor_table_notes',
+      'ashtapor_gm_notes',
+      'ashtapor_dm_secret_notes',
       'ashtapor_legacy_player_notes',
       'ashtapor_table_notes_backup',
       'ashtapor_my_roster',
