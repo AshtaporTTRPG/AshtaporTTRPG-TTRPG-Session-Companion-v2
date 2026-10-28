@@ -117,7 +117,6 @@ export interface NoteCardProps {
   onToggleExpand: (e?: React.MouseEvent) => void;
   onTogglePin?: () => void;
   onDelete: () => void;
-  onEdit?: (e: React.MouseEvent) => void;
   onSaveNote?: (note: NoteItem) => void;
   onToggleReveal?: () => void;
   onBroadcastNote?: (note: NoteItem) => void;
@@ -134,7 +133,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onToggleExpand,
   onTogglePin,
   onDelete,
-  onEdit,
   onSaveNote,
   onToggleReveal,
   onBroadcastNote,
@@ -157,7 +155,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const [editTheme, setEditTheme] = useState<NoteTheme>(note.theme || 'slate');
   const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Sync inline edit form when note props update externally
   useEffect(() => {
     if (!isInlineEditing) {
       setEditTitle(note.title);
@@ -289,7 +286,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           : ''
       }`}
     >
-      {/* 1. Header Row (Clean Title Line with Category, Author, and Pin only) */}
+      {/* 1. Header Row (Chevron, Title, Category, Author, 1-Click Full View, Pin) */}
       <div
         className="p-2.5 flex items-center justify-between gap-1.5 cursor-pointer select-none"
         onClick={isInlineEditing ? undefined : onToggleExpand}
@@ -340,8 +337,25 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           )}
         </div>
 
-        {/* Right Micro-Icons: Pin Only */}
+        {/* Right Micro-Icons: 1-Click Full View & Pin */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
+          {/* 1-Click Full Reader View */}
+          {onOpenReader && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenReader(note.id);
+              }}
+              title="Open Full Reader View"
+              aria-label="Open Full Reader View"
+              className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer shrink-0"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Pin */}
           {onTogglePin && (
             <button
               type="button"
@@ -411,7 +425,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </select>
               </div>
 
-              {/* Inline Formatting Helper Strip */}
+              {/* Inline Formatting Toolbar */}
               <div className="flex items-center gap-1 flex-wrap py-1 px-1 rounded bg-black/30 border border-white/10 text-xs">
                 <button
                   type="button"
@@ -632,22 +646,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                         </div>
                       )}
                     </div>
-                  )}
-
-                  {/* Full View */}
-                  {onOpenReader && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenReader(note.id);
-                      }}
-                      className="px-2 py-1 rounded bg-black/30 hover:bg-black/50 text-inherit border border-white/10 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
-                      title="Open Full Reader View"
-                    >
-                      <Maximize2 className="w-3 h-3 text-amber-400" />
-                      <span>Full View</span>
-                    </button>
                   )}
 
                   {/* Broadcast (STRICTLY GM Notes) */}
