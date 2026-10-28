@@ -16,7 +16,6 @@ import {
   EyeOff,
   Maximize2,
   ArrowUpRight,
-  Radio,
 } from 'lucide-react';
 import {
   NoteItem,
@@ -214,7 +213,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           : ''
       }`}
     >
-      {/* 1. Header Row */}
+      {/* 1. Header Row (Clean Title Line with Category, Author, and Pin only) */}
       <div
         className="p-2.5 flex items-center justify-between gap-1.5 cursor-pointer select-none"
         onClick={onToggleExpand}
@@ -265,45 +264,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           )}
         </div>
 
-        {/* Right Micro-Icons */}
+        {/* Right Micro-Icons: Pin Only */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
-          {/* GM 1-Click Broadcast: Only on Table Notes and GM Notes */}
-          {isGM && currentVault !== 'myNotes' && (onBroadcastNote || onToggleReveal) && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleBroadcastNote(note);
-              }}
-              title={isRevealed ? 'Stop Revealing & Close' : 'Broadcast Note to Table'}
-              aria-label={isRevealed ? 'Stop Revealing & Close' : 'Broadcast Note to Table'}
-              className={`p-1 rounded transition-colors cursor-pointer ${
-                isRevealed
-                  ? 'text-amber-400 bg-amber-950/60 ring-1 ring-amber-400'
-                  : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
-              }`}
-            >
-              <Radio className={`w-3.5 h-3.5 ${isRevealed ? 'animate-pulse' : ''}`} />
-            </button>
-          )}
-
-          {/* Reader View */}
-          {onOpenReader && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenReader(note.id);
-              }}
-              title="Open Full Reader View"
-              aria-label="Open Full Reader View"
-              className="p-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition cursor-pointer shrink-0"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          {/* Pin */}
           {onTogglePin && (
             <button
               type="button"
@@ -465,8 +427,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </button>
               )}
 
-              {/* GM Broadcast */}
-              {isGM && currentVault !== 'myNotes' && (onBroadcastNote || onToggleReveal) && (
+              {/* Broadcast (STRICTLY GM Notes) */}
+              {isGM && currentVault === 'gmNotes' && (onBroadcastNote || onToggleReveal) && (
                 <button
                   type="button"
                   onClick={(e) => {
