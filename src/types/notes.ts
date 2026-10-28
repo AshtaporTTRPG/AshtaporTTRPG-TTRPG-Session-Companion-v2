@@ -1,45 +1,36 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 export type NoteCategory =
   | 'General'
-  | 'NPC'
-  | 'Quest'
-  | 'Combat'
   | 'Loot'
+  | 'NPC'
   | 'Location'
+  | 'Combat'
   | 'Scene'
-  | 'Hook';
+  | 'Hook'
+  | 'Clue'
+  | 'Quest'; // Retained for backward-compatibility with existing room metadata
 
 export const NOTE_CATEGORIES: NoteCategory[] = [
   'General',
-  'NPC',
-  'Quest',
-  'Combat',
   'Loot',
+  'NPC',
   'Location',
+  'Combat',
   'Scene',
   'Hook',
+  'Clue',
 ];
 
-export const PLAYER_NOTE_CATEGORIES: NoteCategory[] = [
-  'General',
-  'NPC',
-  'Quest',
-  'Loot',
-  'Location',
-];
+// All categories available to players and GM for session scribbles
+export const PLAYER_NOTE_CATEGORIES: NoteCategory[] = NOTE_CATEGORIES;
+export const GM_NOTE_CATEGORIES: NoteCategory[] = NOTE_CATEGORIES;
 
-export const GM_NOTE_CATEGORIES: NoteCategory[] = [
-  'General',
-  'NPC',
-  'Quest',
-  'Combat',
-  'Loot',
-  'Location',
-  'Scene',
-  'Hook',
-];
-
-export function getAvailableCategories(isGM: boolean): NoteCategory[] {
-  return isGM ? GM_NOTE_CATEGORIES : PLAYER_NOTE_CATEGORIES;
+export function getAvailableCategories(_isGM?: boolean): NoteCategory[] {
+  return NOTE_CATEGORIES;
 }
 
 export type NoteTheme = 'slate' | 'parchment' | 'tablet' | 'scroll' | 'journal';
@@ -53,6 +44,7 @@ export interface NoteItem {
   content: string;
   theme?: NoteTheme;
   isPinned?: boolean;
+  isRevealed?: boolean;
   updatedAt: string | number;
   createdAt?: string | number;
   authorRole?: 'GM' | 'PLAYER';
@@ -66,20 +58,11 @@ export interface NotesExportPayload {
   notes: NoteItem[];
 }
 
-export interface DmSecretNote {
-  id: string;
-  title: string;
-  content: string;
-  category?: NoteCategory;
-  theme?: NoteTheme;
-  isRevealed?: boolean;
-  isPinned?: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
+// Unified GM types: GmSecretNote uses NoteItem schema
+export type GmSecretNote = NoteItem;
 
-export type GmSecretNote = DmSecretNote;
-
+// Backward-compatibility alias for existing components during transition
+export type DmSecretNote = NoteItem;
 export type Note = NoteItem;
 
 export interface BroadcastNotePayload {
@@ -92,29 +75,40 @@ export interface BroadcastNotePayload {
   broadcastAt?: number;
 }
 
+export type NoteTransferAction =
+  | 'copy_to_table'
+  | 'move_to_table'
+  | 'copy_to_my'
+  | 'move_to_my'
+  | 'copy_to_gm'
+  | 'move_to_gm'
+  | 'move_to_dm'; // Backward-compatibility alias
+
 export type NotesScope =
   | 'my-notes'
   | 'table-notes'
-  | 'dm-notes'
   | 'gm-notes'
   | 'myNotes'
   | 'tableNotes'
-  | 'dmNotes'
-  | 'gmNotes';
+  | 'gmNotes'
+  | 'dmNotes'; // Backward-compatibility alias
 
+// Room Metadata Keys
 export const OBR_TABLE_NOTES_KEY = 'ashtapor/table_notes';
 export const OBR_LEGACY_TABLE_NOTES_KEY = 'com.ashtapor.session-companion/table-notes';
 export const OBR_PREV_TABLE_NOTES_KEY = 'com.ashtapor.companion/table-notes';
 export const OBR_BROADCAST_NOTE_KEY = 'ashtapor/broadcast_note';
 
+// Client Local Storage Keys
 export const LOCAL_MY_NOTES_KEY = 'ashtapor_my_notes';
 export const LOCAL_LEGACY_PLAYER_NOTES_KEY = 'ashtapor_player_notes_v2';
 export const LOCAL_TABLE_NOTES_KEY = 'ashtapor_table_notes_cache';
-export const LOCAL_DM_NOTES_KEY = 'ashtapor_dm_secret_notes';
-export const LOCAL_DM_COLLAPSED_KEY = 'ashtapor_dm_notes_collapsed_v1';
+export const LOCAL_GM_NOTES_KEY = 'ashtapor_gm_notes';
+export const LOCAL_DM_NOTES_KEY = 'ashtapor_dm_secret_notes'; // Legacy fallback
+export const LOCAL_EXPANDED_NOTES_KEY = 'ashtapor_notes_expanded_ids';
 export const LOCAL_COLLAPSED_NOTES_KEY = 'ashtapor_notes_collapsed_v1';
 
-export type NotesSubTab = 'myNotes' | 'tableNotes' | 'gm' | 'dmNotes';
+export type NotesSubTab = 'myNotes' | 'tableNotes' | 'gmNotes' | 'gm' | 'dmNotes';
 
 export const NOTE_THEME_CONFIG: Record<
   NoteTheme,
@@ -162,4 +156,3 @@ export const NOTE_THEME_CONFIG: Record<
     previewClasses: 'bg-[#241c15] border-amber-900 text-amber-100',
   },
 };
-
