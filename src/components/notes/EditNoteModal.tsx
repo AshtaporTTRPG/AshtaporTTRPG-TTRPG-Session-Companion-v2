@@ -1,24 +1,40 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Pin, X, Bold, Italic, List, CheckSquare } from 'lucide-react';
+import {
+  Pin,
+  X,
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  Minus,
+  List,
+  CheckSquare,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
 import {
   NoteCategory,
   NoteItem,
+  GmSecretNote,
   DmSecretNote,
-  PLAYER_NOTE_CATEGORIES,
-  GM_NOTE_CATEGORIES,
   NoteTheme,
   NOTE_THEMES,
   NOTE_THEME_CONFIG,
+  getAvailableCategories,
 } from '../../types/notes';
 import { applyMarkdownSyntax } from '../../utils/markdownRenderer';
 
 export interface EditNoteModalProps {
   isOpen: boolean;
   isGM: boolean;
-  editingNote?: NoteItem | DmSecretNote | null;
+  editingNote?: NoteItem | GmSecretNote | DmSecretNote | null;
   isDmSecretNote?: boolean;
   isGMSecretNote?: boolean;
-  currentVault?: 'myNotes' | 'tableNotes' | 'dmNotes';
+  currentVault?: 'myNotes' | 'tableNotes' | 'gmNotes' | 'dmNotes';
   defaultCategory?: NoteCategory;
   onClose: () => void;
   onSave: (data: {
@@ -41,14 +57,14 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
   onClose,
   onSave,
 }) => {
-  const isSecretVaultNote = isGMSecretNote || isDmSecretNote || currentVault === 'dmNotes';
+  const isSecretVaultNote =
+    isGMSecretNote || isDmSecretNote || currentVault === 'gmNotes' || currentVault === 'dmNotes';
 
-  // Gate category options based on isGM role:
   const availableCategories = useMemo<NoteCategory[]>(() => {
-    return isGM ? GM_NOTE_CATEGORIES : PLAYER_NOTE_CATEGORIES;
+    return getAvailableCategories(isGM);
   }, [isGM]);
 
-  // Pin to top checkbox: GM only for Table/GM notes; personal in My Notes
+  // Pin to top: GM only for Table/GM notes; personal in My Notes
   const canPin = isGM || currentVault === 'myNotes';
 
   const [title, setTitle] = useState('');
@@ -56,6 +72,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
   const [content, setContent] = useState('');
   const [isPinned, setIsPinned] = useState(false);
   const [theme, setTheme] = useState<NoteTheme>('slate');
+  const [isMaximized, setIsMaximized] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -65,7 +82,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
     if (editingNote) {
       setTitle(editingNote.title || '');
       const initialCat = editingNote.category || 'General';
-      if (isGM || availableCategories.includes(initialCat)) {
+      if (availableCategories.includes(initialCat)) {
         setCategory(initialCat);
       } else {
         setCategory('General');
@@ -83,7 +100,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
       setIsPinned(false);
       setTheme('slate');
     }
-  }, [isOpen, editingNote, isGM, availableCategories, defaultCategory]);
+  }, [isOpen, editingNote, availableCategories, defaultCategory]);
 
   if (!isOpen) return null;
 
@@ -108,12 +125,16 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
   const currentThemeConfig = NOTE_THEME_CONFIG[theme] || NOTE_THEME_CONFIG.slate;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/70 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/75 backdrop-blur-sm animate-fadeIn">
       <div
-        className={`w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden rounded-xl shadow-2xl border transition-colors ${currentThemeConfig.cardClasses}`}
+        className={`w-full flex flex-col overflow-hidden rounded-xl shadow-2xl border transition-all ${
+          isMaximized
+            ? 'h-[96vh] max-h-[96vh] max-w-full'
+            : 'max-w-2xl max-h-[85vh]'
+        } ${currentThemeConfig.cardClasses}`}
       >
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          {/* Header (Shrink-0) */}
+          {/* Header */}
           <div className="shrink-0 p-3 border-b border-inherit/30 flex items-center gap-2">
             <input
               type="text"
@@ -125,7 +146,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
               autoFocus
             />
 
-            {/* Theme Selector: Slate, Parchment, Tablet, Scroll, Journal (Available for ALL players and GM) */}
+            {/* Theme Selector */}
             <select
               value={theme}
               onChange={(e) => setTheme(e.target.value as NoteTheme)}
@@ -140,11 +161,22 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
               ))}
             </select>
 
+            {/* Maximize / Expand Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsMaximized((prev) => !prev)}
+              className="p-1.5 rounded-lg opacity-70 hover:opacity-100 hover:bg-black/20 text-inherit transition cursor-pointer shrink-0"
+              title={isMaximized ? 'Restore standard view' : 'Maximize editor view'}
+              aria-label={isMaximized ? 'Restore standard view' : 'Maximize editor view'}
+            >
+              {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+
             {/* Close Button */}
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg opacity-70 hover:opacity-100 hover:bg-black/20 transition cursor-pointer shrink-0"
+              className="p-1.5 rounded-lg opacity-70 hover:opacity-100 hover:bg-black/20 text-inherit transition cursor-pointer shrink-0"
               title="Close modal"
               aria-label="Close modal"
             >
@@ -152,7 +184,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
             </button>
           </div>
 
-          {/* Toolbar (Shrink-0) */}
+          {/* Toolbar */}
           <div className="shrink-0 px-3 py-1.5 border-b border-inherit/30 flex items-center justify-between gap-2 flex-wrap text-xs">
             <div className="flex items-center gap-2 flex-wrap">
               {/* Category Dropdown */}
@@ -187,7 +219,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
             </div>
 
             {/* Markdown Helper Tools */}
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1 shrink-0 flex-wrap">
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
@@ -211,6 +243,16 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyMarkdownSyntax(textareaRef.current, 'underline', content, setContent)}
+                className="px-2 py-0.5 rounded bg-black/30 hover:bg-black/50 border border-white/10 text-[11px] underline flex items-center gap-0.5 cursor-pointer transition hover:text-amber-400"
+                title="Underline (__text__)"
+              >
+                <UnderlineIcon className="w-2.5 h-2.5" />
+                <span>U</span>
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => applyMarkdownSyntax(textareaRef.current, 'list', content, setContent)}
                 className="px-2 py-0.5 rounded bg-black/30 hover:bg-black/50 border border-white/10 text-[11px] flex items-center gap-1 cursor-pointer transition hover:text-amber-400"
                 title="Bullet List (- item)"
@@ -228,18 +270,28 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
                 <CheckSquare className="w-2.5 h-2.5" />
                 <span>☑ Task</span>
               </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyMarkdownSyntax(textareaRef.current, 'divider', content, setContent)}
+                className="px-2 py-0.5 rounded bg-black/30 hover:bg-black/50 border border-white/10 text-[11px] flex items-center gap-0.5 cursor-pointer transition hover:text-amber-400"
+                title="Line Divider (---)"
+              >
+                <Minus className="w-2.5 h-2.5" />
+                <span>Line</span>
+              </button>
             </div>
           </div>
 
-          {/* Textarea Canvas (Flex-1, Min-h-0) */}
+          {/* Textarea Canvas */}
           <div className="flex-1 min-h-0 p-3 flex flex-col">
             <textarea
               ref={textareaRef}
               className={`w-full flex-1 min-h-0 resize-none rounded-lg p-3 text-xs sm:text-sm focus:outline-none focus:border-amber-500/60 leading-relaxed overflow-y-auto border border-white/20 ${currentThemeConfig.contentClasses}`}
               placeholder={
                 isSecretVaultNote
-                  ? 'Write boxed text scenes, plot hooks, secret DCs, or encounter tactics...\nTip: Use # for encounters, ## for sub-sections, - lists, or - [ ] tasks.'
-                  : 'Write note details, dialogue, lore, reminders, or inventory...\nTip: Use # for encounters, ## for sub-sections, - lists, or - [ ] tasks.'
+                  ? 'Write boxed text scenes, plot hooks, secret DCs, encounter tactics, or riddles...\nTip: Use # for encounters, ## for sub-sections, - lists, --- for dividers, or - [ ] tasks.'
+                  : 'Write note details, dialogue, clues, reminders, or inventory...\nTip: Use # for encounters, ## for sub-sections, - lists, --- for dividers, or - [ ] tasks.'
               }
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -247,7 +299,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
             />
           </div>
 
-          {/* Footer (Shrink-0: Guaranteed Visible) */}
+          {/* Footer */}
           <div className="shrink-0 px-3 py-2 border-t border-inherit/30 flex items-center justify-between bg-black/40">
             <span className="text-xs opacity-75 font-mono">
               {wordCount} {wordCount === 1 ? 'word' : 'words'}
