@@ -29,6 +29,7 @@ import {
   NotesScope,
   NoteTheme,
   NoteTransferAction,
+  normalizeCategory,
   OBR_TABLE_NOTES_KEY as SDK_TABLE_NOTES_KEY,
   OBR_BROADCAST_NOTE_KEY as SDK_BROADCAST_NOTE_KEY,
   LOCAL_MY_NOTES_KEY,
@@ -53,26 +54,21 @@ export const OBR_BROADCAST_NOTE_KEY = BROADCAST_KEY;
 
 const CATEGORY_ORDER: NoteCategory[] = [
   'General',
-  'Loot',
   'NPC',
   'Location',
-  'Combat',
-  'Scene',
-  'Hook',
-  'Clue',
+  'Loot',
+  'Encounters',
+  'Leads',
 ];
 
 export const CATEGORY_ABBREVIATIONS: Record<string, string> = {
   All: 'All',
   General: 'Gen',
-  Loot: 'Loot',
   NPC: 'NPC',
   Location: 'Loc',
-  Combat: 'Cbt',
-  Scene: 'Scene',
-  Hook: 'Hook',
-  Clue: 'Clue',
-  Quest: 'Qst',
+  Loot: 'Loot',
+  Encounters: 'Enc',
+  Leads: 'Lead',
 };
 
 const DEFAULT_MY_NOTES: NoteItem[] = [];
@@ -141,14 +137,10 @@ function migrateToNoteCards(
           createdAt: new Date().toISOString(),
         };
       }
-      const validCat: NoteCategory =
-        item.category && (NOTE_CATEGORIES.includes(item.category) || item.category === 'Quest')
-          ? item.category
-          : 'General';
       return {
         id: item.id || `note-${Date.now()}-${index}`,
         title: item.title || 'Untitled Note',
-        category: validCat,
+        category: normalizeCategory(item.category),
         content: typeof item.content === 'string' ? item.content : '',
         theme: item.theme,
         isPinned: !!item.isPinned,
@@ -608,20 +600,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     const counts: Record<string, number> = {
       All: activeNotesList.length,
       General: 0,
-      Loot: 0,
       NPC: 0,
       Location: 0,
-      Combat: 0,
-      Scene: 0,
-      Hook: 0,
-      Clue: 0,
-      Quest: 0,
+      Loot: 0,
+      Encounters: 0,
+      Leads: 0,
     };
     activeNotesList.forEach((n) => {
-      const cat =
-        n.category && (NOTE_CATEGORIES.includes(n.category) || n.category === 'Quest')
-          ? n.category
-          : 'General';
+      const cat = normalizeCategory(n.category);
       counts[cat] = (counts[cat] || 0) + 1;
     });
     return counts;
@@ -634,9 +620,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         list.push(cat);
       }
     });
-    if ((categoryCounts.Quest || 0) > 0 && !list.includes('Quest')) {
-      list.push('Quest');
-    }
     return list;
   }, [categoryCounts]);
 
@@ -688,7 +671,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         : myNotes;
 
     const payload: NotesExportPayload = {
-      version: '2.0.26',
+      version: '2.0.27',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes: notesToExport,
@@ -733,16 +716,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const validList: NoteItem[] = [];
       for (const item of rawNotes) {
         if (item && (typeof item.title === 'string' || typeof item.content === 'string')) {
-          const categoryVal: NoteCategory =
-            item.category && (NOTE_CATEGORIES.includes(item.category) || item.category === 'Quest')
-              ? item.category
-              : 'General';
           validList.push({
             id:
               item.id ||
               `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             title: (item.title || 'Untitled Note').trim(),
-            category: categoryVal,
+            category: normalizeCategory(item.category),
             content: typeof item.content === 'string' ? item.content : '',
             theme: item.theme,
             isPinned: !!item.isPinned,
@@ -783,11 +762,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         ? crypto.randomUUID()
         : `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+    const normalizedCat = normalizeCategory(sourceNote.category);
+
     if (action === 'copy_to_table') {
       const copyItem: NoteItem = {
         id: newId,
         title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
+        category: normalizedCat,
         content: sourceNote.content,
         theme: sourceNote.theme,
         isPinned: false,
@@ -801,7 +782,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const moveItem: NoteItem = {
         id: newId,
         title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
+        category: normalizedCat,
         content: sourceNote.content,
         theme: sourceNote.theme,
         isPinned: false,
@@ -817,7 +798,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const copyMyItem: NoteItem = {
         id: newId,
         title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
+        category: normalizedCat,
         content: sourceNote.content,
         theme: sourceNote.theme,
         isPinned: false,
@@ -831,7 +812,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const myItem: NoteItem = {
         id: newId,
         title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
+        category: normalizedCat,
         content: sourceNote.content,
         theme: sourceNote.theme,
         isPinned: false,
@@ -847,7 +828,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const gmItem: NoteItem = {
         id: newId,
         title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
+        category: normalizedCat,
         content: sourceNote.content,
         theme: sourceNote.theme,
         isPinned: false,
@@ -861,7 +842,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const gmItem: NoteItem = {
         id: newId,
         title: sourceNote.title,
-        category: (sourceNote.category || 'General') as NoteCategory,
+        category: normalizedCat,
         content: sourceNote.content,
         theme: sourceNote.theme,
         isPinned: false,
@@ -1036,7 +1017,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             )}
           </div>
 
-          {/* Active Broadcast Announcement Banner (Visible to GM) */}
+          {/* Active Broadcast Announcement Banner */}
           {isGameMaster && activeBroadcast && (
             <div className="p-2 rounded-xl bg-amber-950/50 border border-amber-500/70 text-amber-200 text-xs flex items-center justify-between gap-2 shadow-sm shrink-0 animate-fadeIn">
               <div className="flex items-center gap-2 min-w-0">
@@ -1265,7 +1246,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         </>
       )}
 
-      {/* Large Note Modal (Exclusively for "+" and Reader View Edit) */}
+      {/* Large Note Modal */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
         isGM={isGameMaster}
@@ -1274,7 +1255,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         editingNote={editingNote}
         defaultCategory={
           activeSelectedCategory !== 'All'
-            ? (activeSelectedCategory as NoteCategory)
+            ? (normalizeCategory(activeSelectedCategory))
             : 'General'
         }
         onClose={() => {
