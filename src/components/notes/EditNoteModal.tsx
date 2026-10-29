@@ -28,12 +28,42 @@ import {
 import { applyMarkdownSyntax } from '../../utils/markdownRenderer';
 
 export const SANDBOX_PREP_TEMPLATES: Record<string, string> = {
-  General: `# Session Agenda
-- [ ] Review consequences of previous actions
-- [ ] Timeline event / incoming message
-- [ ] Potential encounter / scene 1
-- [ ] Potential encounter / scene 2
-- [ ] End-of-session recap & XP/Loot`,
+  General: `### Review consequences of previous actions
+- [ ] Consequence 1
+- [ ] Consequence 2
+---
+### Timeline events / messages
+- [ ] Event 1
+- [ ] Event 2
+- [ ] Message 1
+- [ ] Message 2
+---
+### Potential encounters / scenes
+- [ ] Scene 1
+- [ ] Scene 2
+---
+### End-of-session
+- [ ] Recap
+- [ ] What's next`,
+
+  NPC: `# [NPC Name]
+- **Role/Faction:** [Relationship / Affiliation]
+- **Nature:** [Friendly / Neutral / Hostile]
+- **Immediate Want:** [Goal]
+- **What They Know:** [Key information or lead]
+- **Leverage / DC:** [Persuasion DC 14 / Intimidation DC 16 / Bribe]
+- **Mannerism / Tell:** [Voice, phrase, or physical quirk]`,
+
+  Location: `# [Region Name]
+[environment description]
+- **Key Features:** [Notable landmark, door, altar, or hazard]
+- **Search DC:** [Any Skill checks]
+- **Hidden items / Lore:** [List]`,
+
+  Loot: `# Loot: [Source Name]
+- **Coin / Valuables:** [Units or gemstones]
+- **Items / Potions:** [Consumables or gear]
+- **Special / Magic Item:** [Item name, attunement, 1-line mechanic]`,
 
   Encounters: `# Encounter: [Name / Threat Level]
 - **Type / Vibe:** [Combat / Trap / Social / Vision]
@@ -44,24 +74,8 @@ export const SANDBOX_PREP_TEMPLATES: Record<string, string> = {
   Leads: `# Lead: [Title / Inscription]
 "[Exact rumor, inscription text, or letter content]"
 - **Source:** [Who tells them or where it is found]
-- **Check / Verify (DC 13):** [What an Arcana / History / Insight check reveals]
+- **Check / Verify:** [What a check reveals]
 - **Points To:** [Target NPC, faction, or location]`,
-
-  NPC: `# [NPC Name] — [Role / Faction]
-- **Disposition:** [Friendly / Neutral / Hostile] · **Immediate Want:** [Goal]
-- **What They Know:** [Key information or lead]
-- **Leverage / DC:** [Persuasion DC 14 / Intimidation DC 16 / Gold]
-- **Mannerism / Tell:** [Voice, phrase, or physical quirk]`,
-
-  Location: `# [Location Name] — [Region]
-[1 sentence sensory environment description]
-- **Key Features:** [Notable landmark, door, altar, or hazard]
-- **Search (DC 14 Investigation):** [Hidden items or lore]`,
-
-  Loot: `# Loot: [Parcel / Source Name]
-- **Coin / Valuables:** [X gp, Y sp, gemstones]
-- **Items / Potions:** [Consumables or gear]
-- **Special / Magic Item:** [Item name, attunement, 1-line mechanic]`,
 };
 
 export interface EditNoteModalProps {
@@ -243,20 +257,20 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
                 <option value="General" className="bg-slate-900 text-slate-100 font-sans">
                   General: Session Agenda
                 </option>
-                <option value="Encounters" className="bg-slate-900 text-slate-100 font-sans">
-                  Encounters: Fight, Trap, or Vision
-                </option>
-                <option value="Leads" className="bg-slate-900 text-slate-100 font-sans">
-                  Leads: Clue, Rumor, or Bounty
-                </option>
                 <option value="NPC" className="bg-slate-900 text-slate-100 font-sans">
-                  NPC: Contact & Dossier
+                  NPC: Contact
                 </option>
                 <option value="Location" className="bg-slate-900 text-slate-100 font-sans">
-                  Location: Waypoint & Dungeon
+                  Location: Waypoint
                 </option>
                 <option value="Loot" className="bg-slate-900 text-slate-100 font-sans">
-                  Loot: Treasure & Parcels
+                  Loot: Treasure or Parcels
+                </option>
+                <option value="Encounters" className="bg-slate-900 text-slate-100 font-sans">
+                  Encounters: Combat or Social
+                </option>
+                <option value="Leads" className="bg-slate-900 text-slate-100 font-sans">
+                  Leads: Clues or Hooks
                 </option>
               </select>
 
