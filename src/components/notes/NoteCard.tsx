@@ -31,6 +31,7 @@ import {
   NOTE_THEMES,
   NOTE_THEME_CONFIG,
   NoteTransferAction,
+  normalizeCategory,
 } from '../../types/notes';
 import { copyToClipboard } from '../../utils/clipboard';
 import { renderMarkdown, toggleMarkdownTask, applyMarkdownSyntax } from '../../utils/markdownRenderer';
@@ -45,12 +46,6 @@ export const CATEGORY_STYLES: Record<
     text: 'text-slate-400',
     activePill: 'border-slate-400 bg-slate-800/80 text-slate-100 font-bold',
   },
-  Loot: {
-    borderL: 'border-l-emerald-500',
-    badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
-    text: 'text-emerald-400',
-    activePill: 'border-emerald-500 bg-emerald-950/40 text-emerald-200 font-bold',
-  },
   NPC: {
     borderL: 'border-l-amber-500',
     badge: 'bg-amber-500/10 text-amber-400 border border-amber-500/30',
@@ -63,49 +58,34 @@ export const CATEGORY_STYLES: Record<
     text: 'text-purple-400',
     activePill: 'border-purple-500 bg-purple-950/40 text-purple-200 font-bold',
   },
-  Combat: {
+  Loot: {
+    borderL: 'border-l-emerald-500',
+    badge: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
+    text: 'text-emerald-400',
+    activePill: 'border-emerald-500 bg-emerald-950/40 text-emerald-200 font-bold',
+  },
+  Encounters: {
     borderL: 'border-l-rose-500',
     badge: 'bg-rose-500/10 text-rose-400 border border-rose-500/30',
     text: 'text-rose-400',
     activePill: 'border-rose-500 bg-rose-950/40 text-rose-200 font-bold',
   },
-  Scene: {
-    borderL: 'border-l-indigo-500',
-    badge: 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30',
-    text: 'text-indigo-300',
-    activePill: 'border-indigo-500 bg-indigo-950/40 text-indigo-200 font-bold',
-  },
-  Hook: {
-    borderL: 'border-l-fuchsia-500',
-    badge: 'bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30',
-    text: 'text-fuchsia-300',
-    activePill: 'border-fuchsia-500 bg-fuchsia-950/40 text-fuchsia-200 font-bold',
-  },
-  Clue: {
+  Leads: {
     borderL: 'border-l-teal-500',
     badge: 'bg-teal-500/10 text-teal-400 border border-teal-500/30',
     text: 'text-teal-400',
     activePill: 'border-teal-500 bg-teal-950/40 text-teal-200 font-bold',
-  },
-  Quest: {
-    borderL: 'border-l-sky-500',
-    badge: 'bg-sky-500/10 text-sky-400 border border-sky-500/30',
-    text: 'text-sky-400',
-    activePill: 'border-sky-500 bg-sky-950/40 text-sky-200 font-bold',
   },
 };
 
 export const CATEGORY_PILL_ACTIVE_STYLES: Record<string, string> = {
   All: 'border-amber-500 bg-amber-950/40 font-bold text-slate-100',
   General: CATEGORY_STYLES.General.activePill,
-  Loot: CATEGORY_STYLES.Loot.activePill,
   NPC: CATEGORY_STYLES.NPC.activePill,
   Location: CATEGORY_STYLES.Location.activePill,
-  Combat: CATEGORY_STYLES.Combat.activePill,
-  Scene: CATEGORY_STYLES.Scene.activePill,
-  Hook: CATEGORY_STYLES.Hook.activePill,
-  Clue: CATEGORY_STYLES.Clue.activePill,
-  Quest: CATEGORY_STYLES.Quest.activePill,
+  Loot: CATEGORY_STYLES.Loot.activePill,
+  Encounters: CATEGORY_STYLES.Encounters.activePill,
+  Leads: CATEGORY_STYLES.Leads.activePill,
 };
 
 export interface NoteCardProps {
@@ -143,15 +123,15 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const transferRef = useRef<HTMLDivElement>(null);
 
+  // Normalized Category
+  const cat = normalizeCategory(note.category);
+  const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
+
   // Inline editing state for dropped-down card view
   const [isInlineEditing, setIsInlineEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(note.title);
   const [editContent, setEditContent] = useState(note.content);
-  const [editCategory, setEditCategory] = useState<NoteCategory>(
-    (note.category && (NOTE_CATEGORIES.includes(note.category) || note.category === 'Quest')
-      ? note.category
-      : 'General') as NoteCategory
-  );
+  const [editCategory, setEditCategory] = useState<NoteCategory>(cat);
   const [editTheme, setEditTheme] = useState<NoteTheme>(note.theme || 'slate');
   const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -159,14 +139,10 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     if (!isInlineEditing) {
       setEditTitle(note.title);
       setEditContent(note.content);
-      setEditCategory(
-        (note.category && (NOTE_CATEGORIES.includes(note.category) || note.category === 'Quest')
-          ? note.category
-          : 'General') as NoteCategory
-      );
+      setEditCategory(cat);
       setEditTheme(note.theme || 'slate');
     }
-  }, [note, isInlineEditing]);
+  }, [note, isInlineEditing, cat]);
 
   const handleBroadcastNote = (targetNote: NoteItem) => {
     if (onBroadcastNote) {
@@ -186,11 +162,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isTransferOpen]);
-
-  const cat = (
-    note.category && CATEGORY_STYLES[note.category] ? note.category : 'General'
-  ) as NoteCategory;
-  const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -230,6 +201,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     const newContent = toggleMarkdownTask(note.content, lineIndex);
     const updated: NoteItem = {
       ...note,
+      category: cat,
       content: newContent,
       updatedAt: typeof note.updatedAt === 'number' ? Date.now() : new Date().toISOString(),
     };
@@ -339,7 +311,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
         {/* Right Micro-Icons: 1-Click Full View & Pin */}
         <div className="flex items-center gap-1 shrink-0 ml-1">
-          {/* 1-Click Full Reader View */}
           {onOpenReader && (
             <button
               type="button"
@@ -355,7 +326,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
             </button>
           )}
 
-          {/* Pin */}
           {onTogglePin && (
             <button
               type="button"
@@ -381,11 +351,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       {isExpanded && (
         <div className="px-2.5 pb-2.5 pt-1 space-y-2 border-t border-inherit/30">
           {isInlineEditing ? (
-            /* ========================================================= */
-            /* INLINE EDIT MODE (Directly inside dropped-down note card) */
-            /* ========================================================= */
+            /* INLINE EDIT MODE */
             <form onSubmit={handleSaveInlineEdit} className="space-y-2" onClick={(e) => e.stopPropagation()}>
-              {/* Inline Metadata Controls: Title, Category, Theme */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <input
                   type="text"
@@ -489,7 +456,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 </button>
               </div>
 
-              {/* Textarea Canvas */}
               <textarea
                 ref={inlineTextareaRef}
                 value={editContent}
@@ -500,7 +466,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 required
               />
 
-              {/* Inline Action Footer: Word count & Save / Cancel */}
               <div className="flex items-center justify-between pt-1 text-xs">
                 <span className="text-[10px] opacity-70 font-mono">
                   {inlineEditWordCount} {inlineEditWordCount === 1 ? 'word' : 'words'}
@@ -523,9 +488,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
               </div>
             </form>
           ) : (
-            /* ========================================================= */
-            /* STANDARD READ VIEW (Dropped-down card in the list)        */
-            /* ========================================================= */
+            /* STANDARD READ VIEW */
             <>
               {/* Action Toolbar */}
               <div className="flex items-center justify-between gap-1 py-1 px-1 rounded-lg bg-black/40 border border-inherit/20 text-xs">
