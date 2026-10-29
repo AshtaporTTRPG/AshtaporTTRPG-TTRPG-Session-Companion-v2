@@ -14,12 +14,9 @@ import {
   Footprints,
   Moon,
   Coins,
-  Dices,
   Copy,
   Check,
 } from 'lucide-react';
-import { liveFeedSync } from '../utils/liveFeedSync';
-import { rollSingleDie } from '../utils/dice';
 
 export interface GrimoireRule {
   id: string;
@@ -30,7 +27,7 @@ export interface GrimoireRule {
   summary: string;
   details: string[];
   actionType?: 'bonus' | 'action' | 'special' | 'passive';
-  interactiveType?: 'emphasis' | 'mass_combat' | 'currency' | 'potions';
+  interactiveType?: 'currency' | 'potions';
 }
 
 const GRIMOIRE_RULES: GrimoireRule[] = [
@@ -255,7 +252,6 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     title: 'Emphasis Rolls (Binary Drama)',
     badge: '2d20 vs 10',
     actionType: 'special',
-    interactiveType: 'emphasis',
     keywords: ['emphasis', 'dramatic', 'binary', '2d20', 'grand success', 'grand failure', 'fate'],
     summary:
       'Absolute binary dramatic outcome without modifiers. Roll 2d20; the die farthest from 10 dictates the outcome.',
@@ -271,7 +267,6 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     title: 'Mass Combat Resolution',
     badge: 'Init 20 & 10',
     actionType: 'special',
-    interactiveType: 'mass_combat',
     keywords: ['mass combat', 'army', 'initiative 20', 'initiative 10', 'fate roll', 'execution'],
     summary:
       'Contested group checks at Initiative 20 (Fate Roll) and Initiative 10 (Execution Roll). Execute fate at round end.',
@@ -320,49 +315,6 @@ export const Grimoire: React.FC<GrimoireProps> = () => {
     navigator.clipboard.writeText(text);
     setCopiedId(rule.id);
     setTimeout(() => setCopiedId(null), 1800);
-  };
-
-  const handleRollEmphasis = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const die1 = rollSingleDie(20);
-    const die2 = rollSingleDie(20);
-    const dist1 = Math.abs(die1 - 10);
-    const dist2 = Math.abs(die2 - 10);
-
-    let decisiveDie = die1;
-    let outcome = 'Standard Outcome';
-
-    if (die1 > 10 && die2 > 10) {
-      decisiveDie = Math.max(die1, die2);
-      outcome = '🌟 GRAND SUCCESS! (Both dice > 10)';
-    } else if (die1 < 10 && die2 < 10) {
-      decisiveDie = Math.min(die1, die2);
-      outcome = '💀 GRAND FAILURE! (Both dice < 10)';
-    } else {
-      decisiveDie = dist1 >= dist2 ? die1 : die2;
-      outcome = decisiveDie > 10 ? '✨ Success (Farthest from 10)' : '⚠️ Setback (Farthest from 10)';
-    }
-
-    const logMsg = `⚖️ Emphasis Roll (2d20): [${die1}, ${die2}] ➔ Decisive: ${decisiveDie} (dist ${Math.max(dist1, dist2)} from 10) — ${outcome}`;
-    liveFeedSync.recordCombatLog(logMsg, true);
-  };
-
-  const handleRollMassCombat = (type: 'Fate (Init 20)' | 'Execution (Init 10)', e: React.MouseEvent) => {
-    e.stopPropagation();
-    const allyRoll = rollSingleDie(20);
-    const enemyRoll = rollSingleDie(20);
-    let outcome = '';
-
-    if (allyRoll > enemyRoll) {
-      outcome = '⚔️ Ally Victory (+1 Advantage)';
-    } else if (allyRoll < enemyRoll) {
-      outcome = '🛡️ Enemy Victory (-1 Setback)';
-    } else {
-      outcome = '⚖️ Contested Tie (Bloody Grasp)';
-    }
-
-    const logMsg = `🚩 Mass Combat ${type}: Ally [${allyRoll}] vs Enemy [${enemyRoll}] ➔ ${outcome}`;
-    liveFeedSync.recordCombatLog(logMsg, true);
   };
 
   const filteredRules = useMemo(() => {
@@ -608,43 +560,6 @@ export const Grimoire: React.FC<GrimoireProps> = () => {
                           <span className="text-emerald-400 font-bold block">Action (Max)</span>
                           <span className="text-neutral-400">10 / 20 / 40 / 60 HP</span>
                         </div>
-                      </div>
-                    )}
-
-                    {/* Interactive 1-click Roll: Emphasis Roll */}
-                    {rule.interactiveType === 'emphasis' && (
-                      <div className="pt-1.5 border-t border-neutral-800/80 flex items-center justify-between">
-                        <span className="text-[10px] text-neutral-400 italic">
-                          Binary dramatic check (2d20)
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleRollEmphasis}
-                          className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 flex items-center gap-1.5 shadow transition cursor-pointer"
-                        >
-                          <Dices className="w-3.5 h-3.5" />
-                          <span>Roll Emphasis</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Interactive 1-click Roll: Mass Combat */}
-                    {rule.interactiveType === 'mass_combat' && (
-                      <div className="pt-1.5 border-t border-neutral-800/80 flex items-center gap-2 justify-end">
-                        <button
-                          type="button"
-                          onClick={(e) => handleRollMassCombat('Fate (Init 20)', e)}
-                          className="px-2 py-1 text-[11px] font-bold rounded-lg bg-neutral-800 hover:bg-neutral-700 text-cyan-300 border border-cyan-800/60 flex items-center gap-1 transition cursor-pointer"
-                        >
-                          <span>Init 20: Fate Roll</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleRollMassCombat('Execution (Init 10)', e)}
-                          className="px-2 py-1 text-[11px] font-bold rounded-lg bg-neutral-800 hover:bg-neutral-700 text-amber-300 border border-amber-800/60 flex items-center gap-1 transition cursor-pointer"
-                        >
-                          <span>Init 10: Execution</span>
-                        </button>
                       </div>
                     )}
 
