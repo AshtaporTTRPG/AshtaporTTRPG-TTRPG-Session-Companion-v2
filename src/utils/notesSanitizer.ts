@@ -3,89 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export const DEMO_NOTE_TITLES = new Set([
-  'campaign shared objectives',
-  'party treasury & shared gear',
-  'the brazen anchor tavern',
-  'personal objectives',
-  'elara & town contacts',
-  'purple rune clue',
-  'purse & magic items',
-  'ambush at the sunken bridge',
-  'the inquisitor’s true identity',
-  'the missing caravan ledger',
-]);
+import { NoteItem, normalizeCategory } from '../types/notes';
 
 /**
- * Filter out hardcoded demo notes from any array of notes.
+ * Sanitizes an array of notes, migrating legacy categories into the 6-category sandbox model.
  */
-export function sanitizeNotesList<T extends { title?: string }>(notes: T[]): T[] {
-  if (!Array.isArray(notes)) return [];
-  return notes.filter((n) => {
-    if (!n || typeof n !== 'object') return false;
-    const title = (n.title || '').trim().toLowerCase();
-    return !DEMO_NOTE_TITLES.has(title);
-  });
-}
+export function sanitizeNotesList(rawList: any[]): NoteItem[] {
+  if (!Array.isArray(rawList)) return [];
 
-const BOOT_SANITIZED_KEY = 'ashtapor_demo_notes_purged_v2_0_24';
-
-/**
- * One-time boot sanitizer filtering out hardcoded demo titles from existing local storage.
- */
-export function runBootSanitizerOnce(): void {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    if (localStorage.getItem(BOOT_SANITIZED_KEY) === 'true') return;
-
-    const storageKeys = [
-      'ashtapor_my_notes',
-      'ashtapor_table_notes',
-      'ashtapor_gm_notes',
-      'ashtapor_dm_secret_notes',
-      'ashtapor_legacy_player_notes',
-      'ashtapor_table_notes_backup',
-      'ashtapor_my_roster',
-    ];
-
-    for (const key of storageKeys) {
-      const data = localStorage.getItem(key);
-      if (data) {
-        try {
-          const parsed = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            if (key === 'ashtapor_my_roster') {
-              const cleaned = parsed.filter(
-                (m) => m && m.id !== 'roster-valerius' && m.name?.trim().toLowerCase() !== 'valerius'
-              );
-              localStorage.setItem(key, JSON.stringify(cleaned));
-            } else {
-              const cleaned = sanitizeNotesList(parsed);
-              localStorage.setItem(key, JSON.stringify(cleaned));
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // Purge ghost dice roll mock data ('5d20 (Dis) + 5')
-    const feedData = localStorage.getItem('ttrpg_ashtapor_feed');
-    if (feedData && feedData.includes('5d20 (Dis) + 5')) {
-      try {
-        const parsedFeed = JSON.parse(feedData);
-        if (Array.isArray(parsedFeed)) {
-          const cleanedFeed = parsedFeed.filter((item: any) => !JSON.stringify(item).includes('5d20 (Dis) + 5'));
-          localStorage.setItem('ttrpg_ashtapor_feed', JSON.stringify(cleanedFeed));
-        } else {
-          localStorage.removeItem('ttrpg_ashtapor_feed');
-        }
-      } catch {
-        localStorage.removeItem('ttrpg_ashtapor_feed');
-      }
-    }
-
-    localStorage.setItem(BOOT_SANITIZED_KEY, 'true');
-  } catch (err) {
-    console.warn('Boot sanitizer error:', err);
-  }
+  return rawList
+    .filter((item) => item && (typeof item.title === 'string' || typeof item.content === 'string'))
+    .map((item, idx) => ({
+      id: item.id || `sanitized-${Date.now()}-${idx}`,
+      title: (item.title || 'Untitled Note').trim(),
+      category: normalizeCategory(item.category),
+      content: typeof item.content === 'string' ? item.content : '',
+      theme: item.theme || 'slate',
+      isPinned: Boolean(item.isPinned),
+      updatedAt: item.updatedAt || new Date().toISOString(),
+      createdAt: item.createdAt || new Date().toISOString(),
+      authorRole: item.authorRole || 'GM',
+      authorName: item.authorName || 'Game Master',
+    }));
 }
