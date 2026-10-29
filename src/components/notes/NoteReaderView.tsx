@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2 } from 'lucide-react';
+import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2, Pin } from 'lucide-react';
 import {
   NoteItem,
   DmSecretNote,
@@ -12,10 +12,12 @@ import {
   NoteCategory,
   NOTE_THEME_CONFIG,
   NoteTransferAction,
+  normalizeCategory,
 } from '../../types/notes';
 import { CATEGORY_STYLES } from './NoteCard';
 import { copyToClipboard } from '../../utils/clipboard';
 import { renderMarkdown, toggleMarkdownTask } from '../../utils/markdownRenderer';
+import { getPinnedHudNote, setPinnedHudNote, HUD_PIN_EVENT } from './StickyHudNote';
 
 export interface NoteReaderViewProps {
   note: NoteItem | GmSecretNote | DmSecretNote;
@@ -42,6 +44,29 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const transferRef = useRef<HTMLDivElement>(null);
 
+  // HUD Pin State
+  const [isHudPinned, setIsHudPinned] = useState(() => {
+    const current = getPinnedHudNote();
+    return current?.id === note.id;
+  });
+
+  useEffect(() => {
+    const handleHudUpdate = () => {
+      const current = getPinnedHudNote();
+      setIsHudPinned(current?.id === note.id);
+    };
+    window.addEventListener(HUD_PIN_EVENT, handleHudUpdate);
+    return () => window.removeEventListener(HUD_PIN_EVENT, handleHudUpdate);
+  }, [note.id]);
+
+  const handleToggleHudPin = () => {
+    if (isHudPinned) {
+      setPinnedHudNote(null);
+    } else {
+      setPinnedHudNote(note as NoteItem);
+    }
+  };
+
   useEffect(() => {
     if (!isTransferOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -65,9 +90,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onBack]);
 
-  const cat = (
-    note.category && CATEGORY_STYLES[note.category] ? note.category : 'General'
-  ) as NoteCategory;
+  const cat = normalizeCategory(note.category);
   const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
   const handleCopyFullNote = async () => {
@@ -150,7 +173,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
           </h2>
         </div>
 
-        {/* Right Action Icons: Copy, Transfer, Edit & Delete */}
+        {/* Right Action Icons: Copy, HUD Pin, Transfer, Edit & Delete */}
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
@@ -164,6 +187,21 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
               <Copy className="w-3.5 h-3.5 text-amber-400" />
             )}
             <span className="hidden xs:inline">{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+
+          {/* Pin to HUD */}
+          <button
+            type="button"
+            onClick={handleToggleHudPin}
+            title={isHudPinned ? 'Unpin from HUD' : 'Pin to HUD (keep visible across tabs)'}
+            className={`px-2 py-1 text-xs font-semibold rounded border transition-colors cursor-pointer flex items-center gap-1 ${
+              isHudPinned
+                ? 'bg-amber-950/80 border-amber-500/80 text-amber-300 ring-1 ring-amber-400/60 shadow-sm'
+                : 'bg-black/30 hover:bg-black/50 text-inherit opacity-80 hover:opacity-100 border-white/10'
+            }`}
+          >
+            <Pin className={`w-3.5 h-3.5 text-amber-400 ${isHudPinned ? 'fill-amber-400' : ''}`} />
+            <span className="hidden xs:inline">{isHudPinned ? 'HUD Pinned' : 'HUD Pin'}</span>
           </button>
 
           {/* Transfer Menu */}
@@ -280,6 +318,9 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
               type="button"
               onClick={() => {
                 if (window.confirm(`Delete note "${note.title}"?`)) {
+                  if (isHudPinned) {
+                    setPinnedHudNote(null);
+                  }
                   onDelete();
                   onBack();
                 }
