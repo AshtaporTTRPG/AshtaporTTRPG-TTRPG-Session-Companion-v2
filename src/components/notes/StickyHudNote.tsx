@@ -11,11 +11,19 @@ import {
   NOTE_THEME_CONFIG,
   normalizeCategory,
 } from '../../types/notes';
-import { CATEGORY_STYLES } from './NoteCard';
 import { renderMarkdown, toggleMarkdownTask } from '../../utils/markdownRenderer';
 
 export const LOCAL_HUD_PIN_KEY = 'ashtapor_hud_pinned_note';
 export const HUD_PIN_EVENT = 'ashtapor:hud_note_updated';
+
+const CATEGORY_BADGES: Record<string, string> = {
+  General: 'bg-slate-500/10 text-slate-400 border border-slate-500/30',
+  NPC: 'bg-amber-500/10 text-amber-400 border border-amber-500/30',
+  Location: 'bg-purple-500/10 text-purple-400 border border-purple-500/30',
+  Loot: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30',
+  Encounters: 'bg-rose-500/10 text-rose-400 border border-rose-500/30',
+  Leads: 'bg-teal-500/10 text-teal-400 border border-teal-500/30',
+};
 
 export function getPinnedHudNote(): NoteItem | null {
   try {
@@ -74,7 +82,6 @@ export const StickyHudNote: React.FC = () => {
     setPinnedHudNote(updated);
     setPinnedNote(updated);
 
-    // Broadcast update so NotesTab syncs the underlying note if mounted
     window.dispatchEvent(new CustomEvent('ashtapor:note_saved_from_hud', { detail: updated }));
   }, [pinnedNote]);
 
@@ -83,7 +90,7 @@ export const StickyHudNote: React.FC = () => {
   }
 
   const cat = normalizeCategory(pinnedNote.category);
-  const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
+  const badgeStyle = CATEGORY_BADGES[cat] || CATEGORY_BADGES.General;
   const themeKey: NoteTheme = pinnedNote.theme || 'slate';
   const themeCfg = NOTE_THEME_CONFIG[themeKey] || NOTE_THEME_CONFIG.slate;
 
@@ -99,7 +106,7 @@ export const StickyHudNote: React.FC = () => {
           <Pin className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
 
           <span
-            className={`text-[9px] font-bold px-1 py-0.2 rounded border uppercase tracking-wider shrink-0 ${catStyle.badge}`}
+            className={`text-[9px] font-bold px-1 py-0.2 rounded border uppercase tracking-wider shrink-0 ${badgeStyle}`}
           >
             {cat}
           </span>
