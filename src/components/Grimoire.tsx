@@ -1,24 +1,22 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useMemo } from 'react';
 import {
   BookOpen,
   Search,
   X,
   ChevronDown,
-  ChevronUp,
   ChevronRight,
   Swords,
   Footprints,
   Moon,
   Coins,
-  Sparkles,
   Dices,
   Copy,
   Check,
-  ShieldAlert,
-  Flame,
-  Activity,
-  Heart,
-  AlertTriangle,
 } from 'lucide-react';
 import { liveFeedSync } from '../utils/liveFeedSync';
 import { rollSingleDie } from '../utils/dice';
@@ -32,7 +30,7 @@ export interface GrimoireRule {
   summary: string;
   details: string[];
   actionType?: 'bonus' | 'action' | 'special' | 'passive';
-  interactiveType?: 'emphasis' | 'mass_combat' | 'currency';
+  interactiveType?: 'emphasis' | 'mass_combat' | 'currency' | 'potions';
 }
 
 const GRIMOIRE_RULES: GrimoireRule[] = [
@@ -43,16 +41,16 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     title: 'Healing Potions',
     badge: 'Bonus / Action',
     actionType: 'bonus',
-    keywords: ['potion', 'healing', 'drink', 'bonus action', 'administer', 'hp', 'heal'],
+    interactiveType: 'potions',
+    keywords: ['potion', 'healing', 'drink', 'bonus action', 'action', 'administer', 'hp'],
     summary:
-      'Drink as a Bonus Action (roll potion dice) or as an Action (receive maximum possible healing).',
+      'Drink as a Bonus Action (roll dice) or as an Action (maximum healing). Administering to an ally uses identical rules.',
     details: [
-      'Self-Administration: Drinking a potion yourself can be done as a Bonus Action (roll standard potion dice) or as an Action (grants the maximum mathematical healing).',
-      'Ally Administration: Administering a potion to an adjacent ally uses identical rules: Bonus Action to roll dice, or Action to grant maximum healing.',
-      'Common Healing: 2d4+2 (BA) or 10 HP flat (Action).',
-      'Greater Healing: 4d4+4 (BA) or 20 HP flat (Action).',
-      'Superior Healing: 8d4+8 (BA) or 40 HP flat (Action).',
-      'Supreme Healing: 10d4+20 (BA) or 60 HP flat (Action).',
+      'Self or Ally: Bonus Action to roll standard dice; Action to receive maximum possible healing.',
+      'Common: 2d4+2 HP (Bonus Action) · 10 HP flat (Action)',
+      'Greater: 4d4+4 HP (Bonus Action) · 20 HP flat (Action)',
+      'Superior: 8d4+8 HP (Bonus Action) · 40 HP flat (Action)',
+      'Supreme: 10d4+20 HP (Bonus Action) · 60 HP flat (Action)',
     ],
   },
   {
@@ -61,15 +59,12 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     title: 'Flanking System',
     badge: 'Flat Bonus',
     actionType: 'passive',
-    keywords: ['flank', 'flanking', 'surround', 'attack bonus', 'advantage', 'melee'],
+    keywords: ['flank', 'flanking', 'attack bonus', 'surround', 'advantage', 'melee'],
     summary:
-      'Flat attack roll bonuses for surrounding enemies: +1 for 2 allies, +2 for 3 allies, or +3 for 4+ allies.',
+      'Flat attack roll bonuses for surrounding enemies: +1 (2 allies), +2 (3 allies), or +3 (4+ allies).',
     details: [
-      'Flat Modifiers: Replaces advantage with a tactical flat modifier to keep d20 advantage distinct.',
-      '2 Allies: +1 flat attack roll bonus.',
-      '3 Allies: +2 flat attack roll bonus.',
-      '4+ Allies: +3 flat attack roll bonus (capped at +3).',
-      'Immunity & Counters: Creatures with all-around vision, exceptional passive perception, Blindsight, Tremorsense, or those 2+ size categories larger than all attackers cannot be flanked.',
+      'Attack Bonuses: +1 (2 allies) · +2 (3 allies) · +3 (4+ allies max).',
+      'Immunity: Creatures with all-around vision, high perception, Blindsight, Tremorsense, or who are 2+ sizes larger cannot be flanked.',
     ],
   },
   {
@@ -80,12 +75,12 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     actionType: 'special',
     keywords: ['massive damage', 'unstable', 'reaction', 'con save', 'incapacitated'],
     summary:
-      'Taking single-source damage exceeding 50% max HP inflicts "Unstable" (lose reactions).',
+      'Single-source damage > 50% max HP inflicts Unstable (lose reactions until stabilized).',
     details: [
-      'Trigger: A character suffers single-source damage exceeding 50% of their maximum HP in a single strike or spell.',
-      'Unstable Status: Immediately lose all reactions until stabilized.',
-      'Recovery Option 1: An adjacent ally can spend an Action on their turn to physically steady and stabilize the creature.',
-      'Recovery Option 2: The unstable creature makes a DC 10 Constitution saving throw at the start of their turn. On a failure, they are Incapacitated until the end of their turn; on a success, Unstable ends.',
+      'Trigger: Taking single-source damage > 50% of your maximum HP.',
+      'Unstable: Immediately lose all reactions until stabilized.',
+      'Recovery: An ally can use an Action to steady you, or you must pass a DC 10 Con save at the start of your turn.',
+      'Failure Penalty: Failing the Con save inflicts Incapacitated until the end of that turn.',
     ],
   },
   {
@@ -96,12 +91,11 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     actionType: 'special',
     keywords: ['lingering injury', 'crit', 'critical hit', '0 hp', 'overkill', 'table'],
     summary:
-      'Triggered when dropped to 0 HP by a Critical Hit, or from single-source damage greater than max HP.',
+      'Triggered when dropped to 0 HP by a Critical Hit, or from single-source damage > maximum HP.',
     details: [
-      'Trigger A: Reduced to 0 HP directly by a Critical Hit.',
-      'Trigger B: Taking single-source damage exceeding total maximum HP in one blow.',
-      'Resolution: The GM rolls on the Ashtapor Lingering Injury table (e.g., limp, internal bleeding, scar, severed tendon, cracked ribs).',
-      'Healing: Requires targeted magical healing (Lesser/Greater Restoration, Regenerate) or extended downtime rest and medical treatment.',
+      'Trigger A: Dropped to 0 HP directly by a Critical Hit.',
+      'Trigger B: Single-source damage > maximum HP.',
+      'Resolution: DM rolls directly on the lingering injury table.',
     ],
   },
   {
@@ -110,14 +104,13 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     title: 'Status Callouts (HP Thresholds)',
     badge: 'Health Tiers',
     actionType: 'passive',
-    keywords: ['status', 'hurt', 'bloodied', 'critical', 'health', 'threshold'],
+    keywords: ['status', 'hurt', 'bloodied', 'critical', 'health', 'threshold', 'hp'],
     summary:
-      'Visual battlefield HP health indicators: Hurt (>50% HP), Bloodied (<=50% HP), and Critical (single-digit HP).',
+      'Standard HP callout tiers: Hurt (>50% HP), Bloodied (≤50% HP), and Critical (single-digit HP remaining).',
     details: [
-      'Hurt: Current HP is > 50% max HP but has taken damage. Shows visible minor wear and defensive posture.',
-      'Bloodied: Current HP is <= 50% max HP. Noticeable open wounds, breathing heavily, visible blood or distress.',
-      'Critical: Single-digit HP remaining (≤ 9 HP). Immediate mortal peril, staggering, barely standing.',
-      'Unconscious / Defeated: 0 HP. Incapacitated, prone, rolling death saves or destroyed.',
+      'Hurt: Current HP is above 50% max HP.',
+      'Bloodied: Current HP is 50% max HP or lower.',
+      'Critical: Single-digit HP remaining (≤ 9 HP).',
     ],
   },
 
@@ -125,34 +118,31 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
   {
     id: 'fall-damage',
     category: 'movement',
-    title: 'Homebrew Fall Damage',
-    badge: 'Flat HP Impact',
+    title: 'Fall Damage',
+    badge: '1 HP / Foot',
     actionType: 'passive',
-    keywords: ['fall', 'falling', 'flat damage', 'distance', 'incapacitated', 'prone'],
+    keywords: ['fall', 'falling', 'flat damage', 'distance', 'incapacitated', 'feet'],
     summary:
-      '1 flat damage per foot beyond 15 ft. Incapacitated creatures take 1 flat damage per foot from 0 ft.',
+      '1 flat damage per foot fallen beyond 15 ft. Incapacitated creatures take 1 damage per foot from 0 ft.',
     details: [
-      'Normal Fall: Falls of 15 ft or less deal 0 damage. Falls > 15 ft deal flat damage equal to (Distance - 15) HP bludgeoning.',
-      'Incapacitated Fall: Incapacitated or paralyzed creatures take 1 flat damage per foot starting from 0 ft (Distance × 1 HP).',
-      'No Dice Rolling: Replaces swingy d6 damage with deterministic kinetic impact.',
-      'Prone: Any creature that takes fall damage lands Prone unless protected by special abilities or magic.',
+      'Standard Fall: 1 flat damage per foot fallen beyond 15 ft (falls of 15 ft or less deal 0 damage).',
+      'Incapacitated Fall: Incapacitated creatures take 1 flat damage per foot starting from 0 ft.',
     ],
   },
   {
     id: 'jumping-mechanics',
     category: 'movement',
-    title: 'Homebrew Jumping Rules',
+    title: 'Jumping',
     badge: 'No Check Needed',
     actionType: 'passive',
     keywords: ['jump', 'jumping', 'standing', 'running', 'str', 'dex', 'speed'],
     summary:
-      'Standing = 5 ft + max(STR, DEX) mod. Running (10-ft lead) = 10 ft + max(STR, DEX) mod. Limited by total movement speed.',
+      'No check required; limited by total movement speed. Uses the higher of your STR or DEX modifier.',
     details: [
-      'Best Attribute: Jump calculation uses Math.max(STR modifier, DEX modifier). Agile rogues and muscular warriors both jump effectively.',
-      'Standing Jump: 5 ft + max(STR, DEX) modifier (min 0 ft).',
-      'Running Jump: 10 ft + max(STR, DEX) modifier with a 10-ft straight lead-up (min 0 ft).',
-      'No Athletics Check Required: Distance is guaranteed based on physical attributes.',
-      'Speed Limitation: Total jump distance consumed on your turn cannot exceed your remaining movement speed.',
+      'Attribute: Uses your STR or DEX modifier (whichever is higher).',
+      'Standing Jump: 5 ft + modifier.',
+      'Running Jump (10-ft lead): 10 ft + modifier.',
+      'Movement Cap: Total jump distance cannot exceed remaining movement speed.',
     ],
   },
   {
@@ -165,10 +155,8 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     summary:
       'Dropping, crawling, or clearing improvised maneuvers costs a flat 15 ft of movement.',
     details: [
-      'Flat Cost: Rather than halving entire remaining movement, tactical ground maneuvers cost a flat 15 ft.',
-      'Dropping Prone / Ducking: Dropping under cover or crawling through low clearances deducts 15 ft from current turn speed.',
-      'Standing Up from Prone: Costs a flat 15 ft of movement (or all remaining speed if less than 15 ft).',
-      'Improvised Low Obstacles: Vaulting or sliding under low barricades costs 15 ft.',
+      'Cost: Flat 15 ft deduction from your movement speed.',
+      'Applies To: Dropping prone, crawling, ducking under low cover, or clearing improvised maneuvers.',
     ],
   },
   {
@@ -179,16 +167,13 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     actionType: 'passive',
     keywords: ['lifting', 'dragging', 'carrying', 'strength', 'size', 'capacity', 'weight'],
     summary:
-      'Base capacity = 15 × STR score. Double for each size above Medium (Large ×2, Huge ×4, Gargantuan ×8).',
+      'Base capacity = 15 × STR score (lbs). Doubles for each size category above Medium.',
     details: [
-      'Base Capacity: Lift, drag, or push up to 15 × Strength score in pounds without a check.',
+      'Base Capacity (Medium/Small): 15 × STR score in pounds.',
       'Size Multipliers:',
-      '• Tiny: ×0.5 capacity',
-      '• Small / Medium: ×1.0 base capacity (15 × STR)',
-      '• Large: ×2 capacity (30 × STR)',
-      '• Huge: ×4 capacity (60 × STR)',
-      '• Gargantuan: ×8 capacity (120 × STR)',
-      'Movement While Dragging: Dragging a creature or weight exceeding carrying limit reduces speed to 5 ft.',
+      '• Large: ×2 capacity (30 × STR score)',
+      '• Huge: ×4 capacity (60 × STR score)',
+      '• Gargantuan: ×8 capacity (120 × STR score)',
     ],
   },
 
@@ -203,46 +188,46 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     summary:
       'Short Rest takes 10 minutes. Limited per day to uses equal to Proficiency Bonus; extra rests incur 1 level of Exhaustion.',
     details: [
-      'Pacing: 10 minutes allows quick recovery between skirmishes without stalling the dungeon crawl narrative.',
-      'Daily Cap: Characters may safely take short rests equal to their Proficiency Bonus per long rest cycle.',
-      'Pushing Past Limits: Taking an additional short rest beyond your Proficiency Bonus limit immediately inflicts 1 level of Exhaustion upon completion.',
-      'Hit Dice: Spend Hit Dice normally to recover HP during any valid short rest.',
+      'Duration: 10 minutes.',
+      'Daily Cap: Uses per day equal to your Proficiency Bonus.',
+      'Exhaustion Penalty: Each additional short rest before a long rest inflicts 1 level of Exhaustion.',
     ],
   },
   {
-    id: 'attunement-and-long-rest',
+    id: 'magic-item-attunement',
     category: 'rest',
-    title: 'Attunement & Long Rest Times',
-    badge: '1 Hr / 8 Hrs',
+    title: 'Magic Item Attunement',
+    badge: '1 Hour',
     actionType: 'passive',
-    keywords: ['attunement', 'magic item', 'long rest', 'hours', 'downtime'],
-    summary:
-      'Magic Item Attunement takes 1 hour of focused downtime. Long Rest takes 8 hours in safe conditions.',
-    details: [
-      'Attunement Duration: Attuning to a magic item requires 1 uninterrupted hour of focused physical contact and practice.',
-      'Attunement Slot Limit: Standard 3 attuned magic items per creature unless granted otherwise by class features (e.g. Artificer).',
-      'Long Rest: 8 hours (at least 6 hours of sleep and no more than 2 hours of light watch duty).',
-      'Sanctuary: Long rests in hostile wilderness or extreme cold/heat require active shelter or Survival checks to avoid interrupted sleep.',
-    ],
+    keywords: ['attunement', 'magic item', 'rest', 'hours', 'focus'],
+    summary: 'Magic item attunement requires 1 hour of focused downtime.',
+    details: ['Attunement Time: 1 hour of focused effort and physical contact with the item.'],
+  },
+  {
+    id: 'long-rest',
+    category: 'rest',
+    title: 'Long Rest',
+    badge: '8 Hours',
+    actionType: 'passive',
+    keywords: ['long rest', 'rest', 'hours', 'sleep', 'recovery'],
+    summary: 'Long rest requires 8 hours of downtime.',
+    details: ['Duration: 8 hours (standard full rest cycle).'],
   },
   {
     id: 'resurrection-ritual',
     category: 'rest',
-    title: 'Ashtapor Resurrection Ritual',
+    title: 'Resurrection Ritual',
     badge: 'Base DC 8 + Deaths',
     actionType: 'special',
-    keywords: ['resurrection', 'ritual', 'death', 'soul', 'dc', 'spellcasting', 'secret'],
+    keywords: ['resurrection', 'ritual', 'death', 'dc', 'spellcasting', 'secret'],
     summary:
-      'Base DC = 8 + previous deaths. Up to 3 allies make secret checks to GM (Success = -1 DC, Nat 20 = -3 DC). Caster makes final check.',
+      'Base DC = 8 + previous deaths. Up to 3 allies make secret checks to the DM, followed by the caster roll.',
     details: [
-      'Soul Willingness: The soul must be free and willing to return.',
-      'Base DC: Begins at DC 8 + (number of times the creature has previously died).',
-      'Allied Contributions: Up to 3 allies offer heartfelt prayers, sacrifices, relics, or memories to anchor the soul. Each makes a relevant check secretly to the GM:',
-      '• Standard Success: -1 to final DC',
-      '• Natural 20 Critical: -3 to final DC',
-      '• Standard Failure: +1 to final DC',
-      '• Natural 1 Fumble: +3 to final DC',
-      'Final Caster Check: The primary ritual caster rolls 1d20 + their spellcasting ability modifier against the modified DC. If met or exceeded, the soul returns.',
+      'Base DC: 8 + previous deaths.',
+      'Player Contributions (rolled in secret to DM): Up to 3 allies make a skill check/roll to aid the ritual.',
+      '• Success: -1 to DC (Natural 20: -3 to DC)',
+      '• Failure: +1 to DC (Natural 1: +3 to DC)',
+      'Final Check (rolled in secret to DM): Caster rolls d20 + spellcasting ability modifier against the modified DC.',
     ],
   },
 
@@ -256,30 +241,28 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     interactiveType: 'currency',
     keywords: ['currency', 'units', 'coin', 'cube', 'bar', 'gold', 'money', 'alloy'],
     summary:
-      'Standardized metallic alloy: Coin = 1 Unit, Cube = 25 Units, Bar = 100 Units. Formed of 33% Cu, 33% Ag, 33% Au, 1% Pt.',
+      'Standardized alloy: 33% Copper, 33% Silver, 33% Gold, 1% Platinum. Coin = 1 Unit, Cube = 25 Units, Bar = 100 Units.',
     details: [
-      'The Alloy: A precision blend of 33% Copper, 33% Silver, 33% Gold, and 1% Platinum. Cannot be easily debased or shaved without ruining the distinctive sheen.',
-      'Coin (Unit): 1 Unit. Everyday trade, meals, standard tavern stays.',
-      'Cube (Block): 25 Units. Standard mercantile transactions, trade goods, basic armor.',
-      'Bar (Ingot): 100 Units. High-end property, masterwork equipment, ship transport, magic materials.',
+      'Alloy Composition: Copper (33%), Silver (33%), Gold (33%), Platinum (1%).',
+      'Coin: 1 Unit',
+      'Cube: 25 Units',
+      'Bar: 100 Units',
     ],
   },
   {
     id: 'emphasis-rolls',
     category: 'world',
     title: 'Emphasis Rolls (Binary Drama)',
-    badge: '2d20 Farthest from 10',
+    badge: '2d20 vs 10',
     actionType: 'special',
     interactiveType: 'emphasis',
     keywords: ['emphasis', 'dramatic', 'binary', '2d20', 'grand success', 'grand failure', 'fate'],
     summary:
-      'Binary dramatic outcome without modifiers. Roll 2d20; the die farthest from 10 dictates the outcome. Both >10 = Grand Success; both <10 = Grand Failure.',
+      'Absolute binary dramatic outcome without modifiers. Roll 2d20; the die farthest from 10 dictates the outcome.',
     details: [
-      'Dramatic Binary Check: Used when raw fate, luck, or narrative momentum decides the consequence without skill modifiers.',
-      'Resolution Rule: Roll 2d20. Measure distance of each die from 10 (|die - 10|). The die with greater distance dictates the outcome.',
-      'Grand Success: Both dice land strictly above 10 (e.g. 14 and 19). Outcome is overwhelmingly positive.',
-      'Grand Failure: Both dice land strictly below 10 (e.g. 3 and 7). Outcome is catastrophic.',
-      'Divided Fate: If one die is > 10 and one is < 10, whichever is farther from 10 wins out.',
+      'Roll: 2d20 with no modifiers. The die farthest from 10 dictates the outcome.',
+      'Grand Success: Both dice land strictly above 10.',
+      'Grand Failure: Both dice land strictly below 10.',
     ],
   },
   {
@@ -291,13 +274,14 @@ const GRIMOIRE_RULES: GrimoireRule[] = [
     interactiveType: 'mass_combat',
     keywords: ['mass combat', 'army', 'initiative 20', 'initiative 10', 'fate roll', 'execution'],
     summary:
-      'Contested group rolls at Initiative 20 (Fate Roll: 1d20 Ally vs 1d20 Enemy) and Initiative 10 (Execution Roll).',
+      'Contested group checks at Initiative 20 (Fate Roll) and Initiative 10 (Execution Roll). Execute fate at round end.',
     details: [
-      'Initiative 20 — Fate Roll: GM and Player roll contested 1d20 for the high-level battlefield morale and environmental favor.',
-      'Initiative 10 — Execution Roll: GM and Player roll contested 1d20 for unit cohesion, tactics, and commander discipline.',
-      'Decisive Advance: Win both Init 20 and Init 10 rolls. Friendly forces punch through enemy lines or capture key objectives.',
-      'Stalemate: Win one roll and lose one roll. Chaotic clash, heavy casualties on both sides, lines remain contested.',
-      'Decisive Setback: Lose both Init 20 and Init 10 rolls. Friendly lines buckle, forced retreat, or flank collapsed.',
+      'Initiative 20 (Fate Roll): 1d20 Ally Group vs 1d20 Enemy Group (determines situational fate).',
+      'Initiative 10 (Execution Roll): Contested d20 rolls to execute fate.',
+      'Round Outcomes (executed at end of round):',
+      '• Win / Win = Decisive Advance',
+      '• Win / Loss or Loss / Win = Stalemate / Hold',
+      '• Loss / Loss = Decisive Setback',
     ],
   },
 ];
@@ -307,14 +291,12 @@ export interface GrimoireProps {
   isDm?: boolean;
 }
 
-export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
-  const isGameMaster = isGM !== undefined ? isGM : (isDm ?? false);
+export const Grimoire: React.FC<GrimoireProps> = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [openRuleIds, setOpenRuleIds] = useState<Set<string>>(() => new Set(['healing-potions', 'flanking']));
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Toggle individual accordion
   const toggleRule = (id: string) => {
     setOpenRuleIds((prev) => {
       const next = new Set(prev);
@@ -324,7 +306,6 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
     });
   };
 
-  // Expand / Collapse all
   const handleExpandAll = () => {
     setOpenRuleIds(new Set(GRIMOIRE_RULES.map((r) => r.id)));
   };
@@ -333,7 +314,6 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
     setOpenRuleIds(new Set());
   };
 
-  // Copy rule text to clipboard
   const handleCopyRule = (rule: GrimoireRule, e: React.MouseEvent) => {
     e.stopPropagation();
     const text = `[Ashtapor Homebrew: ${rule.title}]\n${rule.summary}\n\n${rule.details.join('\n')}`;
@@ -342,7 +322,6 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
     setTimeout(() => setCopiedId(null), 1800);
   };
 
-  // Interactive Roll: Emphasis Roll (2d20)
   const handleRollEmphasis = (e: React.MouseEvent) => {
     e.stopPropagation();
     const die1 = rollSingleDie(20);
@@ -352,15 +331,11 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
 
     let decisiveDie = die1;
     let outcome = 'Standard Outcome';
-    let isGrandSuccess = false;
-    let isGrandFailure = false;
 
     if (die1 > 10 && die2 > 10) {
-      isGrandSuccess = true;
       decisiveDie = Math.max(die1, die2);
       outcome = '🌟 GRAND SUCCESS! (Both dice > 10)';
     } else if (die1 < 10 && die2 < 10) {
-      isGrandFailure = true;
       decisiveDie = Math.min(die1, die2);
       outcome = '💀 GRAND FAILURE! (Both dice < 10)';
     } else {
@@ -372,7 +347,6 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
     liveFeedSync.recordCombatLog(logMsg, true);
   };
 
-  // Interactive Roll: Mass Combat Fate Roll (1d20 Ally vs 1d20 Enemy)
   const handleRollMassCombat = (type: 'Fate (Init 20)' | 'Execution (Init 10)', e: React.MouseEvent) => {
     e.stopPropagation();
     const allyRoll = rollSingleDie(20);
@@ -391,17 +365,14 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
     liveFeedSync.recordCombatLog(logMsg, true);
   };
 
-  // Filtered rules
   const filteredRules = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return GRIMOIRE_RULES.filter((rule) => {
-      // Category filter
       if (selectedCategory !== 'all' && rule.category !== selectedCategory) {
         return false;
       }
       if (!q) return true;
 
-      // Text search in title, badge, summary, keywords, and details
       const matchTitle = rule.title.toLowerCase().includes(q);
       const matchBadge = rule.badge.toLowerCase().includes(q);
       const matchSummary = rule.summary.toLowerCase().includes(q);
@@ -422,23 +393,22 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f17] select-none p-2 gap-2 text-neutral-100">
-      {/* 1. COMPACT TOP SEARCH & CATEGORY STRIP */}
+      {/* 1. TOP SEARCH & CATEGORY FILTER */}
       <div className="space-y-1.5 shrink-0 bg-neutral-900/90 border border-neutral-800 rounded-xl p-2 shadow-sm">
-        {/* Search Input Bar */}
         <div className="relative flex items-center">
           <Search className="w-3.5 h-3.5 absolute left-2.5 text-neutral-400 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search homebrew rules (e.g. potion, flanking, fall, currency)..."
+            placeholder="Search homebrew rules (potion, flanking, fall, currency)..."
             className="w-full pl-8 pr-7 py-1 text-xs font-medium rounded-lg bg-neutral-950 border border-neutral-700 text-amber-200 placeholder-neutral-500 focus:outline-none focus:border-amber-400 transition"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2 p-0.5 text-neutral-400 hover:text-neutral-200"
+              className="absolute right-2 p-0.5 text-neutral-400 hover:text-neutral-200 cursor-pointer"
               title="Clear search"
             >
               <X className="w-3.5 h-3.5" />
@@ -446,7 +416,6 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
           )}
         </div>
 
-        {/* Category Pills & Expand/Collapse Toggle */}
         <div className="flex items-center justify-between gap-1 pt-0.5">
           <div className="flex items-center gap-1 overflow-x-auto">
             <button
@@ -515,7 +484,7 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
               type="button"
               onClick={handleExpandAll}
               className="w-6 h-6 rounded-md bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-amber-300 flex items-center justify-center transition cursor-pointer"
-              title="Expand all rules (▼)"
+              title="Expand all rules"
               aria-label="Expand all rules"
             >
               <ChevronDown className="w-3.5 h-3.5" />
@@ -524,7 +493,7 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
               type="button"
               onClick={handleCollapseAll}
               className="w-6 h-6 rounded-md bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-amber-300 flex items-center justify-center transition cursor-pointer"
-              title="Collapse all rules (▶)"
+              title="Collapse all rules"
               aria-label="Collapse all rules"
             >
               <ChevronRight className="w-3.5 h-3.5" />
@@ -538,9 +507,9 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
         {filteredRules.length === 0 ? (
           <div className="text-center py-10 px-4 bg-neutral-900/50 rounded-xl border border-neutral-800 text-neutral-400">
             <BookOpen className="w-8 h-8 text-neutral-600 mx-auto mb-2" />
-            <p className="text-xs font-semibold">No Ashtapor rules match "{searchQuery}"</p>
+            <p className="text-xs font-semibold">No rules match "{searchQuery}"</p>
             <p className="text-[11px] text-neutral-500 mt-1">
-              Try searching for potions, flanking, jumping, short rest, or emphasis rolls.
+              Search by keyword like potions, flanking, jumping, short rest, or emphasis.
             </p>
           </div>
         ) : (
@@ -549,7 +518,6 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
             const isCombat = rule.category === 'combat';
             const isMovement = rule.category === 'movement';
             const isRest = rule.category === 'rest';
-            const isWorld = rule.category === 'world';
 
             return (
               <div
@@ -557,15 +525,12 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
                 className="bg-neutral-900/80 border border-neutral-800 rounded-xl overflow-hidden shadow-sm transition-all"
               >
                 {/* Header row */}
-                <div
-                  className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-neutral-800/60 transition gap-1.5 group"
-                >
+                <div className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-neutral-800/60 transition gap-1.5 group">
                   <button
                     type="button"
                     onClick={() => toggleRule(rule.id)}
                     className="flex-1 min-w-0 flex items-center gap-1.5 text-left cursor-pointer overflow-hidden"
                   >
-                    {/* Compact minimal chevron chip (w-6 h-6) */}
                     <span className="w-6 h-6 rounded-md bg-neutral-950/80 border border-neutral-800/80 flex items-center justify-center shrink-0 text-neutral-400 group-hover:text-amber-300 group-hover:border-amber-400/50 transition">
                       {isOpen ? (
                         <ChevronDown className="w-3.5 h-3.5" />
@@ -577,7 +542,9 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
                     {isCombat && <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
                     {isMovement && <Footprints className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
                     {isRest && <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
-                    {isWorld && <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    {!isCombat && !isMovement && !isRest && (
+                      <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    )}
 
                     <span className="flex-1 min-w-0 truncate text-left text-xs font-bold text-neutral-200 group-hover:text-amber-300 transition-colors">
                       {rule.title}
@@ -616,26 +583,39 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
 
                 {/* Body Content */}
                 {isOpen && (
-                  <div className="px-3 pb-3 pt-1 border-t border-neutral-800/80 space-y-2 text-xs">
-                    {/* Summary callout box */}
-                    <div className="p-2 rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-200 font-medium leading-relaxed">
-                      {rule.summary}
+                  <div className="px-3 pb-2.5 pt-1 border-t border-neutral-800/80 space-y-2 text-xs">
+                    {/* Compact Specs List */}
+                    <div className="space-y-1 text-[11px] text-neutral-300 font-sans">
+                      {rule.details.map((detail, dIdx) => (
+                        <div key={dIdx} className="leading-relaxed">
+                          {detail.startsWith('•') ? (
+                            <span className="pl-2 block text-neutral-400">{detail}</span>
+                          ) : (
+                            <span>{detail}</span>
+                          )}
+                        </div>
+                      ))}
                     </div>
 
-                    {/* Detailed rule breakdown */}
-                    <ul className="space-y-1 text-[11px] text-neutral-300 list-disc list-inside">
-                      {rule.details.map((detail, dIdx) => (
-                        <li key={dIdx} className="leading-snug">
-                          {detail}
-                        </li>
-                      ))}
-                    </ul>
+                    {/* Quick Potion Table */}
+                    {rule.interactiveType === 'potions' && (
+                      <div className="pt-1 border-t border-neutral-800/80 grid grid-cols-2 gap-1 text-[10px] font-mono">
+                        <div className="p-1 rounded bg-neutral-950/80 border border-neutral-800">
+                          <span className="text-amber-400 font-bold block">Bonus Action (Roll)</span>
+                          <span className="text-neutral-400">Roll potion dice</span>
+                        </div>
+                        <div className="p-1 rounded bg-neutral-950/80 border border-neutral-800">
+                          <span className="text-emerald-400 font-bold block">Action (Max)</span>
+                          <span className="text-neutral-400">10 / 20 / 40 / 60 HP</span>
+                        </div>
+                      </div>
+                    )}
 
-                    {/* Interactive 1-click Roll Buttons */}
+                    {/* Interactive 1-click Roll: Emphasis Roll */}
                     {rule.interactiveType === 'emphasis' && (
                       <div className="pt-1.5 border-t border-neutral-800/80 flex items-center justify-between">
                         <span className="text-[10px] text-neutral-400 italic">
-                          Roll 2d20 dramatic binary check
+                          Binary dramatic check (2d20)
                         </span>
                         <button
                           type="button"
@@ -643,11 +623,12 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
                           className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 flex items-center gap-1.5 shadow transition cursor-pointer"
                         >
                           <Dices className="w-3.5 h-3.5" />
-                          <span>Roll Emphasis (2d20)</span>
+                          <span>Roll Emphasis</span>
                         </button>
                       </div>
                     )}
 
+                    {/* Interactive 1-click Roll: Mass Combat */}
                     {rule.interactiveType === 'mass_combat' && (
                       <div className="pt-1.5 border-t border-neutral-800/80 flex items-center gap-2 justify-end">
                         <button
@@ -667,18 +648,19 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
                       </div>
                     )}
 
+                    {/* Currency Visual Grid */}
                     {rule.interactiveType === 'currency' && (
                       <div className="pt-1.5 border-t border-neutral-800/80 grid grid-cols-3 gap-1.5 text-center font-mono text-[10px]">
                         <div className="p-1 rounded bg-neutral-950 border border-neutral-800">
-                          <span className="text-amber-400 font-bold block">1 Coin</span>
+                          <span className="text-amber-400 font-bold block">Coin</span>
                           <span className="text-neutral-400">1 Unit</span>
                         </div>
                         <div className="p-1 rounded bg-neutral-950 border border-neutral-800">
-                          <span className="text-cyan-400 font-bold block">1 Cube</span>
+                          <span className="text-cyan-400 font-bold block">Cube</span>
                           <span className="text-neutral-400">25 Units</span>
                         </div>
                         <div className="p-1 rounded bg-neutral-950 border border-neutral-800">
-                          <span className="text-emerald-400 font-bold block">1 Bar</span>
+                          <span className="text-emerald-400 font-bold block">Bar</span>
                           <span className="text-neutral-400">100 Units</span>
                         </div>
                       </div>
@@ -693,3 +675,5 @@ export const Grimoire: React.FC<GrimoireProps> = ({ isGM, isDm }) => {
     </div>
   );
 };
+
+export default Grimoire;
