@@ -20,6 +20,7 @@ import {
   NOTE_CATEGORIES,
   NotesExportPayload,
   NoteTransferAction,
+  normalizeCategory,
 } from '../../types/notes';
 import { NoteCard, CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCard';
 import { CreateNoteModal } from './CreateNoteModal';
@@ -56,26 +57,21 @@ export interface NoteCardListProps {
 
 const CATEGORY_ORDER: NoteCategory[] = [
   'General',
-  'Loot',
   'NPC',
   'Location',
-  'Combat',
-  'Scene',
-  'Hook',
-  'Clue',
+  'Loot',
+  'Encounters',
+  'Leads',
 ];
 
 const CATEGORY_ABBREVIATIONS: Record<string, string> = {
   All: 'All',
   General: 'Gen',
-  Loot: 'Loot',
   NPC: 'NPC',
   Location: 'Loc',
-  Combat: 'Cbt',
-  Scene: 'Scene',
-  Hook: 'Hook',
-  Clue: 'Clue',
-  Quest: 'Qst',
+  Loot: 'Loot',
+  Encounters: 'Enc',
+  Leads: 'Lead',
 };
 
 export const NoteCardList: React.FC<NoteCardListProps> = ({
@@ -177,7 +173,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     const dateStr = now.toISOString().split('T')[0];
     const fileName = `ashtapor-notes-${dateStr}.json`;
     const payload: NotesExportPayload = {
-      version: '2.0.26',
+      version: '2.0.27',
       exportedAt: now.toISOString(),
       source: 'ashtapor-session-companion',
       notes,
@@ -222,16 +218,12 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       const validList: NoteItem[] = [];
       for (const item of rawNotes) {
         if (item && (typeof item.title === 'string' || typeof item.content === 'string')) {
-          const categoryVal: NoteCategory =
-            item.category && (NOTE_CATEGORIES.includes(item.category) || item.category === 'Quest')
-              ? item.category
-              : 'General';
           validList.push({
             id:
               item.id ||
               `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             title: (item.title || 'Untitled Note').trim(),
-            category: categoryVal,
+            category: normalizeCategory(item.category),
             content: typeof item.content === 'string' ? item.content : '',
             theme: item.theme,
             isPinned: !!item.isPinned,
@@ -293,20 +285,14 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     const counts: Record<string, number> = {
       All: notes.length,
       General: 0,
-      Loot: 0,
       NPC: 0,
       Location: 0,
-      Combat: 0,
-      Scene: 0,
-      Hook: 0,
-      Clue: 0,
-      Quest: 0,
+      Loot: 0,
+      Encounters: 0,
+      Leads: 0,
     };
     notes.forEach((n) => {
-      const cat =
-        n.category && (NOTE_CATEGORIES.includes(n.category) || n.category === 'Quest')
-          ? n.category
-          : 'General';
+      const cat = normalizeCategory(n.category);
       counts[cat] = (counts[cat] || 0) + 1;
     });
     return counts;
@@ -319,9 +305,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         list.push(cat);
       }
     });
-    if ((categoryCounts.Quest || 0) > 0 && !list.includes('Quest')) {
-      list.push('Quest');
-    }
     return list;
   }, [categoryCounts]);
 
@@ -336,15 +319,16 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   const filteredAndSortedNotes = useMemo(() => {
     return [...notes]
       .filter((note) => {
+        const cat = normalizeCategory(note.category);
         const matchesCategory =
-          selectedCategory === 'All' || (note.category || 'General') === selectedCategory;
+          selectedCategory === 'All' || cat === selectedCategory;
         if (!matchesCategory) return false;
 
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase().trim();
         const inTitle = note.title.toLowerCase().includes(q);
         const inContent = note.content.toLowerCase().includes(q);
-        const inCategory = (note.category || '').toLowerCase().includes(q);
+        const inCategory = cat.toLowerCase().includes(q);
         const inAuthor = (note.authorName || '').toLowerCase().includes(q);
         return inTitle || inContent || inCategory || inAuthor;
       })
@@ -488,7 +472,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         </div>
       )}
 
-      {/* Note Cards List (Cards handle their own inline edits) */}
+      {/* Note Cards List */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
         {filteredAndSortedNotes.length === 0 ? (
           <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
@@ -539,7 +523,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         currentVault={currentVault}
         editingNote={editingNote}
         defaultCategory={
-          selectedCategory !== 'All' ? (selectedCategory as NoteCategory) : 'General'
+          selectedCategory !== 'All' ? (normalizeCategory(selectedCategory)) : 'General'
         }
         onClose={() => {
           setIsEditorOpen(false);
