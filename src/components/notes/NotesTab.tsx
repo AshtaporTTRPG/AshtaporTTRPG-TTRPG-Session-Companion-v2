@@ -330,6 +330,90 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   }, []);
 
+  const commitTableNotes = useCallback(async (updatedTableNotes: NoteItem[]) => {
+    tableNotesRef.current = updatedTableNotes;
+    setTableNotes(updatedTableNotes);
+
+    if (typeof OBR !== 'undefined' && OBR.isReady) {
+      await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
+    }
+  }, []);
+
+  // TWO-WAY SYNCHRONIZATION: Listen for edits saved inside Sticky HUD Note
+  useEffect(() => {
+    const handleHudSaved = (e: Event) => {
+      const customEvent = e as CustomEvent<NoteItem>;
+      const updated = customEvent.detail;
+      if (!updated || !updated.id) return;
+
+      // 1. Check Table Notes
+      setTableNotes((prevTable) => {
+        const idx = prevTable.findIndex((n) => n.id === updated.id);
+        if (idx !== -1) {
+          const next = [...prevTable];
+          next[idx] = { ...next[idx], ...updated };
+          commitTableNotes(next);
+          return next;
+        }
+        return prevTable;
+      });
+
+      // 2. Check GM Notes
+      setGmNotes((prevGm) => {
+        const idx = prevGm.findIndex((n) => n.id === updated.id);
+        if (idx !== -1) {
+          const next = [...prevGm];
+          next[idx] = { ...next[idx], ...updated };
+          try {
+            localStorage.setItem(LOCAL_GM_NOTES_KEY, JSON.stringify(next));
+          } catch (err) {
+            console.warn('Failed saving GM notes from HUD event:', err);
+          }
+          return next;
+        }
+        return prevGm;
+      });
+
+      // 3. Check My Notes
+      setMyNotes((prevMy) => {
+        const idx = prevMy.findIndex((n) => n.id === updated.id);
+        if (idx !== -1) {
+          const next = [...prevMy];
+          next[idx] = { ...next[idx], ...updated };
+          try {
+            localStorage.setItem(LOCAL_MY_NOTES_KEY, JSON.stringify(next));
+          } catch (err) {
+            console.warn('Failed saving My notes from HUD event:', err);
+          }
+          return next;
+        }
+        return prevMy;
+      });
+
+      // 4. Update live broadcast note if currently matching
+      setActiveBroadcast((prevBroadcast) => {
+        if (prevBroadcast && prevBroadcast.id === updated.id) {
+          const nextPayload: BroadcastNotePayload = {
+            ...prevBroadcast,
+            title: updated.title,
+            content: updated.content,
+            theme: updated.theme || prevBroadcast.theme,
+          };
+          if (typeof OBR !== 'undefined' && OBR.isReady) {
+            OBR.room.setMetadata({ [BROADCAST_KEY]: nextPayload });
+          }
+          return nextPayload;
+        }
+        return prevBroadcast;
+      });
+    };
+
+    window.addEventListener('ashtapor:note_saved_from_hud', handleHudSaved);
+    return () => {
+      window.removeEventListener('ashtapor:note_saved_from_hud', handleHudSaved);
+    };
+  }, [commitTableNotes]);
+
   const handleToggleExpandNote = useCallback((id: string) => {
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
@@ -446,15 +530,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return () => {
       if (unsub) unsub();
     };
-  }, []);
-
-  const commitTableNotes = useCallback(async (updatedTableNotes: NoteItem[]) => {
-    tableNotesRef.current = updatedTableNotes;
-    setTableNotes(updatedTableNotes);
-
-    if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
-    }
   }, []);
 
   const handleSaveTableNote = useCallback(async (note: NoteItem) => {
