@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -25,7 +30,7 @@ export function toggleMarkdownTask(content: string, lineIndex: number): string {
 /**
  * Markdown Viewer Component that supports:
  * - Interactive task checkboxes
- * - Collapsible # and ## header sections
+ * - Collapsible # (H1), ## (H2), and ### (H3) header sections
  * - Horizontal rule dividers (---, ***, ___)
  * - Inline bold (**bold**), italics (*italic*), and underline (__underline__ or <u>underline</u>)
  * - Bullet lists (- item)
@@ -51,6 +56,7 @@ export const MarkdownContent: React.FC<{
 
   let currentH1Id: string | null = null;
   let currentH2Id: string | null = null;
+  let currentH3Id: string | null = null;
 
   return (
     <div className="space-y-1">
@@ -60,7 +66,8 @@ export const MarkdownContent: React.FC<{
           if (
             collapsibleHeaders &&
             ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-              (currentH2Id && collapsedHeaders[currentH2Id]))
+              (currentH2Id && collapsedHeaders[currentH2Id]) ||
+              (currentH3Id && collapsedHeaders[currentH3Id]))
           ) {
             return null;
           }
@@ -73,27 +80,35 @@ export const MarkdownContent: React.FC<{
           if (
             collapsibleHeaders &&
             ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-              (currentH2Id && collapsedHeaders[currentH2Id]))
+              (currentH2Id && collapsedHeaders[currentH2Id]) ||
+              (currentH3Id && collapsedHeaders[currentH3Id]))
           ) {
             return null;
           }
           return <hr key={lineIndex} className="my-2 border-inherit/30" />;
         }
 
-        // 2. Level 1 Header: # Header
-        const h1Match = line.match(/^#\s+(.*)$/);
-        if (h1Match) {
-          const headerId = `h1-${lineIndex}`;
-          currentH1Id = headerId;
-          currentH2Id = null;
+        // 2. Level 3 Header: ### Sub-Header (Evaluated first to prevent partial prefix match)
+        const h3Match = line.match(/^###\s+(.*)$/);
+        if (h3Match) {
+          const headerId = `h3-${lineIndex}`;
+          currentH3Id = headerId;
+
+          if (
+            collapsibleHeaders &&
+            ((currentH1Id && collapsedHeaders[currentH1Id]) ||
+              (currentH2Id && collapsedHeaders[currentH2Id]))
+          ) {
+            return null;
+          }
 
           if (!collapsibleHeaders) {
             return (
               <div
                 key={lineIndex}
-                className="text-xs md:text-sm font-bold border-b border-inherit/25 pb-0.5 pt-1.5 text-inherit"
+                className="text-[11px] font-bold uppercase tracking-wider pt-0.5 pb-0.5 text-inherit opacity-90"
               >
-                {parseInlineFormatting(h1Match[1])}
+                {parseInlineFormatting(h3Match[1])}
               </div>
             );
           }
@@ -104,26 +119,26 @@ export const MarkdownContent: React.FC<{
             <div
               key={lineIndex}
               onClick={(e) => toggleHeader(headerId, e)}
-              className="flex items-center gap-1.5 py-1 text-xs md:text-sm font-bold border-b border-inherit/25 cursor-pointer select-none group mt-1.5 mb-1 hover:opacity-85 transition"
-              title={isCollapsed ? 'Click to expand encounter' : 'Click to collapse encounter'}
+              className="flex items-center gap-1 py-0.5 text-[11px] font-bold uppercase tracking-wider cursor-pointer select-none group mt-1 mb-0.5 hover:opacity-85 transition pl-1 text-inherit opacity-90"
+              title={isCollapsed ? 'Click to expand sub-section' : 'Click to collapse sub-section'}
             >
               <button
                 type="button"
                 onClick={(e) => toggleHeader(headerId, e)}
-                className="p-0.5 rounded hover:bg-black/20 text-amber-400 shrink-0 cursor-pointer"
-                title={isCollapsed ? 'Expand section' : 'Collapse section'}
+                className="p-0.5 rounded hover:bg-black/20 text-amber-400/70 shrink-0 cursor-pointer"
+                title={isCollapsed ? 'Expand sub-section' : 'Collapse sub-section'}
               >
                 {isCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  <ChevronRight className="w-2.5 h-2.5" />
                 ) : (
-                  <ChevronDown className="w-3.5 h-3.5" />
+                  <ChevronDown className="w-2.5 h-2.5" />
                 )}
               </button>
-              <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h1Match[1])}
+              <span className="flex-1 min-w-0 truncate">
+                {parseInlineFormatting(h3Match[1])}
               </span>
               {isCollapsed && (
-                <span className="text-[10px] font-mono opacity-50 font-normal shrink-0">
+                <span className="text-[9px] font-mono opacity-50 font-normal shrink-0 lowercase">
                   (collapsed)
                 </span>
               )}
@@ -136,6 +151,7 @@ export const MarkdownContent: React.FC<{
         if (h2Match) {
           const headerId = `h2-${lineIndex}`;
           currentH2Id = headerId;
+          currentH3Id = null;
 
           if (collapsibleHeaders && currentH1Id && collapsedHeaders[currentH1Id]) {
             return null;
@@ -185,16 +201,69 @@ export const MarkdownContent: React.FC<{
           );
         }
 
+        // 4. Level 1 Header: # Header
+        const h1Match = line.match(/^#\s+(.*)$/);
+        if (h1Match) {
+          const headerId = `h1-${lineIndex}`;
+          currentH1Id = headerId;
+          currentH2Id = null;
+          currentH3Id = null;
+
+          if (!collapsibleHeaders) {
+            return (
+              <div
+                key={lineIndex}
+                className="text-xs md:text-sm font-bold border-b border-inherit/25 pb-0.5 pt-1.5 text-inherit"
+              >
+                {parseInlineFormatting(h1Match[1])}
+              </div>
+            );
+          }
+
+          const isCollapsed = Boolean(collapsedHeaders[headerId]);
+
+          return (
+            <div
+              key={lineIndex}
+              onClick={(e) => toggleHeader(headerId, e)}
+              className="flex items-center gap-1.5 py-1 text-xs md:text-sm font-bold border-b border-inherit/25 cursor-pointer select-none group mt-1.5 mb-1 hover:opacity-85 transition"
+              title={isCollapsed ? 'Click to expand encounter' : 'Click to collapse encounter'}
+            >
+              <button
+                type="button"
+                onClick={(e) => toggleHeader(headerId, e)}
+                className="p-0.5 rounded hover:bg-black/20 text-amber-400 shrink-0 cursor-pointer"
+                title={isCollapsed ? 'Expand section' : 'Collapse section'}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <span className="flex-1 min-w-0 truncate text-inherit">
+                {parseInlineFormatting(h1Match[1])}
+              </span>
+              {isCollapsed && (
+                <span className="text-[10px] font-mono opacity-50 font-normal shrink-0">
+                  (collapsed)
+                </span>
+              )}
+            </div>
+          );
+        }
+
         // Hidden content under collapsed header
         if (
           collapsibleHeaders &&
           ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-            (currentH2Id && collapsedHeaders[currentH2Id]))
+            (currentH2Id && collapsedHeaders[currentH2Id]) ||
+            (currentH3Id && collapsedHeaders[currentH3Id]))
         ) {
           return null;
         }
 
-        // 4. Checkbox Task list item: - [ ] or - [x]
+        // 5. Checkbox Task list item: - [ ] or - [x]
         const taskMatch = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
         if (taskMatch) {
           const isChecked = taskMatch[2].toLowerCase() === 'x';
@@ -230,7 +299,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 5. Bullet list item: - item or * item
+        // 6. Bullet list item: - item or * item
         const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
         if (bulletMatch) {
           return (
@@ -241,7 +310,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 6. Standard text line
+        // 7. Standard text line
         return (
           <div key={lineIndex} className="leading-relaxed">
             {parseInlineFormatting(line)}
