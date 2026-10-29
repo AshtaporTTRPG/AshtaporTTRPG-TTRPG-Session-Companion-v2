@@ -13,6 +13,7 @@ import { DiceChamber } from './components/dice/DiceChamber';
 import { RangeTab } from './components/range/RangeTab';
 import { Grimoire } from './components/Grimoire';
 import { NotesTab } from './components/notes/NotesTab';
+import { StickyHudNote } from './components/notes/StickyHudNote';
 import { BroadcastModal } from './components/notes/BroadcastModal';
 import { BroadcastNotePayload, OBR_BROADCAST_NOTE_KEY } from './types/notes';
 import { liveFeedSync } from './utils/liveFeedSync';
@@ -125,7 +126,6 @@ export default function App() {
     if (!isReady || typeof OBR === 'undefined' || !OBR.isReady) return;
     const unsub = OBR.room.onMetadataChange((meta) => {
       const live = meta[OBR_BROADCAST_NOTE_KEY] as BroadcastNotePayload | undefined;
-      // Strictly verify that live is a valid payload and not an empty object
       if (live && live.id && live.title) {
         setBroadcastNote(live);
       } else {
@@ -157,7 +157,6 @@ export default function App() {
   const handleStopRevealing = async () => {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        // Dispatches undefined to cleanly remove the key in OBR SDK standards
         await OBR.room.setMetadata({ [OBR_BROADCAST_NOTE_KEY]: undefined });
       }
       setBroadcastNote(null);
@@ -317,6 +316,9 @@ export default function App() {
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
       />
+
+      {/* Cross-Tab Collapsible Sticky HUD Note */}
+      <StickyHudNote />
 
       <main className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col">
         <div className={activeTab === 'combat' ? 'flex flex-col h-full' : 'hidden'}>
