@@ -23,8 +23,46 @@ import {
   NOTE_THEMES,
   NOTE_THEME_CONFIG,
   getAvailableCategories,
+  normalizeCategory,
 } from '../../types/notes';
 import { applyMarkdownSyntax } from '../../utils/markdownRenderer';
+
+export const SANDBOX_PREP_TEMPLATES: Record<string, string> = {
+  General: `# Session Agenda
+- [ ] Review consequences of previous actions
+- [ ] Timeline event / incoming message
+- [ ] Potential encounter / scene 1
+- [ ] Potential encounter / scene 2
+- [ ] End-of-session recap & XP/Loot`,
+
+  Encounters: `# Encounter: [Name / Threat Level]
+- **Type / Vibe:** [Combat / Trap / Social / Vision]
+- **Opening / Trigger:** [What starts it or what players see]
+- **Tactics / Mechanics:** [Target priority, DC 14 check, hazard]
+- **Recycle Hook:** [Where else this can take place if bypassed]`,
+
+  Leads: `# Lead: [Title / Inscription]
+"[Exact rumor, inscription text, or letter content]"
+- **Source:** [Who tells them or where it is found]
+- **Check / Verify (DC 13):** [What an Arcana / History / Insight check reveals]
+- **Points To:** [Target NPC, faction, or location]`,
+
+  NPC: `# [NPC Name] — [Role / Faction]
+- **Disposition:** [Friendly / Neutral / Hostile] · **Immediate Want:** [Goal]
+- **What They Know:** [Key information or lead]
+- **Leverage / DC:** [Persuasion DC 14 / Intimidation DC 16 / Gold]
+- **Mannerism / Tell:** [Voice, phrase, or physical quirk]`,
+
+  Location: `# [Location Name] — [Region]
+[1 sentence sensory environment description]
+- **Key Features:** [Notable landmark, door, altar, or hazard]
+- **Search (DC 14 Investigation):** [Hidden items or lore]`,
+
+  Loot: `# Loot: [Parcel / Source Name]
+- **Coin / Valuables:** [X gp, Y sp, gemstones]
+- **Items / Potions:** [Consumables or gear]
+- **Special / Magic Item:** [Item name, attunement, 1-line mechanic]`,
+};
 
 export interface EditNoteModalProps {
   isOpen: boolean;
@@ -78,26 +116,20 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
 
     if (editingNote) {
       setTitle(editingNote.title || '');
-      const initialCat = editingNote.category || 'General';
-      if (availableCategories.includes(initialCat)) {
-        setCategory(initialCat);
-      } else {
-        setCategory('General');
-      }
+      const initialCat = normalizeCategory(editingNote.category);
+      setCategory(initialCat);
       setContent(editingNote.content || '');
       setIsPinned(Boolean(editingNote.isPinned));
       setTheme(editingNote.theme || 'slate');
     } else {
       setTitle('');
-      const fallbackCat = availableCategories.includes(defaultCategory)
-        ? defaultCategory
-        : 'General';
+      const fallbackCat = normalizeCategory(defaultCategory);
       setCategory(fallbackCat);
       setContent('');
       setIsPinned(false);
       setTheme('slate');
     }
-  }, [isOpen, editingNote, availableCategories, defaultCategory]);
+  }, [isOpen, editingNote, defaultCategory]);
 
   if (!isOpen) return null;
 
@@ -105,9 +137,7 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
 
-    const finalCategory: NoteCategory = availableCategories.includes(category)
-      ? category
-      : 'General';
+    const finalCategory: NoteCategory = normalizeCategory(category);
 
     onSave({
       title: title.trim(),
@@ -116,6 +146,22 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
       isPinned: canPin ? isPinned : false,
       theme,
     });
+  };
+
+  const handleInsertTemplate = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selected = e.target.value;
+    if (!selected || !SANDBOX_PREP_TEMPLATES[selected]) return;
+
+    const template = SANDBOX_PREP_TEMPLATES[selected];
+
+    if (!content.trim()) {
+      setContent(template);
+    } else {
+      setContent((prev) => `${prev.trim()}\n\n---\n\n${template}`);
+    }
+
+    setCategory(normalizeCategory(selected));
+    e.target.value = '';
   };
 
   const wordCount = content.trim() ? content.trim().split(/\s+/).filter(Boolean).length : 0;
@@ -181,6 +227,37 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
                     {cat}
                   </option>
                 ))}
+              </select>
+
+              {/* 1-Click Sandbox Template Dropdown */}
+              <select
+                onChange={handleInsertTemplate}
+                defaultValue=""
+                className="px-2 py-1 text-xs font-semibold rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 focus:outline-none focus:border-amber-400 cursor-pointer transition"
+                title="Insert Sandbox Prep Template"
+                aria-label="Insert Sandbox Prep Template"
+              >
+                <option value="" disabled className="bg-slate-900 text-slate-300">
+                  📋 Insert Template...
+                </option>
+                <option value="General" className="bg-slate-900 text-slate-100 font-sans">
+                  General: Session Agenda
+                </option>
+                <option value="Encounters" className="bg-slate-900 text-slate-100 font-sans">
+                  Encounters: Fight, Trap, or Vision
+                </option>
+                <option value="Leads" className="bg-slate-900 text-slate-100 font-sans">
+                  Leads: Clue, Rumor, or Bounty
+                </option>
+                <option value="NPC" className="bg-slate-900 text-slate-100 font-sans">
+                  NPC: Contact & Dossier
+                </option>
+                <option value="Location" className="bg-slate-900 text-slate-100 font-sans">
+                  Location: Waypoint & Dungeon
+                </option>
+                <option value="Loot" className="bg-slate-900 text-slate-100 font-sans">
+                  Loot: Treasure & Parcels
+                </option>
               </select>
 
               {/* Pin to Top */}
@@ -272,8 +349,8 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
               className={`w-full flex-1 min-h-0 resize-none rounded-lg p-3 text-xs sm:text-sm focus:outline-none focus:border-amber-500/60 leading-relaxed overflow-y-auto border border-white/20 ${currentThemeConfig.contentClasses}`}
               placeholder={
                 isSecretVaultNote
-                  ? 'Write boxed text scenes, plot hooks, secret DCs, encounter tactics, or riddles...\nTip: Use # for encounters, ## for sub-sections, - lists, --- for dividers, or - [ ] tasks.'
-                  : 'Write note details, dialogue, clues, reminders, or inventory...\nTip: Use # for encounters, ## for sub-sections, - lists, --- for dividers, or - [ ] tasks.'
+                  ? 'Write boxed text scenes, plot hooks, secret DCs, encounter tactics, or riddles...\nTip: Choose "📋 Insert Template..." above to scaffold structured notes instantly.'
+                  : 'Write note details, dialogue, clues, reminders, or inventory...\nTip: Choose "📋 Insert Template..." above to scaffold structured notes instantly.'
               }
               value={content}
               onChange={(e) => setContent(e.target.value)}
