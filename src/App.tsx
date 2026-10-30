@@ -315,6 +315,8 @@ export default function App() {
       <ContextualHelpTooltip
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
+        activeAppTab={activeTab}
+        isGM={isGM}
       />
 
       {/* Cross-Tab Collapsible Sticky HUD Note */}
