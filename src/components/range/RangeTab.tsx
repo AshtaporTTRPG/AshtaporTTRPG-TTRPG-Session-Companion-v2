@@ -1,8 +1,14 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState, useMemo } from 'react';
 import {
   Ruler,
   Compass,
   ArrowUpRight,
+  ArrowDownRight,
   Minus,
   Plus,
   ChevronDown,
@@ -11,15 +17,15 @@ import {
   Flame,
   RotateCcw,
 } from 'lucide-react';
-import { liveFeedSync } from '../../utils/liveFeedSync';
 
 export const RangeTab: React.FC = () => {
-  // 3D Range Finder States: Ground Distance & Height
+  // 3D Range Finder States: Ground Distance, Height, and Elevation Direction
   const [groundDistance, setGroundDistance] = useState<number>(30);
   const [height, setHeight] = useState<number>(30);
+  const [isTargetBelow, setIsTargetBelow] = useState<boolean>(false);
 
-  // Accordion active sections (Jump Calculator open by default)
-  const [isJumpOpen, setIsJumpOpen] = useState<boolean>(true);
+  // Accordion active sections (Defaulted to Closed to guarantee 0-scroll viewport)
+  const [isJumpOpen, setIsJumpOpen] = useState<boolean>(false);
   const [isFallOpen, setIsFallOpen] = useState<boolean>(false);
 
   // Ashtapor Homebrew Jump Calculator state
@@ -31,19 +37,31 @@ export const RangeTab: React.FC = () => {
   const [fallDistance, setFallDistance] = useState<number>(30);
   const [isIncapacitated, setIsIncapacitated] = useState<boolean>(false);
 
-  // Standard 5e Pythagorean calculation: round(sqrt(ground^2 + height^2) / 5) * 5
+  // 3D Pythagorean calculation & grid rounding (>= .5 rounds up, < .5 rounds down)
   const rawHypotenuse = Math.sqrt(
     groundDistance * groundDistance + height * height
   );
   const hypotenuse = Math.round(rawHypotenuse / 5) * 5;
   const squares = Math.round(hypotenuse / 5);
 
-  // Dynamic SVG Right Triangle Coordinates
+  // Dynamic Reach Guidance based on standard 5e range brackets
+  const reachGuidance = useMemo(() => {
+    if (hypotenuse <= 5) return 'Reachable in Melee (5 ft)';
+    if (hypotenuse <= 10) return 'Reachable with Reach (10 ft)';
+    if (hypotenuse <= 30) return 'Reachable with 30 ft range (exceeds 10 ft)';
+    if (hypotenuse <= 60) return 'Reachable with 60 ft range (exceeds 30 ft)';
+    if (hypotenuse <= 120) return 'Reachable with 120 ft range (exceeds 60 ft)';
+    if (hypotenuse <= 150) return 'Reachable with 150 ft range (exceeds 120 ft)';
+    if (hypotenuse <= 300) return 'Reachable with 300 ft range (exceeds 150 ft)';
+    if (hypotenuse <= 600) return 'Reachable with 600 ft range (exceeds 300 ft)';
+    return 'Beyond 600 ft (exceeds standard weapon range)';
+  }, [hypotenuse]);
+
+  // Dynamic SVG Right Triangle Coordinates (Supports Target Above and Target Below)
   const svgData = useMemo(() => {
     const width = 420;
     const canvasHeight = 175;
     const originX = 50;
-    const originY = 145;
     const maxDrawW = 310;
     const maxDrawH = 110;
 
@@ -53,10 +71,13 @@ export const RangeTab: React.FC = () => {
     const legX = groundDistance > 0 ? Math.max(45, groundDistance * scale) : 25;
     const legY = height > 0 ? Math.max(30, height * scale) : 15;
 
+    // Normal: Baseline at bottom (145), rises to (145 - legY)
+    // Inverted: Baseline at top (30), drops to (30 + legY)
+    const originY = isTargetBelow ? 30 : 145;
     const cornerX = originX + legX;
     const cornerY = originY;
     const targetX = cornerX;
-    const targetY = originY - legY;
+    const targetY = isTargetBelow ? originY + legY : originY - legY;
 
     const midHypotenuseX = (originX + targetX) / 2;
     const midHypotenuseY = (originY + targetY) / 2;
@@ -73,36 +94,32 @@ export const RangeTab: React.FC = () => {
       midHypotenuseX,
       midHypotenuseY,
     };
-  }, [groundDistance, height]);
+  }, [groundDistance, height, isTargetBelow]);
 
-  // Jump Calculations
+  // Jump Calculations (5 ft / 10 ft + higher of STR or DEX mod)
   const bestJumpMod = Math.max(strModifier, dexModifier);
   const standingJumpDistance = Math.max(0, 5 + bestJumpMod);
   const runningJumpDistance = Math.max(0, 10 + bestJumpMod);
   const activeJumpDistance = hasRunningStart ? runningJumpDistance : standingJumpDistance;
 
-  // Fall Damage Calculations
+  // Fall Damage Calculations (1 flat dmg per ft beyond 15 ft; 1 flat dmg from 0 ft for Incapacitated)
   const flatFallDamage = isIncapacitated
     ? Math.max(0, fallDistance) * 1
     : fallDistance <= 15
     ? 0
     : Math.max(0, fallDistance - 15);
 
-  const handleLogFallDamage = () => {
-    const msg = `💥 Flat Fall Damage (${fallDistance} ft${isIncapacitated ? ', Incapacitated' : ' Normal'}): ${flatFallDamage} HP flat damage.`;
-    liveFeedSync.recordCombatLog(msg, true);
-  };
-
   const handleResetInputs = () => {
     setGroundDistance(30);
     setHeight(30);
+    setIsTargetBelow(false);
   };
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-y-auto bg-[#0b0f17] select-none p-2.5 gap-2.5">
-      {/* 1. SINGLE INTERACTIVE 3D ELEVATION CANVAS */}
-      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 relative flex flex-col gap-3 shadow-md">
-        {/* Header Strip with Title & Quick Reset */}
+      {/* 1. SINGLE INTERACTIVE 3D ELEVATION CANVAS & HERO READOUT */}
+      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 relative flex flex-col gap-2.5 shadow-md">
+        {/* Top Header Bar */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <Ruler className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -112,22 +129,58 @@ export const RangeTab: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/60 font-mono text-[11px] font-extrabold text-emerald-300">
-              {hypotenuse} ft ({squares} sq)
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsTargetBelow((prev) => !prev)}
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition cursor-pointer flex items-center gap-1 ${
+                isTargetBelow
+                  ? 'bg-cyan-950 border-cyan-500/80 text-cyan-300'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="Toggle target elevation direction"
+            >
+              {isTargetBelow ? (
+                <>
+                  <ArrowDownRight className="w-3 h-3 text-cyan-400" />
+                  <span>Target Below</span>
+                </>
+              ) : (
+                <>
+                  <ArrowUpRight className="w-3 h-3 text-amber-400" />
+                  <span>Target Above</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={handleResetInputs}
               className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-900 transition cursor-pointer"
-              title="Reset Ground and Height to 30ft"
-              aria-label="Reset Ground and Height to 30ft"
+              title="Reset inputs to 30ft"
+              aria-label="Reset inputs to 30ft"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        {/* Clean Right Triangle SVG Canvas (No floating boxes blocking points or lines) */}
+        {/* High-Contrast Hero Result Display (Visible at a Glance) */}
+        <div className="p-2.5 rounded-xl bg-gradient-to-r from-emerald-950/90 via-slate-900/90 to-emerald-950/90 border border-emerald-500/60 shadow-lg flex flex-col gap-1">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <span className="font-mono text-base sm:text-lg font-black text-emerald-300 tracking-tight">
+              [ {hypotenuse} ft ({squares} squares) ]
+            </span>
+            <span className="font-mono text-[11px] font-semibold text-emerald-400/80">
+              · {rawHypotenuse.toFixed(1)} ft exact
+            </span>
+          </div>
+          <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 pt-1 border-t border-emerald-800/60">
+            <span>🎯</span>
+            <span>{reachGuidance}</span>
+          </div>
+        </div>
+
+        {/* Clean Right Triangle SVG Canvas */}
         <div className="relative w-full h-44 bg-slate-900/85 border border-slate-800/90 rounded-lg overflow-hidden flex items-center justify-center select-none shadow-inner">
           <svg
             viewBox={`0 0 ${svgData.width} ${svgData.canvasHeight}`}
@@ -166,17 +219,21 @@ export const RangeTab: React.FC = () => {
               />
             )}
 
-            {/* Right Angle Square Indicator */}
+            {/* Right Angle Indicator */}
             {groundDistance > 0 && height > 0 && (
               <path
-                d={`M ${svgData.cornerX - 8} ${svgData.cornerY} L ${svgData.cornerX - 8} ${svgData.cornerY - 8} L ${svgData.cornerX} ${svgData.cornerY - 8}`}
+                d={
+                  isTargetBelow
+                    ? `M ${svgData.cornerX - 8} ${svgData.cornerY} L ${svgData.cornerX - 8} ${svgData.cornerY + 8} L ${svgData.cornerX} ${svgData.cornerY + 8}`
+                    : `M ${svgData.cornerX - 8} ${svgData.cornerY} L ${svgData.cornerX - 8} ${svgData.cornerY - 8} L ${svgData.cornerX} ${svgData.cornerY - 8}`
+                }
                 fill="none"
                 stroke="#64748b"
                 strokeWidth="1.2"
               />
             )}
 
-            {/* Horizontal Leg (Ground Distance) */}
+            {/* Horizontal Ground Leg (Amber) */}
             <line
               x1={svgData.originX}
               y1={svgData.originY}
@@ -187,7 +244,7 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Vertical Leg (Height) */}
+            {/* Vertical Elevation Leg (Cyan) */}
             <line
               x1={svgData.cornerX}
               y1={svgData.cornerY}
@@ -198,7 +255,7 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Hypotenuse Diagonal Line */}
+            {/* Hypotenuse Diagonal Line (Emerald) */}
             <line
               x1={svgData.originX}
               y1={svgData.originY}
@@ -209,18 +266,22 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Caster Origin Marker */}
+            {/* Origin Marker (Amber) */}
             <circle cx={svgData.originX} cy={svgData.originY} r="4.5" fill="#f59e0b" />
             <circle cx={svgData.originX} cy={svgData.originY} r="8" fill="none" stroke="#f59e0b" strokeOpacity="0.3" strokeWidth="1.5" />
 
-            {/* Target Marker */}
+            {/* Target Marker (Cyan) */}
             <circle cx={svgData.targetX} cy={svgData.targetY} r="4.5" fill="#38bdf8" />
             <circle cx={svgData.targetX} cy={svgData.targetY} r="8" fill="none" stroke="#38bdf8" strokeOpacity="0.3" strokeWidth="1.5" />
 
-            {/* Hypotenuse Label: Bold bright emerald text positioned alongside the diagonal line without blocking vertices */}
+            {/* Hypotenuse Value on Diagonal */}
             <text
               x={svgData.midHypotenuseX - 8}
-              y={Math.max(22, svgData.midHypotenuseY - 10)}
+              y={
+                isTargetBelow
+                  ? Math.min(160, svgData.midHypotenuseY + 14)
+                  : Math.max(22, svgData.midHypotenuseY - 10)
+              }
               textAnchor="middle"
               className="font-mono text-xs font-black fill-emerald-400 select-none"
               style={{ filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.95))' }}
@@ -228,43 +289,43 @@ export const RangeTab: React.FC = () => {
               {hypotenuse} ft ({squares} sq)
             </text>
 
-            {/* Horizontal Leg Value Label */}
+            {/* Ground Value Label (Amber) */}
             <text
               x={(svgData.originX + svgData.cornerX) / 2}
-              y={svgData.originY + 14}
+              y={isTargetBelow ? svgData.originY - 8 : svgData.originY + 14}
               textAnchor="middle"
-              className="font-mono text-[9px] font-bold fill-amber-400/90 select-none"
+              className="font-mono text-[9px] font-bold fill-amber-400 select-none"
             >
               {groundDistance} ft
             </text>
 
-            {/* Vertical Leg Value Label */}
+            {/* Vertical Elevation Value Label (Cyan) */}
             <text
               x={svgData.cornerX + 16}
               y={(svgData.cornerY + svgData.targetY) / 2 + 3}
               textAnchor="start"
-              className="font-mono text-[9px] font-bold fill-cyan-400/90 select-none"
+              className="font-mono text-[9px] font-bold fill-cyan-400 select-none"
             >
               {height} ft
             </text>
           </svg>
         </div>
 
-        {/* 2. DIRECT INTERACTIVE LEGS CONTROLS */}
+        {/* 2. DIRECT INTERACTIVE LEGS CONTROLS (COLOR MATCHED) */}
         <div className="grid grid-cols-2 gap-2.5">
-          {/* Horizontal Leg (Ground Distance) */}
-          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-amber-500/40 space-y-1.5 shadow-sm">
+          {/* Horizontal Ground Leg (Amber 500) */}
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-amber-500/50 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
               <label htmlFor="ground-leg-input" className="text-[10px] font-bold text-amber-300 font-mono tracking-wide flex items-center gap-1">
                 <Compass className="w-3 h-3 text-amber-400" />
                 <span>GROUND DISTANCE</span>
               </label>
-              <span className="text-[9px] font-mono text-amber-400/80 font-bold">
+              <span className="text-[9px] font-mono text-amber-400 font-bold">
                 {groundDistance}ft
               </span>
             </div>
 
-            {/* Stepper Input: [ - ] <input> [ + ] */}
+            {/* Stepper Input */}
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -283,7 +344,7 @@ export const RangeTab: React.FC = () => {
                 step="5"
                 value={groundDistance}
                 onChange={(e) => setGroundDistance(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                className="flex-1 min-w-0 h-7 px-1.5 text-center text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 tabular-nums"
+                className="flex-1 min-w-0 h-7 px-1.5 text-center text-xs font-mono font-bold rounded bg-slate-950 border border-amber-500/50 text-amber-300 focus:outline-none focus:border-amber-400 tabular-nums"
               />
 
               <button
@@ -297,7 +358,7 @@ export const RangeTab: React.FC = () => {
               </button>
             </div>
 
-            {/* Compact Preset Chips: [ 15ft ] [ 30ft ] [ 60ft ] [ 120ft ] */}
+            {/* Preset Chips */}
             <div className="grid grid-cols-4 gap-1 pt-0.5">
               {[15, 30, 60, 120].map((val) => (
                 <button
@@ -316,26 +377,30 @@ export const RangeTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Vertical Leg (Height) */}
-          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-cyan-500/40 space-y-1.5 shadow-sm">
+          {/* Vertical Elevation Leg (Cyan 400) */}
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-cyan-500/50 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
               <label htmlFor="height-leg-input" className="text-[10px] font-bold text-cyan-300 font-mono tracking-wide flex items-center gap-1">
-                <ArrowUpRight className="w-3 h-3 text-cyan-400" />
-                <span>HEIGHT</span>
+                {isTargetBelow ? (
+                  <ArrowDownRight className="w-3 h-3 text-cyan-400" />
+                ) : (
+                  <ArrowUpRight className="w-3 h-3 text-cyan-400" />
+                )}
+                <span>ELEVATION</span>
               </label>
-              <span className="text-[9px] font-mono text-cyan-400/80 font-bold">
-                {height}ft
+              <span className="text-[9px] font-mono text-cyan-400 font-bold">
+                {isTargetBelow ? `-${height}ft` : `+${height}ft`}
               </span>
             </div>
 
-            {/* Stepper Input: [ - ] <input> [ + ] */}
+            {/* Stepper Input */}
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setHeight((prev) => Math.max(0, prev - 5))}
                 className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="-5 ft height"
-                aria-label="-5 ft height"
+                title="-5 ft elevation"
+                aria-label="-5 ft elevation"
               >
                 <Minus className="w-3.5 h-3.5" />
               </button>
@@ -347,21 +412,21 @@ export const RangeTab: React.FC = () => {
                 step="5"
                 value={height}
                 onChange={(e) => setHeight(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                className="flex-1 min-w-0 h-7 px-1.5 text-center text-xs font-mono font-bold rounded bg-slate-950 border border-slate-700 text-cyan-300 focus:outline-none focus:border-cyan-400 tabular-nums"
+                className="flex-1 min-w-0 h-7 px-1.5 text-center text-xs font-mono font-bold rounded bg-slate-950 border border-cyan-500/50 text-cyan-300 focus:outline-none focus:border-cyan-400 tabular-nums"
               />
 
               <button
                 type="button"
                 onClick={() => setHeight((prev) => prev + 5)}
                 className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="+5 ft height"
-                aria-label="+5 ft height"
+                title="+5 ft elevation"
+                aria-label="+5 ft elevation"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Compact Preset Chips: [ 10ft ] [ 30ft ] [ 60ft ] [ 100ft ] */}
+            {/* Preset Chips */}
             <div className="grid grid-cols-4 gap-1 pt-0.5">
               {[10, 30, 60, 100].map((val) => (
                 <button
@@ -628,25 +693,14 @@ export const RangeTab: React.FC = () => {
               ))}
             </div>
 
-            <div className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-600/50 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-rose-400/90 block">
-                    Ashtapor Fall Damage
-                  </span>
-                  <div className="text-base font-mono font-bold text-rose-200">
-                    Flat Impact: <span className="text-lg text-rose-400">{flatFallDamage} HP</span>
-                  </div>
+            <div className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-600/50 space-y-1.5">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-rose-400/90 block">
+                  Ashtapor Fall Damage
+                </span>
+                <div className="text-base font-mono font-bold text-rose-200">
+                  Flat Impact: <span className="text-lg text-rose-400">{flatFallDamage} HP</span>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={handleLogFallDamage}
-                  className="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 text-white shadow-md transition cursor-pointer flex items-center gap-1 shrink-0"
-                >
-                  <Flame className="w-3.5 h-3.5" />
-                  <span>Log Feed</span>
-                </button>
               </div>
 
               <div className="text-[10px] text-rose-300/80 border-t border-rose-800/40 pt-1">
