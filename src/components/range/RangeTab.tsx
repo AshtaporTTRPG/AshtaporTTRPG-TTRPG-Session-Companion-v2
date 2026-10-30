@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 export const RangeTab: React.FC = () => {
-  // 3D Range Finder States: Ground Distance, Height, and Elevation Direction
+  // 3D Range Finder States: Horizontal Distance, Vertical Distance, and Direction
   const [groundDistance, setGroundDistance] = useState<number>(30);
   const [height, setHeight] = useState<number>(30);
   const [isTargetBelow, setIsTargetBelow] = useState<boolean>(false);
@@ -30,16 +30,16 @@ export const RangeTab: React.FC = () => {
   const [isFallOpen, setIsFallOpen] = useState<boolean>(false);
   const [isLiftOpen, setIsLiftOpen] = useState<boolean>(false);
 
-  // Ashtapor Homebrew Jump Calculator state
+  // Jump Calculator state
   const [strModifier, setStrModifier] = useState<number>(3);
   const [dexModifier, setDexModifier] = useState<number>(2);
   const [hasRunningStart, setHasRunningStart] = useState<boolean>(true);
 
-  // Ashtapor Homebrew Fall Damage Calculator state
+  // Fall Damage Calculator state
   const [fallDistance, setFallDistance] = useState<number>(30);
   const [isIncapacitated, setIsIncapacitated] = useState<boolean>(false);
 
-  // Ashtapor Homebrew Lifting & Dragging state
+  // Lifting & Dragging state
   const [strScore, setStrScore] = useState<number>(10);
   const [sizeCategory, setSizeCategory] = useState<'medium' | 'large' | 'huge' | 'gargantuan'>('medium');
 
@@ -63,7 +63,7 @@ export const RangeTab: React.FC = () => {
     return 'Beyond 600 ft (exceeds standard weapon range)';
   }, [hypotenuse]);
 
-  // Dynamic SVG Right Triangle Coordinates (Compact 150px height profile)
+  // Dynamic SVG Right Triangle Coordinates (Compact profile)
   const svgData = useMemo(() => {
     const width = 420;
     const canvasHeight = 150;
@@ -77,6 +77,8 @@ export const RangeTab: React.FC = () => {
     const legX = groundDistance > 0 ? Math.max(45, groundDistance * scale) : 25;
     const legY = height > 0 ? Math.max(26, height * scale) : 15;
 
+    // Normal: Baseline at bottom (126), rises to (126 - legY)
+    // Inverted: Baseline at top (24), drops to (24 + legY)
     const originY = isTargetBelow ? 24 : 126;
     const cornerX = originX + legX;
     const cornerY = originY;
@@ -145,7 +147,7 @@ export const RangeTab: React.FC = () => {
                   ? 'bg-cyan-950 border-cyan-500/80 text-cyan-300'
                   : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
               }`}
-              title="Toggle target elevation direction"
+              title="Toggle target vertical direction"
             >
               {isTargetBelow ? (
                 <>
@@ -172,7 +174,7 @@ export const RangeTab: React.FC = () => {
           </div>
         </div>
 
-        {/* High-Contrast Obsidian Hero Display (Vivid Lime Pop) */}
+        {/* High-Contrast Obsidian Hero Display (Vivid Lime Pop + Crisp White Guidance) */}
         <div className="p-2 rounded-xl bg-slate-900/95 border border-slate-700/80 shadow-md flex flex-col gap-1">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
             <span className="font-mono text-base sm:text-lg font-black text-lime-400 tracking-tight drop-shadow-[0_1px_4px_rgba(163,230,53,0.25)]">
@@ -182,13 +184,13 @@ export const RangeTab: React.FC = () => {
               · <span className="text-slate-300">{rawHypotenuse.toFixed(1)} ft exact</span>
             </span>
           </div>
-          <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 pt-1 border-t border-slate-800">
+          <div className="text-xs font-bold text-white flex items-center gap-1.5 pt-1 border-t border-slate-800">
             <span>🎯</span>
             <span>{reachGuidance}</span>
           </div>
         </div>
 
-        {/* Scaled Right Triangle SVG Canvas (Compact profile) */}
+        {/* Scaled Right Triangle SVG Canvas */}
         <div className="relative w-full h-32 bg-slate-900/85 border border-slate-800/90 rounded-lg overflow-hidden flex items-center justify-center select-none shadow-inner">
           <svg
             viewBox={`0 0 ${svgData.width} ${svgData.canvasHeight}`}
@@ -237,7 +239,7 @@ export const RangeTab: React.FC = () => {
               />
             )}
 
-            {/* Horizontal Ground Leg (Amber) */}
+            {/* Horizontal Leg (Amber) */}
             <line
               x1={svgData.originX}
               y1={svgData.originY}
@@ -248,7 +250,7 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Vertical Elevation Leg (Cyan) */}
+            {/* Vertical Leg (Cyan) */}
             <line
               x1={svgData.cornerX}
               y1={svgData.cornerY}
@@ -310,14 +312,14 @@ export const RangeTab: React.FC = () => {
           </svg>
         </div>
 
-        {/* 2. DIRECT INTERACTIVE LEGS CONTROLS (COLOR MATCHED) */}
+        {/* 2. DIRECT INTERACTIVE LEGS CONTROLS (HORIZONTAL & VERTICAL) */}
         <div className="grid grid-cols-2 gap-2">
-          {/* Horizontal Ground Leg (Amber 500) */}
+          {/* Horizontal Leg (Amber 500) */}
           <div className="p-2 rounded-lg bg-slate-900/90 border border-amber-500/50 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <label htmlFor="ground-leg-input" className="text-[10px] font-bold text-amber-300 font-mono tracking-wide flex items-center gap-1">
+              <label htmlFor="horizontal-leg-input" className="text-[10px] font-bold text-amber-300 font-mono tracking-wide flex items-center gap-1">
                 <Compass className="w-3 h-3 text-amber-400" />
-                <span>GROUND DISTANCE</span>
+                <span>HORIZONTAL</span>
               </label>
               <span className="text-[9px] font-mono text-amber-400 font-bold">
                 {groundDistance}ft
@@ -329,14 +331,14 @@ export const RangeTab: React.FC = () => {
                 type="button"
                 onClick={() => setGroundDistance((prev) => Math.max(0, prev - 5))}
                 className="h-6.5 w-6.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="-5 ft ground distance"
-                aria-label="-5 ft ground distance"
+                title="-5 ft horizontal"
+                aria-label="-5 ft horizontal"
               >
                 <Minus className="w-3 h-3" />
               </button>
 
               <input
-                id="ground-leg-input"
+                id="horizontal-leg-input"
                 type="number"
                 min="0"
                 step="5"
@@ -349,8 +351,8 @@ export const RangeTab: React.FC = () => {
                 type="button"
                 onClick={() => setGroundDistance((prev) => prev + 5)}
                 className="h-6.5 w-6.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="+5 ft ground distance"
-                aria-label="+5 ft ground distance"
+                title="+5 ft horizontal"
+                aria-label="+5 ft horizontal"
               >
                 <Plus className="w-3 h-3" />
               </button>
@@ -374,16 +376,16 @@ export const RangeTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Vertical Elevation Leg (Cyan 400) */}
+          {/* Vertical Leg (Cyan 400) */}
           <div className="p-2 rounded-lg bg-slate-900/90 border border-cyan-500/50 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <label htmlFor="height-leg-input" className="text-[10px] font-bold text-cyan-300 font-mono tracking-wide flex items-center gap-1">
+              <label htmlFor="vertical-leg-input" className="text-[10px] font-bold text-cyan-300 font-mono tracking-wide flex items-center gap-1">
                 {isTargetBelow ? (
                   <ArrowDownRight className="w-3 h-3 text-cyan-400" />
                 ) : (
                   <ArrowUpRight className="w-3 h-3 text-cyan-400" />
                 )}
-                <span>ELEVATION</span>
+                <span>VERTICAL</span>
               </label>
               <span className="text-[9px] font-mono text-cyan-400 font-bold">
                 {isTargetBelow ? `-${height}ft` : `+${height}ft`}
@@ -395,14 +397,14 @@ export const RangeTab: React.FC = () => {
                 type="button"
                 onClick={() => setHeight((prev) => Math.max(0, prev - 5))}
                 className="h-6.5 w-6.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="-5 ft elevation"
-                aria-label="-5 ft elevation"
+                title="-5 ft vertical"
+                aria-label="-5 ft vertical"
               >
                 <Minus className="w-3 h-3" />
               </button>
 
               <input
-                id="height-leg-input"
+                id="vertical-leg-input"
                 type="number"
                 min="0"
                 step="5"
@@ -415,8 +417,8 @@ export const RangeTab: React.FC = () => {
                 type="button"
                 onClick={() => setHeight((prev) => prev + 5)}
                 className="h-6.5 w-6.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center transition cursor-pointer"
-                title="+5 ft elevation"
-                aria-label="+5 ft elevation"
+                title="+5 ft vertical"
+                aria-label="+5 ft vertical"
               >
                 <Plus className="w-3 h-3" />
               </button>
@@ -442,7 +444,7 @@ export const RangeTab: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. COLLAPSIBLE ASHTAPOR JUMP CALCULATOR */}
+      {/* 3. COLLAPSIBLE JUMP CALCULATOR */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"
@@ -451,7 +453,7 @@ export const RangeTab: React.FC = () => {
         >
           <div className="flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-display">Ashtapor Jump Calculator</span>
+            <span className="font-display">Jump Calculator</span>
             <span className="text-[10px] font-mono text-emerald-400 font-semibold">
               · {activeJumpDistance} ft ({hasRunningStart ? 'Running' : 'Standing'})
             </span>
@@ -597,7 +599,7 @@ export const RangeTab: React.FC = () => {
         )}
       </div>
 
-      {/* 4. COLLAPSIBLE ASHTAPOR FALL DAMAGE CALCULATOR */}
+      {/* 4. COLLAPSIBLE FALL DAMAGE CALCULATOR */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"
@@ -606,7 +608,7 @@ export const RangeTab: React.FC = () => {
         >
           <div className="flex items-center gap-1.5">
             <Flame className="w-3.5 h-3.5 text-rose-400" />
-            <span className="font-display">Ashtapor Fall Damage Calculator</span>
+            <span className="font-display">Fall Damage Calculator</span>
             <span className="text-[10px] font-mono text-rose-400 font-semibold">
               · Flat {flatFallDamage} HP
             </span>
@@ -687,7 +689,7 @@ export const RangeTab: React.FC = () => {
             <div className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-600/50 space-y-1.5">
               <div>
                 <span className="text-[10px] uppercase font-bold text-rose-400/90 block">
-                  Ashtapor Fall Damage
+                  Fall Damage
                 </span>
                 <div className="text-base font-mono font-bold text-rose-200">
                   Flat Impact: <span className="text-lg text-rose-400">{flatFallDamage} HP</span>
@@ -706,7 +708,7 @@ export const RangeTab: React.FC = () => {
         )}
       </div>
 
-      {/* 5. COLLAPSIBLE ASHTAPOR LIFTING & DRAGGING CALCULATOR */}
+      {/* 5. COLLAPSIBLE LIFTING & DRAGGING CALCULATOR */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"
@@ -715,7 +717,7 @@ export const RangeTab: React.FC = () => {
         >
           <div className="flex items-center gap-1.5">
             <Scale className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="font-display">Ashtapor Lifting & Dragging</span>
+            <span className="font-display">Lifting & Dragging</span>
             <span className="text-[10px] font-mono text-indigo-400 font-semibold">
               · {liftCapacity} lbs ({sizeCategory.toUpperCase()})
             </span>
