@@ -150,13 +150,13 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 <strong>Turn Management (GM):</strong> Step through combat turns with <strong>Next</strong> / <strong>Prev</strong>, sort by score (<strong>⇅</strong>), or drag cards (⠿) to manually order combatants.
               </li>
               <li>
-                <strong>Adding Combatants (GM):</strong> Click <strong>+</strong> in the header to enter initiative, name, and role/color tag[cite: 2].
+                <strong>Adding Combatants (GM):</strong> Click <strong>+</strong> in the header to enter initiative, name, and role/color tag.
               </li>
               <li>
-                <strong>Player Permissions:</strong> Players can edit character names, type personal notes (AC/slots), and toggle status conditions, but cannot delete cards or re-sort the roster[cite: 2].
+                <strong>Player Permissions:</strong> Players can edit character names, type personal notes (AC/slots), and toggle status conditions, but cannot delete cards or re-sort the roster.
               </li>
               <li>
-                <strong>Defeated Skip:</strong> Marking a combatant defeated (💀) dims their card and automatically bypasses them during initiative stepping[cite: 2].
+                <strong>Defeated Skip:</strong> Marking a combatant defeated (💀) dims their card and automatically bypasses them during initiative stepping.
               </li>
             </ul>
           </section>
@@ -172,13 +172,13 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand result for damage rolls, pooled checks, or healing[cite: 2].
+                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand result for damage rolls, pooled checks, or healing.
               </li>
               <li>
-                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each individual die for multi-attacks and mob checks[cite: 2].
+                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each individual die for multi-attacks and mob checks.
               </li>
               <li>
-                <strong>Calculator Dock:</strong> Click the calculator icon to run quick arithmetic and insert the output directly into your staging tray[cite: 2].
+                <strong>Calculator Dock:</strong> Click the calculator icon to run quick arithmetic and insert the output directly into your staging tray.
               </li>
             </ul>
           </section>
@@ -219,13 +219,13 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Quick Lookup:</strong> Instant reference cards for Potions, Flanking, Massive Damage, Long Rest limits, and Universal Currency[cite: 2].
+                <strong>Quick Lookup:</strong> Instant reference cards for Potions, Flanking, Massive Damage, Long Rest limits, and Universal Currency.
               </li>
               <li>
-                <strong>Instant Search:</strong> Filter rules by keyword or click category pills (<em>Combat, Movement, Rest, World</em>)[cite: 2].
+                <strong>Instant Search:</strong> Filter rules by keyword or click category pills (<em>Combat, Movement, Rest, World</em>).
               </li>
               <li>
-                <strong>Copy to Table:</strong> Click the copy icon on any rule card to copy the exact text to your clipboard[cite: 2].
+                <strong>Copy to Table:</strong> Click the copy icon on any rule card to copy the exact text to your clipboard.
               </li>
             </ul>
           </section>
@@ -243,22 +243,22 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
               <li>
                 <strong>3 Vaults:</strong>
                 <div className="pl-2 space-y-0.5 mt-0.5 text-slate-400">
-                  <div>• <strong className="text-slate-200">My Notes:</strong> Private scratchpad stored locally on your device[cite: 2].</div>
-                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players[cite: 2].</div>
-                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all screens in real time[cite: 2].</div>
+                  <div>• <strong className="text-slate-200">My Notes:</strong> Private scratchpad stored locally on your device.</div>
+                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players.</div>
+                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all screens in real time.</div>
                 </div>
               </li>
               <li>
-                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>[cite: 2].
+                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>.
               </li>
               <li>
-                <strong>1-Click Prep Templates:</strong> Choose <em>"📋 Insert Template..."</em> to scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards[cite: 2].
+                <strong>1-Click Prep Templates:</strong> Choose <em>"📋 Insert Template..."</em> to scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards.
               </li>
               <li>
-                <strong>Interactive Markdown:</strong> Headers (<code>#</code>, <code>##</code>, <code>###</code>) are collapsible; checkboxes (<code>- [ ]</code>) are interactive and clickable directly in reader views[cite: 2].
+                <strong>Interactive Markdown:</strong> Headers (<code>#</code>, <code>##</code>, <code>###</code>) are collapsible; checkboxes (<code>- [ ]</code>) are interactive and clickable directly in reader views.
               </li>
               <li>
-                <strong>Vault Transfer:</strong> Use <strong>Transfer</strong> to move or copy notes between My Notes, Table Notes, and GM Notes[cite: 2].
+                <strong>Vault Transfer:</strong> Use <strong>Transfer</strong> to move or copy notes between My Notes, Table Notes, and GM Notes.
               </li>
             </ul>
           </section>
@@ -274,16 +274,16 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card to lock it into a slim drawer visible across Combat, Dice, Tactics, Grimoire, and Notes[cite: 2].
+                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card to lock it into a slim drawer visible across Combat, Dice, Tactics, Grimoire, and Notes.
               </li>
               <li>
-                <strong>Interactive Drawer:</strong> Click the bar to expand your pinned note. Tasks (<code>- [ ]</code>) can be checked off directly inside the drawer without leaving combat[cite: 2].
+                <strong>Interactive Drawer:</strong> Click the bar to expand your pinned note. Tasks (<code>- [ ]</code>) can be checked off directly inside the drawer without leaving combat.
               </li>
               <li>
-                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit note text directly in place; edits sync automatically to your underlying vault[cite: 2].
+                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit note text directly in place; edits sync automatically to your underlying vault.
               </li>
               <li>
-                <strong>Private & Local:</strong> Pinned notes live strictly on your client screen and consume 0 room metadata[cite: 2].
+                <strong>Private & Local:</strong> Pinned notes live strictly on your client screen and consume 0 room metadata.
               </li>
             </ul>
           </section>
