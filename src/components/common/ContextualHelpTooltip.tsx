@@ -14,12 +14,11 @@ import {
   FileText,
   Pin,
 } from 'lucide-react';
-import { ActiveTab } from '../../App';
 
 interface ContextualHelpTooltipProps {
   isOpen: boolean;
   onClose: () => void;
-  activeAppTab?: ActiveTab;
+  activeAppTab?: string;
   isGM?: boolean;
 }
 
@@ -30,38 +29,12 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 }) => {
   const contentContainerRef = useRef<HTMLDivElement>(null);
 
-  // Section references for precise internal scrolling
-  const combatRef = useRef<HTMLDivElement>(null);
-  const diceRef = useRef<HTMLDivElement>(null);
-  const tacticsRef = useRef<HTMLDivElement>(null);
-  const grimoireRef = useRef<HTMLDivElement>(null);
-  const notesRef = useRef<HTMLDivElement>(null);
-  const hudRef = useRef<HTMLDivElement>(null);
-
-  const getTargetRef = (tabKey: string) => {
-    switch (tabKey) {
-      case 'combat':
-        return combatRef;
-      case 'dice':
-        return diceRef;
-      case 'range':
-      case 'tactics':
-        return tacticsRef;
-      case 'grimoire':
-        return grimoireRef;
-      case 'notes':
-        return notesRef;
-      case 'hud':
-        return hudRef;
-      default:
-        return combatRef;
-    }
-  };
-
-  const scrollToSection = (targetRef: React.RefObject<HTMLDivElement | null>, smooth = true) => {
-    if (targetRef.current && contentContainerRef.current) {
-      const container = contentContainerRef.current;
-      const topOffset = targetRef.current.offsetTop - container.offsetTop;
+  const scrollToSectionId = (sectionId: string, smooth = true) => {
+    const container = contentContainerRef.current;
+    if (!container) return;
+    const target = container.querySelector(`#${sectionId}`) as HTMLElement | null;
+    if (target) {
+      const topOffset = target.offsetTop - container.offsetTop;
       container.scrollTo({
         top: Math.max(0, topOffset - 6),
         behavior: smooth ? 'smooth' : 'auto',
@@ -69,13 +42,17 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
     }
   };
 
-  // Auto-scroll to the currently active tab when the modal opens
+  // Auto-scroll to the active tab's section when the guide opens
   useEffect(() => {
     if (!isOpen) return;
     const timer = setTimeout(() => {
-      const ref = getTargetRef(activeAppTab);
-      scrollToSection(ref, false);
-    }, 60);
+      let targetId = 'help-sec-combat';
+      if (activeAppTab === 'dice') targetId = 'help-sec-dice';
+      if (activeAppTab === 'range' || activeAppTab === 'tactics') targetId = 'help-sec-tactics';
+      if (activeAppTab === 'grimoire') targetId = 'help-sec-grimoire';
+      if (activeAppTab === 'notes') targetId = 'help-sec-notes';
+      scrollToSectionId(targetId, false);
+    }, 50);
     return () => clearTimeout(timer);
   }, [isOpen, activeAppTab]);
 
@@ -106,7 +83,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
         <div className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-950/70 border-b border-slate-800/80 overflow-x-auto shrink-0 scrollbar-none">
           <button
             type="button"
-            onClick={() => scrollToSection(combatRef)}
+            onClick={() => scrollToSectionId('help-sec-combat')}
             className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
               activeAppTab === 'combat'
                 ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
@@ -119,7 +96,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
           <button
             type="button"
-            onClick={() => scrollToSection(diceRef)}
+            onClick={() => scrollToSectionId('help-sec-dice')}
             className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
               activeAppTab === 'dice'
                 ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
@@ -132,9 +109,9 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
           <button
             type="button"
-            onClick={() => scrollToSection(tacticsRef)}
+            onClick={() => scrollToSectionId('help-sec-tactics')}
             className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
-              activeAppTab === 'range'
+              activeAppTab === 'range' || activeAppTab === 'tactics'
                 ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
                 : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700'
             }`}
@@ -145,7 +122,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
           <button
             type="button"
-            onClick={() => scrollToSection(grimoireRef)}
+            onClick={() => scrollToSectionId('help-sec-grimoire')}
             className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
               activeAppTab === 'grimoire'
                 ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
@@ -158,7 +135,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
           <button
             type="button"
-            onClick={() => scrollToSection(notesRef)}
+            onClick={() => scrollToSectionId('help-sec-notes')}
             className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
               activeAppTab === 'notes'
                 ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
@@ -171,7 +148,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
 
           <button
             type="button"
-            onClick={() => scrollToSection(hudRef)}
+            onClick={() => scrollToSectionId('help-sec-hud')}
             className="px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700"
           >
             <span>📌</span>
@@ -185,34 +162,32 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
           className="flex-1 overflow-y-auto p-3.5 space-y-4 text-xs text-slate-300 leading-relaxed scrollbar-thin scrollbar-thumb-slate-800"
         >
           {/* 1. COMBAT WHITEBOARD (TAB 1) */}
-          <section ref={combatRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-                <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                <span>1. Combat Whiteboard</span>
-              </h3>
-            </div>
+          <section id="help-sec-combat" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+            <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
+              <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span>1. Combat Whiteboard</span>
+            </h3>
             <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
               Initiative Roster · Drag Reorder (⠿) · Defeated (💀) skips active turn
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Turn Management (GM):</strong> Step through combat turns with <strong>Next</strong> / <strong>Prev</strong>, sort by score (<strong>⇅</strong>), or drag cards (⠿) to manually order combatants[cite: 2].
+                <strong>Turn Management (GM):</strong> Step through combat turns with <strong>Next</strong> / <strong>Prev</strong>, sort by score (<strong>⇅</strong>), or drag cards (⠿) to manually order combatants.
               </li>
               <li>
-                <strong>Adding Combatants (GM):</strong> Click <strong>+</strong> in the header to enter initiative, name, and role/color tag[cite: 2].
+                <strong>Adding Combatants (GM):</strong> Click <strong>+</strong> in the header to enter initiative, name, and role/color tag.
               </li>
               <li>
-                <strong>Player Permissions:</strong> Players can edit character names, type personal notes (AC/slots), and toggle status conditions, but cannot delete cards or re-sort the roster[cite: 2].
+                <strong>Player Permissions:</strong> Players can edit character names, type personal notes (AC/slots), and toggle status conditions, but cannot delete cards or re-sort the roster.
               </li>
               <li>
-                <strong>Defeated Skip:</strong> Marking a combatant defeated (💀) dims their card and automatically bypasses them during initiative stepping[cite: 2].
+                <strong>Defeated Skip:</strong> Marking a combatant defeated (💀) dims their card and automatically bypasses them during initiative stepping.
               </li>
             </ul>
           </section>
 
           {/* 2. DICE CHAMBER & STAGING (TAB 2) */}
-          <section ref={diceRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+          <section id="help-sec-dice" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <Dices className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
               <span>2. Dice Chamber & Staging</span>
@@ -222,19 +197,19 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand result for damage rolls, pooled checks, or healing[cite: 2].
+                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand result for damage rolls, pooled checks, or healing.
               </li>
               <li>
-                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each individual die for multi-attacks and mob checks[cite: 2].
+                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each individual die for multi-attacks and mob checks.
               </li>
               <li>
-                <strong>Calculator Dock:</strong> Click the calculator icon to run quick arithmetic and insert the output directly into your staging tray[cite: 2].
+                <strong>Calculator Dock:</strong> Click the calculator icon to run quick arithmetic and insert the output directly into your staging tray.
               </li>
             </ul>
           </section>
 
           {/* 3. TACTICS (TAB 3) */}
-          <section ref={tacticsRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+          <section id="help-sec-tactics" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <Ruler className="w-3.5 h-3.5 text-lime-400 shrink-0" />
               <span>3. Tactics (3D Range, Jump, Fall & Lift)</span>
@@ -244,10 +219,10 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>3D Range:</strong> Enter Horizontal distance and Vertical elevation (+ Above / - Below) to solve true diagonal distance and view instant 5e reach guidance (e.g., <em>Reachable with 60 ft range</em>).
+                <strong>3D Range:</strong> Enter Horizontal distance and Vertical elevation (+ Above / - Below) to solve true diagonal distance and view instant reach guidance (e.g., <em>Reachable with 60 ft range</em>).
               </li>
               <li>
-                <strong>Jump Calculator:</strong> Enter STR/DEX modifiers to view both Standing (5 ft + Mod) and Running (10 ft + Mod) distances side-by-side with zero checks required.
+                <strong>Jump Calculator:</strong> Enter STR/DEX modifiers to view both Standing (5 ft + Mod) and Running (10 ft + Mod) clearances side-by-side with zero checks required.
               </li>
               <li>
                 <strong>Fall Damage:</strong> Enter fall distance to inspect both Normal falls (0 damage up to 15 ft, then 1 flat HP/ft) and Incapacitated falls (1 flat HP/ft from 0 ft).
@@ -259,7 +234,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
           </section>
 
           {/* 4. GRIMOIRE (TAB 4) */}
-          <section ref={grimoireRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+          <section id="help-sec-grimoire" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <BookOpen className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
               <span>4. Grimoire (Homebrew Rules)</span>
@@ -269,19 +244,19 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Quick Lookup:</strong> Instant cards for Potions, Flanking, Massive Damage, Long Rest limits, and Universal Currency[cite: 2].
+                <strong>Quick Lookup:</strong> Instant reference cards for Potions, Flanking, Massive Damage, Long Rest limits, and Universal Currency.
               </li>
               <li>
-                <strong>Instant Search:</strong> Filter rules by keyword or click category pills (<em>Combat, Movement, Rest, World</em>)[cite: 2].
+                <strong>Instant Search:</strong> Filter rules by keyword or click category pills (<em>Combat, Movement, Rest, World</em>).
               </li>
               <li>
-                <strong>Copy to Table:</strong> Click the copy icon on any rule card to copy the exact text to your clipboard[cite: 2].
+                <strong>Copy to Table:</strong> Click the copy icon on any rule card to copy the exact text to your clipboard.
               </li>
             </ul>
           </section>
 
           {/* 5. NOTES & SANDBOX PREP (TAB 5) */}
-          <section ref={notesRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+          <section id="help-sec-notes" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>5. Notes, Handouts & Broadcasts</span>
@@ -293,28 +268,28 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
               <li>
                 <strong>3 Vaults:</strong>
                 <div className="pl-2 space-y-0.5 mt-0.5 text-slate-400">
-                  <div>• <strong className="text-slate-200">My Notes:</strong> Private scratchpad stored locally on your device[cite: 2].</div>
-                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players[cite: 2].</div>
-                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all screens in real time[cite: 2].</div>
+                  <div>• <strong className="text-slate-200">My Notes:</strong> Private scratchpad stored locally on your device.</div>
+                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players.</div>
+                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all screens in real time.</div>
                 </div>
               </li>
               <li>
-                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>[cite: 2].
+                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>.
               </li>
               <li>
-                <strong>1-Click Prep Templates:</strong> Choose <em>"📋 Insert Template..."</em> to scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards[cite: 2].
+                <strong>1-Click Prep Templates:</strong> Choose <em>"📋 Insert Template..."</em> to scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards.
               </li>
               <li>
-                <strong>Interactive Markdown:</strong> Headers (<code>#</code>, <code>##</code>, <code>###</code>) are collapsible; checkboxes (<code>- [ ]</code>) are interactive and clickable directly in reader views[cite: 2].
+                <strong>Interactive Markdown:</strong> Headers (<code>#</code>, <code>##</code>, <code>###</code>) are collapsible; checkboxes (<code>- [ ]</code>) are interactive and clickable directly in reader views.
               </li>
               <li>
-                <strong>Vault Transfer:</strong> Use <strong>Transfer</strong> to move or copy notes between My Notes, Table Notes, and GM Notes[cite: 2].
+                <strong>Vault Transfer:</strong> Use <strong>Transfer</strong> to move or copy notes between My Notes, Table Notes, and GM Notes.
               </li>
             </ul>
           </section>
 
           {/* 6. STICKY HUD NOTE (CROSS-TAB UTILITY) */}
-          <section ref={hudRef} className="space-y-1.5">
+          <section id="help-sec-hud" className="space-y-1.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
               <span>6. Sticky HUD Note (Cross-Tab Glance)</span>
@@ -324,16 +299,16 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card to lock it into a slim drawer visible across Combat, Dice, Tactics, Grimoire, and Notes[cite: 2].
+                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card to lock it into a slim drawer visible across Combat, Dice, Tactics, Grimoire, and Notes.
               </li>
               <li>
-                <strong>Interactive Drawer:</strong> Click the bar to expand your pinned note. Tasks (<code>- [ ]</code>) can be checked off directly inside the drawer without leaving combat[cite: 2].
+                <strong>Interactive Drawer:</strong> Click the bar to expand your pinned note. Tasks (<code>- [ ]</code>) can be checked off directly inside the drawer without leaving combat.
               </li>
               <li>
-                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit note text directly in place; edits sync automatically to your underlying vault[cite: 2].
+                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit note text directly in place; edits sync automatically to your underlying vault.
               </li>
               <li>
-                <strong>Private & Local:</strong> Pinned notes live strictly on your client screen and consume 0 room metadata[cite: 2].
+                <strong>Private & Local:</strong> Pinned notes live strictly on your client screen and consume 0 room metadata.
               </li>
             </ul>
           </section>
