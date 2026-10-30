@@ -33,11 +33,9 @@ export const RangeTab: React.FC = () => {
   // Jump Calculator state
   const [strModifier, setStrModifier] = useState<number>(3);
   const [dexModifier, setDexModifier] = useState<number>(2);
-  const [hasRunningStart, setHasRunningStart] = useState<boolean>(true);
 
   // Fall Damage Calculator state
   const [fallDistance, setFallDistance] = useState<number>(30);
-  const [isIncapacitated, setIsIncapacitated] = useState<boolean>(false);
 
   // Lifting & Dragging state
   const [strScore, setStrScore] = useState<number>(10);
@@ -102,18 +100,14 @@ export const RangeTab: React.FC = () => {
     };
   }, [groundDistance, height, isTargetBelow]);
 
-  // Jump Calculations (5 ft / 10 ft + higher of STR or DEX mod)
+  // Jump Calculations (5 ft standing / 10 ft running + higher of STR or DEX mod)
   const bestJumpMod = Math.max(strModifier, dexModifier);
   const standingJumpDistance = Math.max(0, 5 + bestJumpMod);
   const runningJumpDistance = Math.max(0, 10 + bestJumpMod);
-  const activeJumpDistance = hasRunningStart ? runningJumpDistance : standingJumpDistance;
 
-  // Fall Damage Calculations (1 flat dmg per ft beyond 15 ft; 1 flat dmg from 0 ft for Incapacitated)
-  const flatFallDamage = isIncapacitated
-    ? Math.max(0, fallDistance) * 1
-    : fallDistance <= 15
-    ? 0
-    : Math.max(0, fallDistance - 15);
+  // Fall Damage Calculations (Dual: Normal vs. Incapacitated)
+  const normalFallDamage = fallDistance <= 15 ? 0 : Math.max(0, fallDistance - 15);
+  const incapFallDamage = Math.max(0, fallDistance);
 
   // Lifting & Dragging Calculations (Base = 15 × STR score; Double per size above Medium)
   const sizeMultiplier = sizeCategory === 'gargantuan' ? 8 : sizeCategory === 'huge' ? 4 : sizeCategory === 'large' ? 2 : 1;
@@ -444,24 +438,24 @@ export const RangeTab: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. COLLAPSIBLE JUMP CALCULATOR */}
+      {/* 3. COLLAPSIBLE JUMP CALCULATOR (DUAL DISPLAY: STANDING & RUNNING) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"
           onClick={() => setIsJumpOpen(!isJumpOpen)}
           className="w-full px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-200 hover:text-amber-300 transition cursor-pointer bg-slate-900/95"
         >
-          <div className="flex items-center gap-1.5">
-            <Activity className="w-3.5 h-3.5 text-amber-400" />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span className="font-display">Jump Calculator</span>
-            <span className="text-[10px] font-mono text-emerald-400 font-semibold">
-              · {activeJumpDistance} ft ({hasRunningStart ? 'Running' : 'Standing'})
+            <span className="text-[10px] font-mono text-emerald-400 font-semibold truncate">
+              · Stand: {standingJumpDistance} ft | Run: {runningJumpDistance} ft
             </span>
           </div>
           {isJumpOpen ? (
-            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronUp className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           )}
         </button>
 
@@ -535,29 +529,9 @@ export const RangeTab: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
-                <input
-                  type="checkbox"
-                  checked={hasRunningStart}
-                  onChange={(e) => setHasRunningStart(e.target.checked)}
-                  className="rounded bg-slate-900 border-slate-700 text-amber-400 focus:ring-amber-400 cursor-pointer"
-                />
-                <div className="text-[11px] leading-tight">
-                  <span className="font-semibold text-slate-200 block">Running Start (10-ft lead)</span>
-                  <span className="text-[10px] text-slate-400">Uses 10 ft base instead of 5 ft base</span>
-                </div>
-              </label>
-            </div>
-
+            {/* Side-by-side Jump Cards (Zero toggling needed) */}
             <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
-              <div
-                className={`p-2 rounded-lg border transition ${
-                  !hasRunningStart
-                    ? 'bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30'
-                    : 'bg-slate-950 border-slate-800 opacity-75'
-                }`}
-              >
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
                   Standing Jump
                 </span>
@@ -571,15 +545,9 @@ export const RangeTab: React.FC = () => {
                 </div>
               </div>
 
-              <div
-                className={`p-2 rounded-lg border transition ${
-                  hasRunningStart
-                    ? 'bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30'
-                    : 'bg-slate-950 border-slate-800 opacity-75'
-                }`}
-              >
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                  Running Jump
+                  Running (10-ft lead)
                 </span>
                 <div className="flex items-baseline gap-1">
                   <span className="text-base font-mono font-bold text-cyan-300">
@@ -599,73 +567,61 @@ export const RangeTab: React.FC = () => {
         )}
       </div>
 
-      {/* 4. COLLAPSIBLE FALL DAMAGE CALCULATOR */}
+      {/* 4. COLLAPSIBLE FALL DAMAGE CALCULATOR (DUAL DISPLAY: NORMAL & INCAP) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
         <button
           type="button"
           onClick={() => setIsFallOpen(!isFallOpen)}
           className="w-full px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-200 hover:text-amber-300 transition cursor-pointer bg-slate-900/95"
         >
-          <div className="flex items-center gap-1.5">
-            <Flame className="w-3.5 h-3.5 text-rose-400" />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Flame className="w-3.5 h-3.5 text-rose-400 shrink-0" />
             <span className="font-display">Fall Damage Calculator</span>
-            <span className="text-[10px] font-mono text-rose-400 font-semibold">
-              · Flat {flatFallDamage} HP
+            <span className="text-[10px] font-mono text-rose-400 font-semibold truncate">
+              · Normal: {normalFallDamage} HP | Incap: {incapFallDamage} HP
             </span>
           </div>
           {isFallOpen ? (
-            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronUp className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           )}
         </button>
 
         {isFallOpen && (
           <div className="p-3 border-t border-slate-800/80 space-y-2.5 text-xs animate-fadeIn">
-            <div className="grid grid-cols-2 gap-2.5 items-center">
-              <div>
-                <label className="text-[10px] font-semibold text-slate-300 block mb-1">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-semibold text-slate-300">
                   Fall Distance (ft)
                 </label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setFallDistance((prev) => Math.max(0, prev - 5))}
-                    className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    step="5"
-                    value={fallDistance}
-                    onChange={(e) => setFallDistance(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                    className="flex-1 min-w-0 h-7 text-center font-mono font-bold rounded bg-slate-950 border border-slate-700 text-rose-300"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setFallDistance((prev) => prev + 5)}
-                    className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
+                <span className="text-[10px] font-mono text-rose-300 font-bold">
+                  {fallDistance} ft
+                </span>
               </div>
-
-              <div className="flex flex-col justify-end pt-1">
-                <label className="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
-                  <input
-                    type="checkbox"
-                    checked={isIncapacitated}
-                    onChange={(e) => setIsIncapacitated(e.target.checked)}
-                    className="rounded bg-slate-900 border-slate-700 text-rose-500 focus:ring-rose-500 cursor-pointer"
-                  />
-                  <div className="text-[11px] leading-tight">
-                    <span className="font-semibold text-rose-300 block">Incapacitated</span>
-                    <span className="text-[9px] text-slate-400">1 flat dmg/ft from 0 ft</span>
-                  </div>
-                </label>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFallDistance((prev) => Math.max(0, prev - 5))}
+                  className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+                >
+                  <Minus className="w-3 h-3" />
+                </button>
+                <input
+                  type="number"
+                  min="0"
+                  step="5"
+                  value={fallDistance}
+                  onChange={(e) => setFallDistance(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="flex-1 min-w-0 h-7 text-center font-mono font-bold rounded bg-slate-950 border border-slate-700 text-rose-300"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFallDistance((prev) => prev + 5)}
+                  className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
               </div>
             </div>
 
@@ -686,22 +642,34 @@ export const RangeTab: React.FC = () => {
               ))}
             </div>
 
-            <div className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-600/50 space-y-1.5">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-rose-400/90 block">
-                  Fall Damage
-                </span>
-                <div className="text-base font-mono font-bold text-rose-200">
-                  Flat Impact: <span className="text-lg text-rose-400">{flatFallDamage} HP</span>
+            {/* Side-by-side Dual Impact Cards */}
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+                    Normal Fall
+                  </span>
+                  <div className="text-base font-mono font-bold text-rose-300">
+                    {normalFallDamage} HP
+                  </div>
+                </div>
+                <div className="text-[9px] text-slate-500 mt-1">
+                  0 HP up to 15 ft, then 1 flat dmg/ft
                 </div>
               </div>
 
-              <div className="text-[10px] text-rose-300/80 border-t border-rose-800/40 pt-1">
-                {isIncapacitated
-                  ? 'Incapacitated: takes 1 flat damage per foot fallen from 0 ft.'
-                  : fallDistance <= 15
-                  ? 'Normal fall: ≤ 15 ft causes 0 damage (acrobatic recovery threshold).'
-                  : `Normal fall: 0 damage for first 15 ft, then 1 flat damage per foot (${fallDistance} - 15 = ${flatFallDamage} HP).`}
+              <div className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-600/50 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-rose-400 block mb-0.5">
+                    Incapacitated
+                  </span>
+                  <div className="text-base font-mono font-bold text-rose-300">
+                    {incapFallDamage} HP
+                  </div>
+                </div>
+                <div className="text-[9px] text-rose-400/80 mt-1">
+                  1 flat dmg/ft starting from 0 ft
+                </div>
               </div>
             </div>
           </div>
@@ -715,17 +683,17 @@ export const RangeTab: React.FC = () => {
           onClick={() => setIsLiftOpen(!isLiftOpen)}
           className="w-full px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-200 hover:text-amber-300 transition cursor-pointer bg-slate-900/95"
         >
-          <div className="flex items-center gap-1.5">
-            <Scale className="w-3.5 h-3.5 text-indigo-400" />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Scale className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
             <span className="font-display">Lifting & Dragging</span>
-            <span className="text-[10px] font-mono text-indigo-400 font-semibold">
+            <span className="text-[10px] font-mono text-indigo-400 font-semibold truncate">
               · {liftCapacity} lbs ({sizeCategory.toUpperCase()})
             </span>
           </div>
           {isLiftOpen ? (
-            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronUp className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           )}
         </button>
 
