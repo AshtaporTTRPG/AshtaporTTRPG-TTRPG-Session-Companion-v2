@@ -281,7 +281,7 @@ export default function App() {
             }`}
           >
             <span className="text-xs leading-none">📐</span>
-            <span className="truncate">3D Range</span>
+            <span className="truncate">Tactics</span>
           </button>
 
           <button
