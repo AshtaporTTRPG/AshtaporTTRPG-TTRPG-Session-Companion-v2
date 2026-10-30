@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Activity,
   Flame,
+  Scale,
   RotateCcw,
 } from 'lucide-react';
 
@@ -27,6 +28,7 @@ export const RangeTab: React.FC = () => {
   // Accordion active sections (Defaulted to Closed to guarantee 0-scroll viewport)
   const [isJumpOpen, setIsJumpOpen] = useState<boolean>(false);
   const [isFallOpen, setIsFallOpen] = useState<boolean>(false);
+  const [isLiftOpen, setIsLiftOpen] = useState<boolean>(false);
 
   // Ashtapor Homebrew Jump Calculator state
   const [strModifier, setStrModifier] = useState<number>(3);
@@ -36,6 +38,10 @@ export const RangeTab: React.FC = () => {
   // Ashtapor Homebrew Fall Damage Calculator state
   const [fallDistance, setFallDistance] = useState<number>(30);
   const [isIncapacitated, setIsIncapacitated] = useState<boolean>(false);
+
+  // Ashtapor Homebrew Lifting & Dragging state
+  const [strScore, setStrScore] = useState<number>(10);
+  const [sizeCategory, setSizeCategory] = useState<'medium' | 'large' | 'huge' | 'gargantuan'>('medium');
 
   // 3D Pythagorean calculation & grid rounding (>= .5 rounds up, < .5 rounds down)
   const rawHypotenuse = Math.sqrt(
@@ -71,8 +77,6 @@ export const RangeTab: React.FC = () => {
     const legX = groundDistance > 0 ? Math.max(45, groundDistance * scale) : 25;
     const legY = height > 0 ? Math.max(26, height * scale) : 15;
 
-    // Normal: Baseline at bottom (126), rises to (126 - legY)
-    // Inverted: Baseline at top (24), drops to (24 + legY)
     const originY = isTargetBelow ? 24 : 126;
     const cornerX = originX + legX;
     const cornerY = originY;
@@ -108,6 +112,10 @@ export const RangeTab: React.FC = () => {
     : fallDistance <= 15
     ? 0
     : Math.max(0, fallDistance - 15);
+
+  // Lifting & Dragging Calculations (Base = 15 × STR score; Double per size above Medium)
+  const sizeMultiplier = sizeCategory === 'gargantuan' ? 8 : sizeCategory === 'huge' ? 4 : sizeCategory === 'large' ? 2 : 1;
+  const liftCapacity = Math.max(0, 15 * strScore * sizeMultiplier);
 
   const handleResetInputs = () => {
     setGroundDistance(30);
@@ -180,7 +188,7 @@ export const RangeTab: React.FC = () => {
           </div>
         </div>
 
-        {/* Scaled Right Triangle SVG Canvas (Compact 128px profile) */}
+        {/* Scaled Right Triangle SVG Canvas (Compact profile) */}
         <div className="relative w-full h-32 bg-slate-900/85 border border-slate-800/90 rounded-lg overflow-hidden flex items-center justify-center select-none shadow-inner">
           <svg
             viewBox={`0 0 ${svgData.width} ${svgData.canvasHeight}`}
@@ -196,10 +204,8 @@ export const RangeTab: React.FC = () => {
               </linearGradient>
             </defs>
 
-            {/* Grid Pattern Background */}
             <rect width="100%" height="100%" fill="url(#elevation-grid-pattern)" rx="6" />
 
-            {/* Baseline Dash */}
             <line
               x1="20"
               y1={svgData.originY}
@@ -210,7 +216,6 @@ export const RangeTab: React.FC = () => {
               strokeDasharray="2 2"
             />
 
-            {/* Shaded Triangle Fill */}
             {(groundDistance > 0 || height > 0) && (
               <polygon
                 points={`${svgData.originX},${svgData.originY} ${svgData.cornerX},${svgData.cornerY} ${svgData.targetX},${svgData.targetY}`}
@@ -219,7 +224,6 @@ export const RangeTab: React.FC = () => {
               />
             )}
 
-            {/* Right Angle Indicator */}
             {groundDistance > 0 && height > 0 && (
               <path
                 d={
@@ -266,15 +270,12 @@ export const RangeTab: React.FC = () => {
               strokeLinecap="round"
             />
 
-            {/* Origin Marker (Amber) */}
             <circle cx={svgData.originX} cy={svgData.originY} r="4.5" fill="#f59e0b" />
             <circle cx={svgData.originX} cy={svgData.originY} r="7.5" fill="none" stroke="#f59e0b" strokeOpacity="0.3" strokeWidth="1.5" />
 
-            {/* Target Marker (Cyan) */}
             <circle cx={svgData.targetX} cy={svgData.targetY} r="4.5" fill="#38bdf8" />
             <circle cx={svgData.targetX} cy={svgData.targetY} r="7.5" fill="none" stroke="#38bdf8" strokeOpacity="0.3" strokeWidth="1.5" />
 
-            {/* Hypotenuse Value on Diagonal */}
             <text
               x={svgData.midHypotenuseX - 8}
               y={
@@ -289,7 +290,6 @@ export const RangeTab: React.FC = () => {
               {hypotenuse} ft ({squares} squares)
             </text>
 
-            {/* Ground Value Label (Amber) */}
             <text
               x={(svgData.originX + svgData.cornerX) / 2}
               y={isTargetBelow ? svgData.originY - 6 : svgData.originY + 13}
@@ -299,7 +299,6 @@ export const RangeTab: React.FC = () => {
               {groundDistance} ft
             </text>
 
-            {/* Vertical Elevation Value Label (Cyan) */}
             <text
               x={svgData.cornerX + 14}
               y={(svgData.cornerY + svgData.targetY) / 2 + 3}
@@ -325,7 +324,6 @@ export const RangeTab: React.FC = () => {
               </span>
             </div>
 
-            {/* Stepper Input */}
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -358,7 +356,6 @@ export const RangeTab: React.FC = () => {
               </button>
             </div>
 
-            {/* Preset Chips */}
             <div className="grid grid-cols-4 gap-1">
               {[15, 30, 60, 120].map((val) => (
                 <button
@@ -393,7 +390,6 @@ export const RangeTab: React.FC = () => {
               </span>
             </div>
 
-            {/* Stepper Input */}
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -426,7 +422,6 @@ export const RangeTab: React.FC = () => {
               </button>
             </div>
 
-            {/* Preset Chips */}
             <div className="grid grid-cols-4 gap-1">
               {[10, 30, 60, 100].map((val) => (
                 <button
@@ -471,7 +466,6 @@ export const RangeTab: React.FC = () => {
         {isJumpOpen && (
           <div className="p-3 border-t border-slate-800/80 space-y-2.5 text-xs animate-fadeIn">
             <div className="grid grid-cols-2 gap-2.5 items-center">
-              {/* STR Modifier */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[10px] font-semibold text-slate-300">
@@ -505,7 +499,6 @@ export const RangeTab: React.FC = () => {
                 </div>
               </div>
 
-              {/* DEX Modifier */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[10px] font-semibold text-slate-300">
@@ -540,7 +533,6 @@ export const RangeTab: React.FC = () => {
               </div>
             </div>
 
-            {/* Running Start Checkbox */}
             <div>
               <label className="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition">
                 <input
@@ -556,7 +548,6 @@ export const RangeTab: React.FC = () => {
               </label>
             </div>
 
-            {/* Jump Outputs (Clean single-operator arithmetic: e.g. 5 + 3 or 5 - 1) */}
             <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
               <div
                 className={`p-2 rounded-lg border transition ${
@@ -709,6 +700,137 @@ export const RangeTab: React.FC = () => {
                   : fallDistance <= 15
                   ? 'Normal fall: ≤ 15 ft causes 0 damage (acrobatic recovery threshold).'
                   : `Normal fall: 0 damage for first 15 ft, then 1 flat damage per foot (${fallDistance} - 15 = ${flatFallDamage} HP).`}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 5. COLLAPSIBLE ASHTAPOR LIFTING & DRAGGING CALCULATOR */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm shrink-0">
+        <button
+          type="button"
+          onClick={() => setIsLiftOpen(!isLiftOpen)}
+          className="w-full px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-200 hover:text-amber-300 transition cursor-pointer bg-slate-900/95"
+        >
+          <div className="flex items-center gap-1.5">
+            <Scale className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="font-display">Ashtapor Lifting & Dragging</span>
+            <span className="text-[10px] font-mono text-indigo-400 font-semibold">
+              · {liftCapacity} lbs ({sizeCategory.toUpperCase()})
+            </span>
+          </div>
+          {isLiftOpen ? (
+            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          )}
+        </button>
+
+        {isLiftOpen && (
+          <div className="p-3 border-t border-slate-800/80 space-y-2.5 text-xs animate-fadeIn">
+            <div className="grid grid-cols-2 gap-2.5 items-center">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-semibold text-slate-300">
+                    Strength Score (STR)
+                  </label>
+                  <span className="text-[10px] font-mono text-indigo-300 font-bold">
+                    STR {strScore}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setStrScore((prev) => Math.max(1, prev - 1))}
+                    className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={strScore}
+                    onChange={(e) => setStrScore(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="flex-1 min-w-0 h-7 text-center font-mono font-bold rounded bg-slate-950 border border-slate-700 text-indigo-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setStrScore((prev) => Math.min(30, prev + 1))}
+                    className="h-7 w-7 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-semibold text-slate-300 block mb-1">
+                  Size Category
+                </span>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSizeCategory('medium')}
+                    className={`py-1 text-[9px] font-mono rounded border transition cursor-pointer ${
+                      sizeCategory === 'medium'
+                        ? 'bg-indigo-950 border-indigo-500 text-indigo-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Med / Sm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSizeCategory('large')}
+                    className={`py-1 text-[9px] font-mono rounded border transition cursor-pointer ${
+                      sizeCategory === 'large'
+                        ? 'bg-indigo-950 border-indigo-500 text-indigo-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Large (×2)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSizeCategory('huge')}
+                    className={`py-1 text-[9px] font-mono rounded border transition cursor-pointer ${
+                      sizeCategory === 'huge'
+                        ? 'bg-indigo-950 border-indigo-500 text-indigo-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Huge (×4)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSizeCategory('gargantuan')}
+                    className={`py-1 text-[9px] font-mono rounded border transition cursor-pointer ${
+                      sizeCategory === 'gargantuan'
+                        ? 'bg-indigo-950 border-indigo-500 text-indigo-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Garg (×8)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-600/50 space-y-1">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-indigo-400/90 block">
+                  Push / Drag / Lift Capacity
+                </span>
+                <div className="text-base font-mono font-bold text-indigo-200">
+                  Maximum: <span className="text-lg text-indigo-300">{liftCapacity.toLocaleString()} lbs</span>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-indigo-300/80 border-t border-indigo-800/40 pt-1">
+                Base capacity = 15 × STR score ({15 * strScore} lbs).
+                {sizeMultiplier > 1 && ` Multiplied by ×${sizeMultiplier} for ${sizeCategory.toUpperCase()} size.`}
               </div>
             </div>
           </div>
