@@ -3,36 +3,89 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   X,
   HelpCircle,
   Swords,
   Dices,
-  Pin,
-  FileText,
-  BookOpen,
   Ruler,
+  BookOpen,
+  FileText,
+  Pin,
 } from 'lucide-react';
+import { ActiveTab } from '../../App';
 
 interface ContextualHelpTooltipProps {
   isOpen: boolean;
   onClose: () => void;
-  activeAppTab?: any;
+  activeAppTab?: ActiveTab;
   isGM?: boolean;
 }
 
 export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
   isOpen,
   onClose,
+  activeAppTab = 'combat',
 }) => {
+  const contentContainerRef = useRef<HTMLDivElement>(null);
+
+  // Section references for precise internal scrolling
+  const combatRef = useRef<HTMLDivElement>(null);
+  const diceRef = useRef<HTMLDivElement>(null);
+  const tacticsRef = useRef<HTMLDivElement>(null);
+  const grimoireRef = useRef<HTMLDivElement>(null);
+  const notesRef = useRef<HTMLDivElement>(null);
+  const hudRef = useRef<HTMLDivElement>(null);
+
+  const getTargetRef = (tabKey: string) => {
+    switch (tabKey) {
+      case 'combat':
+        return combatRef;
+      case 'dice':
+        return diceRef;
+      case 'range':
+      case 'tactics':
+        return tacticsRef;
+      case 'grimoire':
+        return grimoireRef;
+      case 'notes':
+        return notesRef;
+      case 'hud':
+        return hudRef;
+      default:
+        return combatRef;
+    }
+  };
+
+  const scrollToSection = (targetRef: React.RefObject<HTMLDivElement | null>, smooth = true) => {
+    if (targetRef.current && contentContainerRef.current) {
+      const container = contentContainerRef.current;
+      const topOffset = targetRef.current.offsetTop - container.offsetTop;
+      container.scrollTo({
+        top: Math.max(0, topOffset - 6),
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+    }
+  };
+
+  // Auto-scroll to the currently active tab when the modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(() => {
+      const ref = getTargetRef(activeAppTab);
+      scrollToSection(ref, false);
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [isOpen, activeAppTab]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/75 backdrop-blur-sm animate-fadeIn">
-      <div className="relative w-full max-w-lg max-h-[88vh] flex flex-col bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden text-slate-200">
-        {/* HEADER */}
-        <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-slate-800 bg-slate-950/80 shrink-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-3 bg-black/80 backdrop-blur-sm animate-fadeIn select-none">
+      <div className="relative w-full max-w-lg max-h-[86vh] flex flex-col bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden text-slate-200">
+        {/* HEADER BAR */}
+        <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-slate-800 bg-slate-950/90 shrink-0">
           <div className="flex items-center gap-2">
             <HelpCircle className="w-4 h-4 text-amber-400" />
             <h2 className="text-xs font-bold text-slate-100 tracking-wider uppercase font-display">
@@ -49,134 +102,245 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
           </button>
         </div>
 
+        {/* 1:1 QUICK-JUMP ANCHOR STRIP */}
+        <div className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-950/70 border-b border-slate-800/80 overflow-x-auto shrink-0 scrollbar-none">
+          <button
+            type="button"
+            onClick={() => scrollToSection(combatRef)}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
+              activeAppTab === 'combat'
+                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <span>⚔️</span>
+            <span>Combat</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => scrollToSection(diceRef)}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
+              activeAppTab === 'dice'
+                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <span>🎲</span>
+            <span>Dice</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => scrollToSection(tacticsRef)}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
+              activeAppTab === 'range'
+                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <span>📐</span>
+            <span>Tactics</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => scrollToSection(grimoireRef)}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
+              activeAppTab === 'grimoire'
+                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <span>📖</span>
+            <span>Grimoire</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => scrollToSection(notesRef)}
+            className={`px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 ${
+              activeAppTab === 'notes'
+                ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700'
+            }`}
+          >
+            <span>📝</span>
+            <span>Notes</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => scrollToSection(hudRef)}
+            className="px-2 py-0.5 text-[10px] font-semibold rounded transition shrink-0 cursor-pointer flex items-center gap-1 bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700"
+          >
+            <span>📌</span>
+            <span>HUD</span>
+          </button>
+        </div>
+
         {/* CONTENT BODY */}
-        <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 text-xs text-slate-300 leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
-          {/* 1. STICKY HUD NOTE */}
-          <section className="space-y-1.5 border-b border-slate-800/80 pb-3">
-            <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-              <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-              <span>Sticky HUD Note (Cross-Tab Glance)</span>
-            </h3>
-            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
+        <div
+          ref={contentContainerRef}
+          className="flex-1 overflow-y-auto p-3.5 space-y-4 text-xs text-slate-300 leading-relaxed scrollbar-thin scrollbar-thumb-slate-800"
+        >
+          {/* 1. COMBAT WHITEBOARD (TAB 1) */}
+          <section ref={combatRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
+                <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span>1. Combat Whiteboard</span>
+              </h3>
+            </div>
+            <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
+              Initiative Roster · Drag Reorder (⠿) · Defeated (💀) skips active turn
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card or reader view to lock that note into a slim 22px bar visible across Combat, Dice, Range, Grimoire, and Notes.
+                <strong>Turn Management (GM):</strong> Step through combat turns with <strong>Next</strong> / <strong>Prev</strong>, sort by score (<strong>⇅</strong>), or drag cards (⠿) to manually order combatants[cite: 2].
               </li>
               <li>
-                <strong>Interactive Glance Drawer:</strong> Click the bar to expand your note. You can check off tasks (<code>- [ ]</code>) directly inside the drawer while running combat or rolling dice.
+                <strong>Adding Combatants (GM):</strong> Click <strong>+</strong> in the header to enter initiative, name, and role/color tag[cite: 2].
               </li>
               <li>
-                <strong>Live Inline Editing:</strong> Click the <strong>Pencil (✏️)</strong> icon on the HUD bar to edit note text in place without switching back to the Notes tab. Changes sync automatically to your vaults.
+                <strong>Player Permissions:</strong> Players can edit character names, type personal notes (AC/slots), and toggle status conditions, but cannot delete cards or re-sort the roster[cite: 2].
               </li>
               <li>
-                <strong>Private & Client-Side:</strong> HUD pins exist only on your screen and take up 0 room metadata.
-              </li>
-            </ul>
-          </section>
-
-          {/* 2. COMBAT WHITEBOARD */}
-          <section className="space-y-1.5 border-b border-slate-800/80 pb-3">
-            <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-              <Swords className="w-3.5 h-3.5 text-rose-400" />
-              <span>Combat Whiteboard</span>
-            </h3>
-            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
-              <li>
-                <strong>Turn Management (GM):</strong> Step through initiative with <strong>Next</strong> / <strong>Prev</strong>, sort by score (<strong>⇅</strong>), or drag cards (⠿) to manually order combatants.
-              </li>
-              <li>
-                <strong>Adding Combatants (GM):</strong> Click <strong>+</strong> in the header to enter an initiative roll, name, and color tag.
-              </li>
-              <li>
-                <strong>Player Permissions:</strong> Players can edit character names, type notes (e.g., AC or spell slots), and toggle conditions, but cannot delete or re-sort the roster.
-              </li>
-              <li>
-                <strong>Conditions & Downed (💀):</strong> Click <strong>+ Tag</strong> to apply status effects. Marking a combatant defeated (💀) automatically skips them in turn order.
+                <strong>Defeated Skip:</strong> Marking a combatant defeated (💀) dims their card and automatically bypasses them during initiative stepping[cite: 2].
               </li>
             </ul>
           </section>
 
-          {/* 3. DICE CHAMBER & CALCULATOR */}
-          <section className="space-y-1.5 border-b border-slate-800/80 pb-3">
+          {/* 2. DICE CHAMBER & STAGING (TAB 2) */}
+          <section ref={diceRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-              <Dices className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Dice Chamber & Staging</span>
+              <Dices className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>2. Dice Chamber & Staging</span>
             </h3>
-            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
+            <div className="font-mono text-[10px] text-cyan-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
+              🎲 Roll Sum (Pooled total) · 📊 Roll Indiv (Separate d20 checks) · Scratchpad Dock
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand number (damage rolls, pooled skill checks, or healing).
+                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand result for damage rolls, pooled checks, or healing[cite: 2].
               </li>
               <li>
-                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each die (multi-attacks or mob attacks).
+                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each individual die for multi-attacks and mob checks[cite: 2].
               </li>
               <li>
-                <strong>Calculator Dock:</strong> Click the calculator icon to run quick math and paste the output straight into your roll formula.
+                <strong>Calculator Dock:</strong> Click the calculator icon to run quick arithmetic and insert the output directly into your staging tray[cite: 2].
               </li>
             </ul>
           </section>
 
-          {/* 4. NOTES & SANDBOX PREP */}
-          <section className="space-y-1.5 border-b border-slate-800/80 pb-3">
+          {/* 3. TACTICS (TAB 3) */}
+          <section ref={tacticsRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-              <FileText className="w-3.5 h-3.5 text-amber-400" />
-              <span>Notes, Handouts & Broadcasts</span>
+              <Ruler className="w-3.5 h-3.5 text-lime-400 shrink-0" />
+              <span>3. Tactics (3D Range, Jump, Fall & Lift)</span>
             </h3>
-            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
+            <div className="font-mono text-[10px] text-lime-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
+              3D: √(H² + V²) · Jump: 5/10 + Mod · Fall: 0 ≤ 15ft, then 1/ft · Lift: 15 × STR × Size
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
+              <li>
+                <strong>3D Range:</strong> Enter Horizontal distance and Vertical elevation (+ Above / - Below) to solve true diagonal distance and view instant 5e reach guidance (e.g., <em>Reachable with 60 ft range</em>).
+              </li>
+              <li>
+                <strong>Jump Calculator:</strong> Enter STR/DEX modifiers to view both Standing (5 ft + Mod) and Running (10 ft + Mod) distances side-by-side with zero checks required.
+              </li>
+              <li>
+                <strong>Fall Damage:</strong> Enter fall distance to inspect both Normal falls (0 damage up to 15 ft, then 1 flat HP/ft) and Incapacitated falls (1 flat HP/ft from 0 ft).
+              </li>
+              <li>
+                <strong>Lifting & Dragging:</strong> Enter STR score and size category (Med to Gargantuan) for maximum push, drag, and lift capacity ($15 \times \text{STR} \times \text{Size Multiplier}$).
+              </li>
+            </ul>
+          </section>
+
+          {/* 4. GRIMOIRE (TAB 4) */}
+          <section ref={grimoireRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+            <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
+              <BookOpen className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span>4. Grimoire (Homebrew Rules)</span>
+            </h3>
+            <div className="font-mono text-[10px] text-indigo-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
+              Potions (Bonus) · Flanking (+1/+2/+3) · Massive (&gt;50% = Unstable) · Currency (1:25:100)
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
+              <li>
+                <strong>Quick Lookup:</strong> Instant cards for Potions, Flanking, Massive Damage, Long Rest limits, and Universal Currency[cite: 2].
+              </li>
+              <li>
+                <strong>Instant Search:</strong> Filter rules by keyword or click category pills (<em>Combat, Movement, Rest, World</em>)[cite: 2].
+              </li>
+              <li>
+                <strong>Copy to Table:</strong> Click the copy icon on any rule card to copy the exact text to your clipboard[cite: 2].
+              </li>
+            </ul>
+          </section>
+
+          {/* 5. NOTES & SANDBOX PREP (TAB 5) */}
+          <section ref={notesRef} className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
+            <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
+              <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>5. Notes, Handouts & Broadcasts</span>
+            </h3>
+            <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
+              3 Vaults (Personal, Table, GM) · 5 Handout Themes · Markdown # ## ### · Clickable - [ ]
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
                 <strong>3 Vaults:</strong>
                 <div className="pl-2 space-y-0.5 mt-0.5 text-slate-400">
-                  <div>• <strong className="text-slate-200">My Notes:</strong> Private local scratchpad stored on your device.</div>
-                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players.</div>
-                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all player screens in real time.</div>
+                  <div>• <strong className="text-slate-200">My Notes:</strong> Private scratchpad stored locally on your device[cite: 2].</div>
+                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players[cite: 2].</div>
+                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all screens in real time[cite: 2].</div>
                 </div>
               </li>
               <li>
-                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>.
+                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>[cite: 2].
               </li>
               <li>
-                <strong>1-Click Prep Templates:</strong> When creating a note, choose <em>"📋 Insert Template..."</em> to instantly scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards.
+                <strong>1-Click Prep Templates:</strong> Choose <em>"📋 Insert Template..."</em> to scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards[cite: 2].
               </li>
               <li>
-                <strong>Collapsible Markdown:</strong> Use <code>#</code> (H1), <code>##</code> (H2), and <code>###</code> (H3) to create collapsible headers. Use <code>- [ ]</code> to create clickable checkboxes.
+                <strong>Interactive Markdown:</strong> Headers (<code>#</code>, <code>##</code>, <code>###</code>) are collapsible; checkboxes (<code>- [ ]</code>) are interactive and clickable directly in reader views[cite: 2].
               </li>
               <li>
-                <strong>Vault Transfer:</strong> Use the <strong>Transfer</strong> button on any card to move or copy notes between My Notes, Table Notes, and GM Notes.
+                <strong>Vault Transfer:</strong> Use <strong>Transfer</strong> to move or copy notes between My Notes, Table Notes, and GM Notes[cite: 2].
               </li>
             </ul>
           </section>
 
-          {/* 5. GRIMOIRE */}
-          <section className="space-y-1.5 border-b border-slate-800/80 pb-3">
+          {/* 6. STICKY HUD NOTE (CROSS-TAB UTILITY) */}
+          <section ref={hudRef} className="space-y-1.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-              <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Grimoire (Homebrew Rules)</span>
+              <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
+              <span>6. Sticky HUD Note (Cross-Tab Glance)</span>
             </h3>
-            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
+            <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
+              Cross-Tab Pin · Interactive Checkboxes · Live Inline Edit (✏️) · 0 Metadata
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Quick Lookup:</strong> Instant, zero-fluff reference cards for Potions, Flanking, Massive Damage, Rest limits, and Universal Currency.
+                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card to lock it into a slim drawer visible across Combat, Dice, Tactics, Grimoire, and Notes[cite: 2].
               </li>
               <li>
-                <strong>Instant Search:</strong> Filter rules by keyword or click the category pills (<em>Combat, Movement, Rest, World</em>).
+                <strong>Interactive Drawer:</strong> Click the bar to expand your pinned note. Tasks (<code>- [ ]</code>) can be checked off directly inside the drawer without leaving combat[cite: 2].
               </li>
               <li>
-                <strong>Copy to Table:</strong> Click the copy icon on any rule card to copy the exact text to your clipboard.
+                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit note text directly in place; edits sync automatically to your underlying vault[cite: 2].
+              </li>
+              <li>
+                <strong>Private & Local:</strong> Pinned notes live strictly on your client screen and consume 0 room metadata[cite: 2].
               </li>
             </ul>
-          </section>
-
-          {/* 6. 3D RANGE */}
-          <section className="space-y-1.5">
-            <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
-              <Ruler className="w-3.5 h-3.5 text-emerald-400" />
-              <span>3D Range Calculator</span>
-            </h3>
-            <p className="text-[11px] text-slate-300 pl-4">
-              Enter ground distance and elevation difference to calculate true Pythagorean distance for aerial combat, ranged attacks, and vertical spell ranges.
-            </p>
           </section>
         </div>
 
         {/* FOOTER */}
-        <div className="px-3.5 py-2 border-t border-slate-800 bg-slate-950/60 flex justify-end shrink-0">
+        <div className="px-3.5 py-2 border-t border-slate-800 bg-slate-950/70 flex justify-end shrink-0">
           <button
             type="button"
             onClick={onClose}
