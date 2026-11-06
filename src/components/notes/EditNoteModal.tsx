@@ -29,53 +29,51 @@ import { applyMarkdownSyntax } from '../../utils/markdownRenderer';
 
 export const SANDBOX_PREP_TEMPLATES: Record<string, string> = {
   General: `### Review consequences of previous actions
-- [ ] Consequence 1
-- [ ] Consequence 2
+- [ ] 
+- [ ] 
 ---
 ### Timeline events / messages
-- [ ] Event 1
-- [ ] Event 2
-- [ ] Message 1
-- [ ] Message 2
+- [ ] 
+- [ ] 
 ---
 ### Potential encounters / scenes
-- [ ] Scene 1
-- [ ] Scene 2
+- [ ] 
+- [ ] 
 ---
 ### End-of-session
 - [ ] Recap
 - [ ] What's next`,
 
-  NPC: `# [NPC Name]
-- **Role/Faction:** [Relationship / Affiliation]
-- **Nature:** [Friendly / Neutral / Hostile]
-- **Immediate Want:** [Goal]
-- **What They Know:** [Key information or lead]
-- **Leverage / DC:** [Persuasion DC 14 / Intimidation DC 16 / Bribe]
-- **Mannerism / Tell:** [Voice, phrase, or physical quirk]`,
+  NPC: `# <NPC Name>
+- **Role/Faction:** 
+- **Nature:** Friendly / Neutral / Hostile
+- **Immediate Want:** 
+- **What They Know:** 
+- **Leverage / DC:** 
+- **Mannerism / Tell:** `,
 
-  Location: `# [Region Name]
-[environment description]
-- **Key Features:** [Notable landmark, door, altar, or hazard]
-- **Search DC:** [Any Skill checks]
-- **Hidden items / Lore:** [List]`,
+  Location: `# <Region / Location Name>
+- **Environment:** 
+- **Key Features:** 
+- **Search DC:** 
+- **Hidden Items / Lore:** `,
 
-  Loot: `# Loot: [Source Name]
-- **Coin / Valuables:** [Units or gemstones]
-- **Items / Potions:** [Consumables or gear]
-- **Special / Magic Item:** [Item name, attunement, 1-line mechanic]`,
+  Loot: `# Loot: <Source / Cache>
+- **Coin / Valuables:** 
+- **Items / Potions:** 
+- **Special / Magic Item:** `,
 
-  Encounters: `# Encounter: [Name / Threat Level]
-- **Type / Vibe:** [Combat / Trap / Social / Vision]
-- **Opening / Trigger:** [What starts it or what players see]
-- **Tactics / Mechanics:** [Target priority, DC 14 check, hazard]
-- **Recycle Hook:** [Where else this can take place if bypassed]`,
+  Encounters: `# Encounter: <Name / Threat Level>
+- **Type / Vibe:** Combat / Trap / Social / Vision
+- **Opening / Trigger:** 
+- **Tactics / Mechanics:** 
+- **Recycle Hook:** `,
 
-  Leads: `# Lead: [Title / Inscription]
-"[Exact rumor, inscription text, or letter content]"
-- **Source:** [Who tells them or where it is found]
-- **Check / Verify:** [What a check reveals]
-- **Points To:** [Target NPC, faction, or location]`,
+  Leads: `# Lead: <Title / Inscription>
+- **Content / Rumor:** 
+- **Source:** 
+- **Check / Verify:** 
+- **Points To:** `,
 };
 
 export interface EditNoteModalProps {
@@ -167,15 +165,66 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
     if (!selected || !SANDBOX_PREP_TEMPLATES[selected]) return;
 
     const template = SANDBOX_PREP_TEMPLATES[selected];
+    const newContent = !content.trim()
+      ? template
+      : `${content.trim()}\n\n---\n\n${template}`;
 
-    if (!content.trim()) {
-      setContent(template);
-    } else {
-      setContent((prev) => `${prev.trim()}\n\n---\n\n${template}`);
-    }
-
+    setContent(newContent);
     setCategory(normalizeCategory(selected));
     e.target.value = '';
+
+    // Auto-focus and highlight first <...> token
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      const match = /<[^>\n]+>/.exec(newContent);
+      if (match) {
+        textarea.setSelectionRange(match.index, match.index + match[0].length);
+      }
+    }, 50);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab') {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      const text = textarea.value;
+      const cursorPos = textarea.selectionEnd;
+
+      // Find next <...> token after cursor; wrap to top if at end
+      const tokenRegex = /<[^>\n]+>/g;
+      tokenRegex.lastIndex = cursorPos;
+      let match = tokenRegex.exec(text);
+
+      if (!match) {
+        tokenRegex.lastIndex = 0;
+        match = tokenRegex.exec(text);
+      }
+
+      if (match) {
+        e.preventDefault();
+        textarea.focus();
+        textarea.setSelectionRange(match.index, match.index + match[0].length);
+      }
+    }
+  };
+
+  const handleDoubleClick = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const text = textarea.value;
+    const pos = textarea.selectionStart;
+
+    const start = text.lastIndexOf('<', pos);
+    const end = text.indexOf('>', pos);
+
+    if (start !== -1 && end !== -1 && start < end && !text.slice(start, end).includes('\n')) {
+      textarea.focus();
+      textarea.setSelectionRange(start, end + 1);
+    }
   };
 
   const wordCount = content.trim() ? content.trim().split(/\s+/).filter(Boolean).length : 0;
@@ -368,6 +417,8 @@ export const EditNoteModal: React.FC<EditNoteModalProps> = ({
               }
               value={content}
               onChange={(e) => setContent(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onDoubleClick={handleDoubleClick}
               required
             />
           </div>
