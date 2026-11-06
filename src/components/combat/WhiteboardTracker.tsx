@@ -737,7 +737,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-950 text-slate-100 select-text">
       {/* 1. TOP HEADER CASSETTE BAR */}
-      <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-slate-800 bg-slate-900/95 shrink-0 min-h-[38px]">
+      <div className="relative z-20 flex items-center justify-between px-2.5 py-1.5 border-b border-slate-800 bg-slate-900/95 shrink-0 min-h-[38px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded shrink-0">
             R{board.round}
@@ -751,7 +751,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
           {isGM && (
             <>
               {/* Snapshot Preset Menu */}
-              <div className="relative" ref={snapshotMenuRef}>
+              <div ref={snapshotMenuRef}>
                 <button
                   type="button"
                   onClick={() => setIsSnapshotMenuOpen(!isSnapshotMenuOpen)}
@@ -762,8 +762,12 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
                   }`}
                 >
-                  <Bookmark className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden xs:inline text-[11px]">Saved</span>
+                  <Bookmark
+                    className={`w-3.5 h-3.5 ${
+                      isSnapshotMenuOpen ? 'text-slate-950' : 'text-amber-400'
+                    }`}
+                  />
+                  <span className="text-[11px]">Saved</span>
                   {snapshots.length > 0 && (
                     <span className="text-[10px] font-mono px-1 rounded-full bg-slate-950 border border-slate-700 text-amber-300">
                       {snapshots.length}
@@ -772,7 +776,7 @@ export const WhiteboardTracker: React.FC<WhiteboardTrackerProps> = ({ isGM = fal
                 </button>
 
                 {isSnapshotMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 z-50 w-72 max-h-[380px] flex flex-col bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2.5 text-xs animate-fadeIn">
+                  <div className="absolute right-2 top-full mt-1.5 z-50 w-72 max-w-[calc(100%-16px)] max-h-[380px] flex flex-col bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2.5 text-xs animate-fadeIn">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
                       <div className="flex items-center gap-1.5">
                         <Bookmark className="w-3.5 h-3.5 text-amber-400" />
