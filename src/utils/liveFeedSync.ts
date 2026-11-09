@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import OBR from '@owlbear-rodeo/sdk';
 import {
   DiceRollResult,
@@ -56,6 +61,8 @@ export interface UnifiedFeedItem {
 }
 
 export const FEED_EVENT_KEY = 'ashtapor/feed_event';
+export const FEED_BUFFER_KEY = 'ashtapor/recent_feed';
+const MAX_BUFFER_ITEMS = 12;
 
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
 
@@ -92,6 +99,7 @@ class LiveFeedSyncManager {
   private currentName = 'Adventurer';
   private currentRoleIsGm = false;
   private currentId = '';
+  private commitQueue: Promise<void> = Promise.resolve();
 
   constructor() {
     this.init();
@@ -144,26 +152,45 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // Listen for live room events (supports both clean object structure and legacy string fallback)
-        OBR.room.onMetadataChange((metadata) => {
-          const feedPayload = metadata[FEED_EVENT_KEY] as any;
-          if (!feedPayload) return;
+        // 1. Rehydrate initial history from the room metadata ring buffer
+        OBR.room.getMetadata().then((metadata) => {
+          if (!metadata) return;
+          const buffer = metadata[FEED_BUFFER_KEY];
+          if (Array.isArray(buffer)) {
+            this.handleIncomingItems(buffer);
+          }
+        }).catch(() => {});
 
-          let incomingItem: UnifiedFeedItem | undefined;
-          if (typeof feedPayload.raw === 'string') {
-            try {
-              incomingItem = JSON.parse(feedPayload.raw);
-            } catch (err) {
-              console.warn('Could not parse legacy feed event JSON:', err);
-            }
-          } else if (feedPayload.item) {
-            incomingItem = feedPayload.item;
-          } else if (feedPayload.id && feedPayload.type) {
-            incomingItem = feedPayload as UnifiedFeedItem;
+        // 2. Listen for metadata updates from any player in the room
+        OBR.room.onMetadataChange((metadata) => {
+          if (!metadata) return;
+
+          // Priority A: Process recent ring buffer
+          const buffer = metadata[FEED_BUFFER_KEY];
+          if (Array.isArray(buffer)) {
+            this.handleIncomingItems(buffer);
+            return;
           }
 
-          if (incomingItem && incomingItem.id) {
-            this.handleIncomingItem(incomingItem);
+          // Priority B: Legacy single-item fallback
+          const feedPayload = metadata[FEED_EVENT_KEY] as any;
+          if (feedPayload) {
+            let incomingItem: UnifiedFeedItem | undefined;
+            if (typeof feedPayload.raw === 'string') {
+              try {
+                incomingItem = JSON.parse(feedPayload.raw);
+              } catch (err) {
+                console.warn('Could not parse legacy feed event JSON:', err);
+              }
+            } else if (feedPayload.item) {
+              incomingItem = feedPayload.item;
+            } else if (feedPayload.id && feedPayload.type) {
+              incomingItem = feedPayload as UnifiedFeedItem;
+            }
+
+            if (incomingItem && incomingItem.id) {
+              this.handleIncomingItems([incomingItem]);
+            }
           }
         });
       });
@@ -206,23 +233,33 @@ class LiveFeedSyncManager {
     return this.currentRoleIsGm;
   }
 
-  private handleIncomingItem(item: UnifiedFeedItem) {
-    if (this.items.some((it) => it.id === item.id)) return;
+  private handleIncomingItems(incoming: UnifiedFeedItem[]) {
+    let addedAny = false;
 
-    const visibility = item.rollDetails?.visibility || (item.isSecretRoll ? 'gm_only' : 'public');
-    const rollerId = item.rollerId || item.rollDetails?.rollerId;
-    const isRoller = (rollerId && rollerId === this.getPlayerId()) || item.sender === this.currentName;
+    for (const item of incoming) {
+      if (!item || !item.id) continue;
+      if (this.items.some((it) => it.id === item.id)) continue;
 
-    if (visibility === 'self' && !isRoller) {
-      return;
+      const visibility = item.rollDetails?.visibility || (item.isSecretRoll ? 'gm_only' : 'public');
+      const rollerId = item.rollerId || item.rollDetails?.rollerId;
+      const isRoller = (rollerId && rollerId === this.getPlayerId()) || item.sender === this.currentName;
+
+      if (visibility === 'self' && !isRoller) {
+        continue;
+      }
+
+      this.items.push(item);
+      addedAny = true;
     }
 
-    this.items.push(item);
-    if (this.items.length > 100) {
-      this.items = this.items.slice(this.items.length - 100);
+    if (addedAny) {
+      this.items.sort((a, b) => a.timestamp - b.timestamp);
+      if (this.items.length > 100) {
+        this.items = this.items.slice(this.items.length - 100);
+      }
+      this.persistFeed();
+      this.notifyListeners();
     }
-    this.persistFeed();
-    this.notifyListeners(item);
   }
 
   private persistFeed() {
@@ -255,22 +292,44 @@ class LiveFeedSyncManager {
     this.items = [];
     this.persistFeed();
     this.notifyListeners();
+
+    if (this.currentRoleIsGm && typeof OBR !== 'undefined' && OBR.isReady) {
+      try {
+        await OBR.room.setMetadata({
+          [FEED_BUFFER_KEY]: [],
+          [FEED_EVENT_KEY]: undefined,
+        });
+      } catch (e) {
+        console.warn('Could not clear room feed buffer:', e);
+      }
+    }
   }
 
   private async broadcastFeedItem(item: UnifiedFeedItem) {
-    try {
-      if (typeof OBR !== 'undefined' && OBR.isReady) {
-        const sanitizedItem = sanitizeMetadataPayload(item);
-        await OBR.room.setMetadata({
-          [FEED_EVENT_KEY]: {
-            item: sanitizedItem,
-            timestamp: Date.now(),
-          },
-        });
+    this.commitQueue = this.commitQueue.then(async () => {
+      try {
+        if (typeof OBR !== 'undefined' && OBR.isReady) {
+          const meta = await OBR.room.getMetadata();
+          const existingBuffer: UnifiedFeedItem[] = Array.isArray(meta[FEED_BUFFER_KEY])
+            ? meta[FEED_BUFFER_KEY]
+            : [];
+
+          const deduped = existingBuffer.filter((it) => it.id !== item.id);
+          const sanitizedItem = sanitizeMetadataPayload(item);
+          const nextBuffer = [...deduped, sanitizedItem].slice(-MAX_BUFFER_ITEMS);
+
+          await OBR.room.setMetadata({
+            [FEED_BUFFER_KEY]: nextBuffer,
+            [FEED_EVENT_KEY]: {
+              item: sanitizedItem,
+              timestamp: Date.now(),
+            },
+          });
+        }
+      } catch (e) {
+        console.warn('Could not broadcast feed buffer to OBR room:', e);
       }
-    } catch (e) {
-      console.warn('Could not broadcast feed item to OBR room:', e);
-    }
+    });
   }
 
   public recordDiceRoll(roll: DiceRollResult, broadcast: boolean = true) {
