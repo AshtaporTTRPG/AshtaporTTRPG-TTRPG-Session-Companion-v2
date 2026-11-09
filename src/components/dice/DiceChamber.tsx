@@ -70,7 +70,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
   const [modifier, setModifier] = useState<number>(0);
   const [visibility, setVisibility] = useState<RollVisibility>('public');
 
-  // Permanently Docked Calculator State (defaults to compact 'docked' mini-bar)
+  // Docked Calculator State
   const [calcMode, setCalcMode] = useState<CalcViewMode>('docked');
 
   // Custom Macros & Queue State
@@ -259,7 +259,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  // Evaluates a single macro returning formatted output and metadata
   const evaluateMacro = (macro: CustomMacro) => {
     let activeAdvMode: 'normal' | 'advantage' | 'disadvantage' = 'normal';
     const rawMode = (macro as any).rollMode || macro.advantageMode;
@@ -388,7 +387,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  // Queue Handling Functions
   const handleStageMacro = (macro: CustomMacro, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -515,7 +513,140 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
 
   return (
     <div className="flex flex-col h-full overflow-y-auto min-h-0 pr-1 select-text scrollbar-thin scrollbar-thumb-slate-800 bg-[#0b0f17] p-2 gap-2 text-slate-100">
-      {/* 1. QUICK D20 ACTIONS + VISIBILITY SELECTOR */}
+      
+      {/* 1. TOP FORMULA INPUT BAR (Full Width 440px) */}
+      <div className="relative flex items-center h-9 w-full shrink-0">
+        <input
+          type="text"
+          value={formulaInput}
+          onChange={(e) => handleFormulaInputChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleExecuteRoll('sum');
+              triggerRollFlash('sum');
+            }
+          }}
+          placeholder="e.g. 1d20+5, 5d20+1d4+15, 8d6"
+          className="w-full h-9 px-3 pr-8 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition placeholder:text-slate-600 shadow-inner"
+        />
+        {formulaInput && (
+          <button
+            type="button"
+            onClick={handleClearFormula}
+            className="absolute right-2 p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
+            title="Clear formula expression & modifier"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {/* 2. DEDICATED ACTION CARDS (Stacked Two-Button Grid) */}
+      <div className="grid grid-cols-2 gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => {
+            handleExecuteRoll('individual');
+            triggerRollFlash('indiv');
+          }}
+          className={`h-11 px-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-md border border-indigo-400/30 active:scale-[0.98] transition flex flex-col items-center justify-center cursor-pointer select-none ${
+            rollFlash === 'indiv' ? 'ring-2 ring-white brightness-125' : ''
+          }`}
+          title="Roll separate checks: each d20 check evaluated individually against AC or DC"
+        >
+          <span className="text-[11px] font-black uppercase tracking-wide leading-none">
+            ⚔️ ATTACKS / CHECKS
+          </span>
+          <span className="text-[9px] font-semibold opacity-85 mt-0.5 tracking-tight leading-none">
+            & SAVING THROWS
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            handleExecuteRoll('sum');
+            triggerRollFlash('sum');
+          }}
+          className={`h-11 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg shadow-md active:scale-[0.98] transition flex flex-col items-center justify-center cursor-pointer select-none ${
+            rollFlash === 'sum' ? 'ring-2 ring-white brightness-125' : ''
+          }`}
+          title="Roll sum: all dice and flat modifiers pooled into one grand total"
+        >
+          <span className="text-[11px] font-black uppercase tracking-wide leading-none">
+            💥 HEALING / DAMAGE
+          </span>
+          <span className="text-[9px] font-black opacity-90 mt-0.5 tracking-tight leading-none">
+            & SKILLS CHALLENGE
+          </span>
+        </button>
+      </div>
+
+      {/* 3. DIE SELECTION STRIP (d4 to d100) + ADVANTAGE TOGGLES */}
+      <div className="flex items-center justify-between gap-1 h-7 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
+          {INTERACTIVE_DICE.map((die) => {
+            const isD20 = die === 'd20';
+            return (
+              <button
+                key={die}
+                type="button"
+                onClick={() => handleDieButtonClick(die)}
+                className={`h-7 px-2 text-xs rounded transition-colors shrink-0 flex items-center justify-center cursor-pointer ${
+                  isD20
+                    ? 'font-bold bg-amber-950/30 text-amber-400 border border-amber-500/60 hover:bg-amber-900/40'
+                    : 'font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                }`}
+                title={`Add ${die} to formula`}
+              >
+                {die}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 shrink-0 h-7">
+          <button
+            type="button"
+            onClick={() => setAdvantageMode('advantage')}
+            className={`px-2 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+              advantageMode === 'advantage'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Advantage: Roll 2d20, keep highest"
+          >
+            Adv
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdvantageMode('normal')}
+            className={`px-2 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+              advantageMode === 'normal'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Straight roll"
+          >
+            Straight
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdvantageMode('disadvantage')}
+            className={`px-2 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
+              advantageMode === 'disadvantage'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Disadvantage: Roll 2d20, keep lowest"
+          >
+            Dis
+          </button>
+        </div>
+      </div>
+
+      {/* 4. QUICK D20 SHORTCUTS + VISIBILITY SELECTOR STRIP */}
       <div className="flex items-center justify-between gap-1.5 shrink-0 px-0.5">
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-[10px] font-black uppercase tracking-wider text-amber-500/80 mr-1 shrink-0 select-none">
@@ -561,7 +692,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
             }`}
             title="Public: Visible to all players & GM"
           >
-            Public
+            👁️ Public
           </button>
           <button
             type="button"
@@ -573,7 +704,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
             }`}
             title="GM Only: Hidden from other players"
           >
-            GM
+            🛡️ GM
           </button>
           <button
             type="button"
@@ -585,137 +716,12 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
             }`}
             title="Self: Visible only to you"
           >
-            Self
+            🔒 Self
           </button>
         </div>
       </div>
 
-      {/* 2. FORMULA BAR & CONTROLS (Calculator icon removed to maximize formula space) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
-        <div className="relative flex items-center h-9 w-full gap-1.5">
-          <div className="relative flex-1 h-full flex items-center min-w-0">
-            <input
-              type="text"
-              value={formulaInput}
-              onChange={(e) => handleFormulaInputChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleExecuteRoll('sum');
-                  triggerRollFlash('sum');
-                }
-              }}
-              placeholder="e.g. 1d20+5, 5d20+1d4+15, 8d6"
-              className="w-full h-9 px-2.5 pr-7 text-xs font-mono font-bold rounded-lg bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 transition placeholder:text-slate-600"
-            />
-            {formulaInput && (
-              <button
-                type="button"
-                onClick={handleClearFormula}
-                className="absolute right-1.5 p-1 text-slate-400 hover:text-amber-300 rounded transition cursor-pointer"
-                title="Clear expression & modifier"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                handleExecuteRoll('sum');
-                triggerRollFlash('sum');
-              }}
-              className={`h-9 px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2 rounded-lg shadow-md active:scale-95 transition-transform flex items-center gap-1 cursor-pointer font-sans tracking-wide uppercase ${
-                rollFlash === 'sum' ? 'ring-2 ring-white brightness-125 scale-95' : ''
-              }`}
-              title="Roll sum: Evaluates all dice once and sums grand total"
-            >
-              <span>🎲</span>
-              <span>ROLL SUM</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                handleExecuteRoll('individual');
-                triggerRollFlash('indiv');
-              }}
-              className={`h-9 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg shadow-md border border-indigo-500/30 active:scale-95 transition-transform flex items-center gap-1 cursor-pointer font-sans tracking-wide uppercase ${
-                rollFlash === 'indiv' ? 'ring-2 ring-white brightness-125 scale-95' : ''
-              }`}
-              title="Roll individual: Attacks & checks (flat modifier applied to each d20 roll individually)"
-            >
-              <span>📊</span>
-              <span>ROLL INDIV</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-1 h-6.5">
-          <div className="flex items-center gap-1 shrink-0">
-            {INTERACTIVE_DICE.map((die) => {
-              const isD20 = die === 'd20';
-              return (
-                <button
-                  key={die}
-                  type="button"
-                  onClick={() => handleDieButtonClick(die)}
-                  className={`h-6 px-1.5 text-xs rounded transition-colors shrink-0 flex items-center justify-center cursor-pointer ${
-                    isD20
-                      ? 'font-bold bg-amber-950/25 text-amber-400 border border-amber-500/60 hover:bg-amber-900/30'
-                      : 'font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
-                  }`}
-                  title={`Add ${die} to formula`}
-                >
-                  {die}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setAdvantageMode('advantage')}
-              className={`px-1.5 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
-                advantageMode === 'advantage'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Advantage: Roll 2d20, keep highest"
-            >
-              Adv
-            </button>
-            <button
-              type="button"
-              onClick={() => setAdvantageMode('normal')}
-              className={`px-1.5 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
-                advantageMode === 'normal'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Straight roll"
-            >
-              Straight
-            </button>
-            <button
-              type="button"
-              onClick={() => setAdvantageMode('disadvantage')}
-              className={`px-1.5 py-0.5 text-[11px] font-semibold rounded transition-colors shrink-0 cursor-pointer ${
-                advantageMode === 'disadvantage'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Disadvantage: Roll 2d20, keep lowest"
-            >
-              Dis
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. PERMANENTLY DOCKED MINI-CALCULATOR */}
+      {/* 5. DOCKED CALCULATOR */}
       <CalculatorDock
         viewMode={calcMode === 'closed' ? 'docked' : calcMode}
         onChangeViewMode={(mode) => setCalcMode(mode)}
@@ -723,7 +729,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         onApply={handleApplyFromCalculator}
       />
 
-      {/* 4. CUSTOM MACROS DRAWER & QUEUE TRAY */}
+      {/* 6. CUSTOM MACROS DRAWER & QUEUE TRAY */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
         <div className="flex items-center justify-between">
           <button
@@ -919,7 +925,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         )}
       </div>
 
-      {/* 5. ROLL FEED (Immutable Audit Log) */}
+      {/* 7. ROLL FEED (Audit Log) */}
       <div className="flex-1 min-h-[220px] rounded-xl border border-slate-800/90 bg-slate-950/60 p-2 flex flex-col gap-2">
         <div className="flex items-center justify-between pb-1 border-b border-slate-800/80 shrink-0">
           <div className="flex items-center gap-1.5">
@@ -998,7 +1004,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         </div>
       </div>
 
-      {/* 6. MODALS: ADD / EDIT MACRO */}
+      {/* 8. MODALS: ADD / EDIT MACRO */}
       <AddCustomMacroModal
         isOpen={isAddMacroOpen && !editingMacro}
         onClose={() => setIsAddMacroOpen(false)}
