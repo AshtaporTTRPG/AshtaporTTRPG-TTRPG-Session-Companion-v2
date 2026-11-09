@@ -62,13 +62,28 @@ export interface UnifiedFeedItem {
 
 export const FEED_EVENT_KEY = 'ashtapor/feed_event';
 export const FEED_BUFFER_KEY = 'ashtapor/recent_feed';
-const MAX_BUFFER_ITEMS = 12;
+const MAX_BUFFER_BYTES = 3000;
 
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
 
 function formatFormula(count: number, die: string, mod: number): string {
   const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '';
   return `${count}${die}${modStr}`;
+}
+
+/**
+ * Calculates exact UTF-8 byte length of any JSON-serializable object.
+ */
+function getByteLength(val: any): number {
+  try {
+    const str = typeof val === 'string' ? val : JSON.stringify(val);
+    if (typeof TextEncoder !== 'undefined') {
+      return new TextEncoder().encode(str).length;
+    }
+    return encodeURI(str).split(/%..|./).length - 1;
+  } catch {
+    return 3000;
+  }
 }
 
 /**
@@ -90,6 +105,76 @@ function sanitizeMetadataPayload<T>(obj: T): T {
     return cleaned as T;
   }
   return obj;
+}
+
+/**
+ * Compresses roll objects before broadcasting to ensure minimum byte footprint.
+ */
+function slimFeedItemForBroadcast(item: UnifiedFeedItem): UnifiedFeedItem {
+  const sanitized = sanitizeMetadataPayload(item);
+  if (!sanitized || !sanitized.rollDetails) return sanitized;
+
+  const rd = sanitized.rollDetails;
+  const slimRollDetails: any = {
+    id: rd.id,
+    rollerName: rd.rollerName,
+    rollerId: rd.rollerId,
+    visibility: rd.visibility,
+    formula: rd.formula,
+    total: rd.total,
+    timestamp: rd.timestamp,
+    diceType: rd.diceType,
+    count: rd.count,
+    modifier: rd.modifier,
+    advantageMode: rd.advantageMode,
+    isCrit: rd.isCrit,
+    isFumble: rd.isFumble,
+    label: rd.label,
+    displayMode: rd.displayMode,
+    macroName: rd.macroName,
+  };
+
+  if (rd.poolBreakdown && Array.isArray(rd.poolBreakdown)) {
+    slimRollDetails.poolBreakdown = rd.poolBreakdown.map((p: any) => ({
+      dieType: p.dieType,
+      rolls: p.rolls,
+    }));
+  }
+
+  if (rd.breakdown && Array.isArray(rd.breakdown)) {
+    slimRollDetails.breakdown = rd.breakdown.slice(0, 10);
+  }
+
+  if (rd.instances && Array.isArray(rd.instances)) {
+    slimRollDetails.instances = rd.instances.slice(0, 10).map((inst: any) => ({
+      index: inst.index,
+      d20Chosen: inst.d20Chosen,
+      d20Discarded: inst.d20Discarded,
+      isCrit: inst.isCrit,
+      isFumble: inst.isFumble,
+      riders: inst.riders,
+      modifier: inst.modifier,
+      total: inst.total,
+    }));
+  }
+
+  if (rd.rolls && Array.isArray(rd.rolls)) {
+    slimRollDetails.rolls = rd.rolls.slice(0, 20);
+  }
+
+  return {
+    id: sanitized.id,
+    type: sanitized.type,
+    sender: sanitized.sender,
+    rollerName: sanitized.rollerName,
+    rollerId: sanitized.rollerId,
+    isDm: sanitized.isDm,
+    message: sanitized.message,
+    playerMessage: sanitized.playerMessage,
+    isSecretRoll: sanitized.isSecretRoll,
+    timestamp: sanitized.timestamp,
+    rollDetails: slimRollDetails,
+  };
 }
 
 class LiveFeedSyncManager {
@@ -152,7 +237,7 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // 1. Rehydrate initial history from the room metadata ring buffer
+        // 1. Initial mount rehydration from room buffer
         OBR.room.getMetadata().then((metadata) => {
           if (!metadata) return;
           const buffer = metadata[FEED_BUFFER_KEY];
@@ -161,28 +246,20 @@ class LiveFeedSyncManager {
           }
         }).catch(() => {});
 
-        // 2. Listen for metadata updates from any player in the room
+        // 2. Real-time room metadata listener
         OBR.room.onMetadataChange((metadata) => {
           if (!metadata) return;
 
-          // Priority A: Process recent ring buffer
           const buffer = metadata[FEED_BUFFER_KEY];
           if (Array.isArray(buffer)) {
             this.handleIncomingItems(buffer);
             return;
           }
 
-          // Priority B: Legacy single-item fallback
           const feedPayload = metadata[FEED_EVENT_KEY] as any;
           if (feedPayload) {
             let incomingItem: UnifiedFeedItem | undefined;
-            if (typeof feedPayload.raw === 'string') {
-              try {
-                incomingItem = JSON.parse(feedPayload.raw);
-              } catch (err) {
-                console.warn('Could not parse legacy feed event JSON:', err);
-              }
-            } else if (feedPayload.item) {
+            if (feedPayload.item) {
               incomingItem = feedPayload.item;
             } else if (feedPayload.id && feedPayload.type) {
               incomingItem = feedPayload as UnifiedFeedItem;
@@ -314,14 +391,20 @@ class LiveFeedSyncManager {
             ? meta[FEED_BUFFER_KEY]
             : [];
 
-          const deduped = existingBuffer.filter((it) => it.id !== item.id);
-          const sanitizedItem = sanitizeMetadataPayload(item);
-          const nextBuffer = [...deduped, sanitizedItem].slice(-MAX_BUFFER_ITEMS);
+          const deduped = existingBuffer.filter((it) => it && it.id !== item.id);
+          const slimItem = slimFeedItemForBroadcast(item);
+          const nextBuffer = [...deduped, slimItem];
+
+          // STRICT BYTE-SIZE AUTO-PURGE:
+          // Keep discarding oldest entries until total payload is strictly <= 3,000 bytes
+          while (nextBuffer.length > 1 && getByteLength(nextBuffer) > MAX_BUFFER_BYTES) {
+            nextBuffer.shift();
+          }
 
           await OBR.room.setMetadata({
             [FEED_BUFFER_KEY]: nextBuffer,
             [FEED_EVENT_KEY]: {
-              item: sanitizedItem,
+              item: slimItem,
               timestamp: Date.now(),
             },
           });
