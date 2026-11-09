@@ -35,8 +35,18 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
 }) => {
   const isGameMaster = isGM !== undefined ? isGM : isDm;
   const isGmOnly = roll.visibility === 'gm_only';
-  const hasInstances = roll.instances && roll.instances.length > 0;
-  const macroName = roll.macroName || (roll.label && !roll.label.includes('1d20') && !roll.label.startsWith('Initiative') ? roll.label : undefined);
+  const isIndividual = roll.displayMode === 'individual';
+  const hasInstances = isIndividual && Boolean(roll.instances && roll.instances.length > 0);
+
+  // Suppress macro tag if label is just the formula itself or standard d20 string
+  const isFormulaLabel =
+    roll.label &&
+    (roll.label.trim() === roll.formula?.trim() ||
+      /^\d*d\d+/i.test(roll.label.trim()) ||
+      roll.label.startsWith('1d20') ||
+      roll.label.startsWith('Initiative'));
+
+  const macroName = roll.macroName || (!isFormulaLabel ? roll.label : undefined);
 
   return (
     <div
@@ -79,7 +89,7 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
 
         <div className="flex items-center shrink-0">
           <span className="font-mono font-bold text-amber-300 text-xs tabular-nums">
-            {roll.displayMode === 'individual'
+            {isIndividual
               ? `Results: ${
                   hasInstances
                     ? roll.instances!.map((i) => i.total).join(', ')
@@ -90,107 +100,81 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
         </div>
       </div>
 
-      {/* Body */}
-      {hasInstances ? (
-        <div className="space-y-1 pt-0.5">
-          {roll.instances!.map((inst) => (
-            <div
-              key={inst.index}
-              className="flex items-center justify-between gap-1.5 py-1 px-1.5 rounded bg-slate-950/60 border border-slate-800/60 text-xs"
-            >
-              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                {macroName && (
-                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold mr-1">
-                    🏷️ {macroName}
-                  </span>
-                )}
-                <span className="text-slate-400 font-semibold text-[11px] shrink-0">
-                  Roll {inst.index}:
-                </span>
-
-                <span className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-slate-700 font-mono tabular-nums shrink-0 inline-flex items-center gap-1">
-                  <span>{inst.d20Chosen}</span>
-                  {inst.d20Discarded !== undefined && (
-                    <>
-                      <span className="text-slate-600">,</span>
-                      <span className="line-through text-slate-500 font-normal">
-                        {inst.d20Discarded}
-                      </span>
-                    </>
+      {/* Mode A: Individual Attacks & Checks (Roll 1, Roll 2, etc.) */}
+      {isIndividual ? (
+        hasInstances ? (
+          <div className="space-y-1 pt-0.5">
+            {roll.instances!.map((inst) => (
+              <div
+                key={inst.index}
+                className="flex items-center justify-between gap-1.5 py-1 px-1.5 rounded bg-slate-950/60 border border-slate-800/60 text-xs"
+              >
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                  {macroName && (
+                    <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold mr-1">
+                      🏷️ {macroName}
+                    </span>
                   )}
+                  <span className="text-slate-400 font-semibold text-[11px] shrink-0">
+                    Roll {inst.index}:
+                  </span>
+
+                  <span className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-slate-700 font-mono tabular-nums shrink-0 inline-flex items-center gap-1">
+                    <span>{inst.d20Chosen}</span>
+                    {inst.d20Discarded !== undefined && (
+                      <>
+                        <span className="text-slate-600">,</span>
+                        <span className="line-through text-slate-500 font-normal">
+                          {inst.d20Discarded}
+                        </span>
+                      </>
+                    )}
+                  </span>
+
+                  {inst.isCrit && (
+                    <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
+                      CRIT
+                    </span>
+                  )}
+
+                  {inst.isFumble && (
+                    <span className="bg-rose-950 text-rose-400 border border-rose-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
+                      FUMBLE
+                    </span>
+                  )}
+
+                  {inst.riders.map((r, rIdx) => (
+                    <span key={rIdx} className="text-slate-300 font-mono text-[11px] shrink-0">
+                      + {r.count}{r.diceType}[{r.rolls.join(', ')}]
+                    </span>
+                  ))}
+
+                  {inst.modifier !== 0 && (
+                    <span className="text-slate-400 font-mono text-[11px] shrink-0">
+                      {inst.modifier > 0
+                        ? `+ ${inst.modifier}`
+                        : `- ${Math.abs(inst.modifier)}`}
+                    </span>
+                  )}
+                </div>
+
+                <span className="text-amber-300 font-bold font-mono text-xs tabular-nums shrink-0 ml-auto pl-1">
+                  = {inst.total}
                 </span>
-
-                {inst.isCrit && (
-                  <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
-                    CRIT
-                  </span>
-                )}
-
-                {inst.isFumble && (
-                  <span className="bg-rose-950 text-rose-400 border border-rose-800 text-[10px] px-1 font-black rounded uppercase shrink-0">
-                    FUMBLE
-                  </span>
-                )}
-
-                {inst.riders.map((r, rIdx) => (
-                  <span key={rIdx} className="text-slate-300 font-mono text-[11px] shrink-0">
-                    + {r.count}{r.diceType}[{r.rolls.join(', ')}]
-                  </span>
-                ))}
-
-                {inst.modifier !== 0 && (
-                  <span className="text-slate-400 font-mono text-[11px] shrink-0">
-                    {inst.modifier > 0
-                      ? `+ ${inst.modifier}`
-                      : `- ${Math.abs(inst.modifier)}`}
-                  </span>
-                )}
               </div>
-
-              <span className="text-amber-300 font-bold font-mono text-xs tabular-nums shrink-0 ml-auto pl-1">
-                = {inst.total}
-              </span>
-            </div>
-          ))}
-
-          {roll.displayMode === 'sum' && (
-            <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
-              <span>Combined Total:</span>
-              <span className="font-mono tabular-nums text-sm">{roll.total}</span>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="pt-0.5 space-y-1 text-[11px] font-mono">
-          {macroName && (
-            <div className="pb-1">
-              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold mr-1">
-                🏷️ {macroName}
-              </span>
-            </div>
-          )}
-
-          {roll.pairedRolls && roll.pairedRolls.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pb-1">
-              {roll.pairedRolls.map((pair) => (
-                <span
-                  key={pair.pairIndex}
-                  className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-slate-700 font-mono tabular-nums text-xs inline-flex items-center gap-1"
-                >
-                  <span>{pair.selected}</span>
-                  <span className="text-slate-600">,</span>
-                  <span className="line-through text-slate-500 font-normal">
-                    {pair.discarded}
-                  </span>
+            ))}
+          </div>
+        ) : (
+          <div className="pt-0.5 space-y-1 text-[11px] font-mono">
+            {macroName && (
+              <div className="pb-1">
+                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold mr-1">
+                  🏷️ {macroName}
                 </span>
-              ))}
-            </div>
-          )}
-
-          {roll.breakdown && roll.breakdown.length > 0 ? (
-            roll.breakdown
-              .filter((line) => !line.startsWith('Total:') && !line.startsWith('Combined Total:'))
-              .map((line, idx) => (
+              </div>
+            )}
+            {roll.breakdown && roll.breakdown.length > 0 ? (
+              roll.breakdown.map((line, idx) => (
                 <div
                   key={idx}
                   className="flex items-center justify-between text-slate-300 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/60"
@@ -198,20 +182,73 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   <span>{renderFormattedBreakdown(line)}</span>
                 </div>
               ))
-          ) : (
-            <div className="text-slate-400">
-              Rolls: [{roll.rolls.join(', ')}]
-              {roll.modifier !== 0 &&
-                ` (${roll.modifier > 0 ? `+${roll.modifier}` : roll.modifier})`}
+            ) : (
+              <div className="text-slate-400">
+                Rolls: [{roll.rolls.join(', ')}]
+              </div>
+            )}
+          </div>
+        )
+      ) : (
+        /* Mode B: Pooled Sum (Healing / Damage / Skills Challenge) */
+        <div className="space-y-1 pt-0.5">
+          {macroName && (
+            <div className="pb-0.5">
+              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                🏷️ {macroName}
+              </span>
             </div>
           )}
 
-          {roll.displayMode === 'sum' && (
-            <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
-              <span>Combined Total:</span>
-              <span className="font-mono tabular-nums text-sm">{roll.total}</span>
+          {roll.poolBreakdown && roll.poolBreakdown.length > 0 ? (
+            <div className="space-y-1">
+              {roll.poolBreakdown.map((pool, pIdx) => {
+                const poolSubtotal = pool.rolls.reduce((sum, val) => sum + val, 0);
+                return (
+                  <div
+                    key={pIdx}
+                    className="flex items-center justify-between gap-1.5 py-0.5 px-2 rounded bg-slate-950/60 border border-slate-800/60 text-xs font-mono"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                      <span className="font-bold text-amber-400">
+                        {pool.rolls.length}{pool.dieType}:
+                      </span>
+                      <span className="text-slate-300">
+                        [{pool.rolls.join(', ')}]
+                      </span>
+                    </div>
+                    <span className="text-slate-400 font-semibold tabular-nums shrink-0">
+                      = {poolSubtotal}
+                    </span>
+                  </div>
+                );
+              })}
+
+              {roll.modifier !== 0 && (
+                <div className="flex items-center justify-between gap-1.5 py-0.5 px-2 rounded bg-slate-950/60 border border-slate-800/60 text-xs font-mono">
+                  <span className="text-slate-400 font-bold">Flat Modifier:</span>
+                  <span className="text-slate-300 font-semibold tabular-nums shrink-0">
+                    {roll.modifier > 0 ? `+${roll.modifier}` : `${roll.modifier}`}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-slate-300 bg-slate-950/60 px-2 py-1 rounded border border-slate-800/60 text-[11px] font-mono">
+              {roll.breakdown && roll.breakdown.length > 0
+                ? roll.breakdown.join(' | ')
+                : `Rolls: [${roll.rolls.join(', ')}]${
+                    roll.modifier
+                      ? ` (${roll.modifier > 0 ? `+${roll.modifier}` : roll.modifier})`
+                      : ''
+                  }`}
             </div>
           )}
+
+          <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
+            <span>Grand Total:</span>
+            <span className="font-mono tabular-nums text-sm font-black">{roll.total}</span>
+          </div>
         </div>
       )}
     </div>
