@@ -112,7 +112,6 @@ export function executeDiceRoll({
     const poolBreakdown: DieGroupRoll[] = [];
     const breakdownSegments: string[] = [];
     const pairedRollsList: PairedD20Roll[] = [];
-    const instanceList: RollInstance[] = [];
 
     let hasCrit = false;
     let hasFumble = false;
@@ -156,18 +155,6 @@ export function executeDiceRoll({
             lineItem,
           });
 
-          instanceList.push({
-            index: d20Index,
-            d20Chosen: chosen,
-            d20Discarded: discarded,
-            isCrit: chosen === 20,
-            isFumble: chosen === 1,
-            riders: [],
-            modifier: instMod,
-            total: instTotal,
-            rawText: `Roll ${d20Index}: ${lineItem}`,
-          });
-
           d20Index++;
         } else {
           const val = rollSingleDie(sides);
@@ -178,22 +165,6 @@ export function executeDiceRoll({
           if (entry.diceType === 'd20') {
             if (val === 20) hasCrit = true;
             if (val === 1) hasFumble = true;
-
-            const isSoloD20 = poolEntries.length === 1 && entry.count === 1;
-            const instMod = isSoloD20 ? modifier : 0;
-            const instTotal = val + instMod;
-
-            instanceList.push({
-              index: d20Index,
-              d20Chosen: val,
-              isCrit: val === 20,
-              isFumble: val === 1,
-              riders: [],
-              modifier: instMod,
-              total: instTotal,
-              rawText: `Roll ${d20Index}: [${val}]`,
-            });
-
             d20Index++;
           }
         }
@@ -238,6 +209,8 @@ export function executeDiceRoll({
       playDiceRollSound();
     }
 
+    const cleanLabel = label.trim() && label.trim() !== formula ? label.trim() : undefined;
+
     return {
       id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       timestamp: Date.now(),
@@ -255,10 +228,10 @@ export function executeDiceRoll({
       breakdown: [breakdownLine],
       rawRolls: allRawRolls,
       pairedRolls: pairedRollsList.length > 0 ? pairedRollsList : undefined,
-      instances: instanceList.length > 0 ? instanceList : undefined,
+      instances: undefined,
       total: grandTotal,
       advantageMode,
-      label: label.trim() || undefined,
+      label: cleanLabel,
       isCrit: hasCrit,
       isFumble: hasFumble && !hasCrit,
       displayMode: 'sum',
@@ -430,6 +403,7 @@ export function executeDiceRoll({
     }
 
     const individualSummary = instanceList.map((inst) => inst.total).join(', ');
+    const cleanLabel = label.trim() && label.trim() !== formula ? label.trim() : undefined;
 
     return {
       id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -450,7 +424,7 @@ export function executeDiceRoll({
       pairedRolls: allPairedRolls.length > 0 ? allPairedRolls : undefined,
       total: 0,
       advantageMode,
-      label: label.trim() || undefined,
+      label: cleanLabel,
       isCrit: hasCrit,
       isFumble: hasFumble && !hasCrit,
       displayMode: 'individual',
@@ -500,6 +474,7 @@ export function executeDiceRoll({
   }
 
   playDiceRollSound();
+  const cleanLabel = label.trim() && label.trim() !== formula ? label.trim() : undefined;
 
   return {
     id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -519,7 +494,7 @@ export function executeDiceRoll({
     rawRolls: allRawRolls,
     total: 0,
     advantageMode,
-    label: label.trim() || undefined,
+    label: cleanLabel,
     isCrit: false,
     isFumble: false,
     displayMode: 'individual',
