@@ -62,8 +62,7 @@ export interface UnifiedFeedItem {
 
 export const FEED_EVENT_KEY = 'ashtapor/feed_event';
 export const FEED_BUFFER_KEY = 'ashtapor/recent_feed';
-export const BROADCAST_DICE_CHANNEL = 'ashtapor/dice_stream';
-export const BROADCAST_CLEAR_CHANNEL = 'ashtapor/clear_stream';
+export const PLAYER_ROLL_KEY = 'ashtapor/last_roll';
 const MAX_BUFFER_BYTES = 3000;
 
 type FeedListener = (items: UnifiedFeedItem[], newItem?: UnifiedFeedItem) => void;
@@ -73,9 +72,6 @@ function formatFormula(count: number, die: string, mod: number): string {
   return `${count}${die}${modStr}`;
 }
 
-/**
- * Calculates exact UTF-8 byte length of any JSON-serializable object.
- */
 function getByteLength(val: any): number {
   try {
     const str = typeof val === 'string' ? val : JSON.stringify(val);
@@ -88,10 +84,6 @@ function getByteLength(val: any): number {
   }
 }
 
-/**
- * Strips all undefined and null values from an object tree
- * to prevent Owlbear's host transformLoadingValues from throwing.
- */
 function sanitizeMetadataPayload<T>(obj: T): T {
   if (obj === null || obj === undefined) return undefined as any;
   if (Array.isArray(obj)) {
@@ -109,10 +101,7 @@ function sanitizeMetadataPayload<T>(obj: T): T {
   return obj;
 }
 
-/**
- * Compresses roll objects before transmitting to ensure minimum byte footprint.
- */
-function slimFeedItemForBroadcast(item: UnifiedFeedItem): UnifiedFeedItem {
+function slimFeedItem(item: UnifiedFeedItem): UnifiedFeedItem {
   const sanitized = sanitizeMetadataPayload(item);
   if (!sanitized || !sanitized.rollDetails) return sanitized;
 
@@ -239,7 +228,7 @@ class LiveFeedSyncManager {
           if (player.role) this.currentRoleIsGm = player.role === 'GM';
         });
 
-        // 1. Initial mount rehydration from room buffer (All users can read)
+        // 1. Rehydrate initial room buffer (Readable by all players & GM)
         OBR.room.getMetadata().then((metadata) => {
           if (!metadata) return;
           const buffer = metadata[FEED_BUFFER_KEY];
@@ -248,7 +237,7 @@ class LiveFeedSyncManager {
           }
         }).catch(() => {});
 
-        // 2. Real-time room metadata listener (All users listen)
+        // 2. Room Metadata Change Listener (Pulls from 3KB room buffer)
         OBR.room.onMetadataChange((metadata) => {
           if (!metadata) return;
           const buffer = metadata[FEED_BUFFER_KEY];
@@ -257,25 +246,40 @@ class LiveFeedSyncManager {
           }
         });
 
-        // 3. Peer-to-Peer Broadcast Listener (Solution A: The GM Relay Pipeline)
-        OBR.broadcast.onMessage(BROADCAST_DICE_CHANNEL, (event) => {
-          const incoming = event.data as UnifiedFeedItem;
-          if (!incoming || !incoming.id) return;
-
-          // Ingest roll into local feed on all clients
-          this.handleIncomingItems([incoming]);
-
-          // IF THIS CLIENT IS THE GM: Commit incoming player roll to the 3KB room buffer
-          if (this.currentRoleIsGm) {
-            this.writeToRoomBuffer(incoming);
+        // 3. Initial Party Scan (Pulls latest roll from all active players)
+        OBR.party.getPlayers().then((players) => {
+          const incomingRolls: UnifiedFeedItem[] = [];
+          for (const p of players) {
+            const roll = p.metadata?.[PLAYER_ROLL_KEY] as UnifiedFeedItem | undefined;
+            if (roll && roll.id) {
+              incomingRolls.push(roll);
+            }
           }
-        });
+          if (incomingRolls.length > 0) {
+            this.handleIncomingItems(incomingRolls);
+          }
+        }).catch(() => {});
 
-        // 4. Peer-to-Peer Clear Feed Listener
-        OBR.broadcast.onMessage(BROADCAST_CLEAR_CHANNEL, () => {
-          this.items = [];
-          this.persistFeed();
-          this.notifyListeners();
+        // 4. Real-time Party Change Listener (Player-to-GM communication)
+        OBR.party.onChange((players) => {
+          const incomingRolls: UnifiedFeedItem[] = [];
+          for (const p of players) {
+            const roll = p.metadata?.[PLAYER_ROLL_KEY] as UnifiedFeedItem | undefined;
+            if (roll && roll.id) {
+              incomingRolls.push(roll);
+            }
+          }
+
+          if (incomingRolls.length > 0) {
+            this.handleIncomingItems(incomingRolls);
+
+            // If this client is the GM, commit player rolls into the 3KB room buffer
+            if (this.currentRoleIsGm) {
+              for (const roll of incomingRolls) {
+                this.writeToRoomBuffer(roll);
+              }
+            }
+          }
         });
       });
     }
@@ -379,10 +383,12 @@ class LiveFeedSyncManager {
 
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        // Send clear command to all open clients via walkie-talkie
-        await OBR.broadcast.sendMessage(BROADCAST_CLEAR_CHANNEL, { timestamp: Date.now() });
+        // Clear own player metadata
+        await OBR.player.setMetadata({
+          [PLAYER_ROLL_KEY]: undefined,
+        });
 
-        // If GM, also wipe the room buffer
+        // If GM, also clear the 3KB room buffer
         if (this.currentRoleIsGm) {
           await OBR.room.setMetadata({
             [FEED_BUFFER_KEY]: [],
@@ -396,7 +402,7 @@ class LiveFeedSyncManager {
   }
 
   /**
-   * Authoritative commit to room metadata buffer with strict 3,000-byte cap.
+   * Commits an item to the 3,000-byte auto-purge room buffer.
    * EXECUTED STRICTLY BY THE GM CLIENT ONLY.
    */
   private async writeToRoomBuffer(item: UnifiedFeedItem) {
@@ -411,7 +417,7 @@ class LiveFeedSyncManager {
             : [];
 
           const deduped = existingBuffer.filter((it) => it && it.id !== item.id);
-          const slimItem = slimFeedItemForBroadcast(item);
+          const slimItem = slimFeedItem(item);
           const nextBuffer = [...deduped, slimItem];
 
           // STRICT BYTE-SIZE AUTO-PURGE:
@@ -522,7 +528,7 @@ class LiveFeedSyncManager {
       },
     };
 
-    // 1. Record in local memory immediately
+    // 1. Immediately log to local memory on this client
     this.items.push(feedItem);
     if (this.items.length > 100) this.items = this.items.slice(this.items.length - 100);
     this.persistFeed();
@@ -530,18 +536,20 @@ class LiveFeedSyncManager {
 
     if (!broadcast || isSelfRoll) return;
 
-    const slimItem = slimFeedItemForBroadcast(feedItem);
+    const slim = slimFeedItem(feedItem);
 
-    // 2. Broadcast via walkie-talkie (Available to both GM and Players)
+    // 2. Publish to player's personal metadata (Allowed for all users, zero permission blocks)
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
-        OBR.broadcast.sendMessage(BROADCAST_DICE_CHANNEL, slimItem).catch(() => {});
+        OBR.player.setMetadata({
+          [PLAYER_ROLL_KEY]: slim,
+        }).catch(() => {});
       }
     } catch {}
 
-    // 3. IF SENDER IS GM: Directly commit to the 3KB room buffer
+    // 3. If this client is the GM, also commit directly to the 3KB room buffer
     if (this.currentRoleIsGm) {
-      this.writeToRoomBuffer(slimItem);
+      this.writeToRoomBuffer(slim);
     }
   }
 
@@ -567,15 +575,8 @@ class LiveFeedSyncManager {
     this.persistFeed();
     this.notifyListeners(feedItem);
 
-    if (broadcast) {
-      try {
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          OBR.broadcast.sendMessage(BROADCAST_DICE_CHANNEL, slimFeedItemForBroadcast(feedItem)).catch(() => {});
-          if (this.currentRoleIsGm) {
-            this.writeToRoomBuffer(feedItem);
-          }
-        }
-      } catch {}
+    if (broadcast && this.currentRoleIsGm) {
+      this.writeToRoomBuffer(feedItem);
     }
   }
 
@@ -597,11 +598,8 @@ class LiveFeedSyncManager {
     try {
       if (typeof OBR !== 'undefined' && OBR.isReady) {
         OBR.notification.show(announcement, 'INFO').catch(() => {});
-        if (broadcast) {
-          OBR.broadcast.sendMessage(BROADCAST_DICE_CHANNEL, slimFeedItemForBroadcast(feedItem)).catch(() => {});
-          if (this.currentRoleIsGm) {
-            this.writeToRoomBuffer(feedItem);
-          }
+        if (broadcast && this.currentRoleIsGm) {
+          this.writeToRoomBuffer(feedItem);
         }
       }
     } catch {}
@@ -622,15 +620,8 @@ class LiveFeedSyncManager {
     this.persistFeed();
     this.notifyListeners(feedItem);
 
-    if (broadcast) {
-      try {
-        if (typeof OBR !== 'undefined' && OBR.isReady) {
-          OBR.broadcast.sendMessage(BROADCAST_DICE_CHANNEL, slimFeedItemForBroadcast(feedItem)).catch(() => {});
-          if (this.currentRoleIsGm) {
-            this.writeToRoomBuffer(feedItem);
-          }
-        }
-      } catch {}
+    if (broadcast && this.currentRoleIsGm) {
+      this.writeToRoomBuffer(feedItem);
     }
   }
 }
