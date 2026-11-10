@@ -18,12 +18,15 @@ import {
   X,
   Radio,
   EyeOff,
+  Pin,
+  Plus,
+  Trash2,
+  FilePlus,
 } from 'lucide-react';
 import {
   Note,
   NoteItem,
   NoteCategory,
-  NOTE_CATEGORIES,
   NotesExportPayload,
   BroadcastNotePayload,
   NotesScope,
@@ -38,38 +41,26 @@ import {
   LOCAL_DM_NOTES_KEY,
   LOCAL_EXPANDED_NOTES_KEY,
 } from '../../types/notes';
-import { NoteCardList, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCardList';
+import { NoteCardList } from './NoteCardList';
 import { CreateNoteModal } from './CreateNoteModal';
 import { NoteReaderView } from './NoteReaderView';
 import { sanitizeNotesList } from '../../utils/notesSanitizer';
+import {
+  getPinnedHudNote,
+  setPinnedHudNote,
+  HUD_PIN_EVENT,
+} from './StickyHudNote';
 
 // Constants for Room Metadata Synchronization
 export const TABLE_NOTES_KEY = SDK_TABLE_NOTES_KEY;
 export const BROADCAST_KEY = SDK_BROADCAST_NOTE_KEY;
 
-// Re-export for App.tsx and external consumers
 export type { BroadcastNotePayload, NotesScope, Note } from '../../types/notes';
 export const OBR_TABLE_NOTES_KEY = TABLE_NOTES_KEY;
 export const OBR_BROADCAST_NOTE_KEY = BROADCAST_KEY;
 
-const CATEGORY_ORDER: NoteCategory[] = [
-  'General',
-  'NPC',
-  'Location',
-  'Loot',
-  'Encounters',
-  'Leads',
-];
-
-export const CATEGORY_ABBREVIATIONS: Record<string, string> = {
-  All: 'All',
-  General: 'Gen',
-  NPC: 'NPC',
-  Location: 'Loc',
-  Loot: 'Loot',
-  Encounters: 'Enc',
-  Leads: 'Lead',
-};
+const LOCAL_SCRATCHPAD_KEY = 'ashtapor_quick_scratchpad';
+const HUD_SCRATCHPAD_ID = 'hud-scratchpad-note';
 
 const DEFAULT_MY_NOTES: NoteItem[] = [];
 const DEFAULT_TABLE_NOTES: NoteItem[] = [];
@@ -170,8 +161,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   playerName = 'Adventurer',
   isReady: propIsReady,
 }) => {
-  const isReady =
-    propIsReady !== undefined ? propIsReady : typeof OBR !== 'undefined' && OBR.isReady;
   const isGameMaster = isGM !== undefined ? isGM : Boolean(isDm);
 
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('myNotes');
@@ -180,16 +169,86 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   const currentRole: 'GM' | 'PLAYER' = isGameMaster ? 'GM' : 'PLAYER';
   const authorName = playerName || (isGameMaster ? 'Game Master' : 'Player');
 
+  // Search filter per subtab
   const [searchByTab, setSearchByTab] = useState<Record<SubTabType, string>>({
     myNotes: '',
     tableNotes: '',
     gmNotes: '',
   });
-  const [categoryByTab, setCategoryByTab] = useState<Record<SubTabType, string>>({
-    myNotes: 'All',
-    tableNotes: 'All',
-    gmNotes: 'All',
+
+  // Persistent Scratchpad State
+  const [scratchpad, setScratchpad] = useState<string>(() => {
+    try {
+      return localStorage.getItem(LOCAL_SCRATCHPAD_KEY) || '';
+    } catch {
+      return '';
+    }
   });
+
+  const [isScratchpadPinned, setIsScratchpadPinned] = useState<boolean>(() => {
+    const pinned = getPinnedHudNote();
+    return pinned?.id === HUD_SCRATCHPAD_ID;
+  });
+
+  useEffect(() => {
+    const checkPinned = () => {
+      const pinned = getPinnedHudNote();
+      setIsScratchpadPinned(pinned?.id === HUD_SCRATCHPAD_ID);
+    };
+    window.addEventListener(HUD_PIN_EVENT, checkPinned);
+    return () => window.removeEventListener(HUD_PIN_EVENT, checkPinned);
+  }, []);
+
+  const scratchpadWordCount = useMemo(() => {
+    const trimmed = scratchpad.trim();
+    return trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+  }, [scratchpad]);
+
+  const handleScratchpadChange = (text: string) => {
+    setScratchpad(text);
+    try {
+      localStorage.setItem(LOCAL_SCRATCHPAD_KEY, text);
+    } catch {}
+
+    const pinned = getPinnedHudNote();
+    if (pinned?.id === HUD_SCRATCHPAD_ID) {
+      setPinnedHudNote({
+        id: HUD_SCRATCHPAD_ID,
+        title: 'Live Scratchpad',
+        content: text,
+        category: 'General',
+        isPinned: true,
+        theme: 'slate',
+        updatedAt: new Date().toISOString(),
+        createdAt: pinned.createdAt || new Date().toISOString(),
+      });
+    }
+  };
+
+  const handleTogglePinScratchpad = () => {
+    const pinned = getPinnedHudNote();
+    if (pinned?.id === HUD_SCRATCHPAD_ID) {
+      setPinnedHudNote(null);
+      setIsScratchpadPinned(false);
+    } else {
+      const scratchNote: NoteItem = {
+        id: HUD_SCRATCHPAD_ID,
+        title: 'Live Scratchpad',
+        content: scratchpad || 'Scratchpad is empty',
+        category: 'General',
+        isPinned: true,
+        theme: 'slate',
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      setPinnedHudNote(scratchNote);
+      setIsScratchpadPinned(true);
+    }
+  };
+
+  const handleClearScratchpad = () => {
+    handleScratchpadChange('');
+  };
 
   const [isMaintenanceMenuOpen, setIsMaintenanceMenuOpen] = useState(false);
   const maintenanceMenuRef = useRef<HTMLDivElement>(null);
@@ -212,7 +271,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMaintenanceMenuOpen]);
 
-  // "My Notes" State (Strictly Local)
+  // "My Notes" State (Local)
   const [myNotes, setMyNotes] = useState<NoteItem[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_MY_NOTES_KEY);
@@ -236,12 +295,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return DEFAULT_MY_NOTES;
   });
 
-  // "Table Notes" State (Synced via OBR Room Metadata)
+  // "Table Notes" State (OBR Room Metadata)
   const [tableNotes, setTableNotes] = useState<NoteItem[]>([]);
   const tableNotesRef = useRef<NoteItem[]>([]);
   tableNotesRef.current = tableNotes;
 
-  // "GM Notes" State (Strictly Local with legacy DM migration)
+  // "GM Notes" State (Local GM)
   const [gmNotes, setGmNotes] = useState<NoteItem[]>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_GM_NOTES_KEY);
@@ -312,6 +371,25 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   }, [isGameMaster, activeSubTab]);
 
+  // TWO-WAY HUD LINK HELPERS
+  const syncNoteToHudIfPinned = (note: NoteItem) => {
+    const currentPinned = getPinnedHudNote();
+    if (currentPinned && currentPinned.id === note.id) {
+      setPinnedHudNote({
+        ...currentPinned,
+        ...note,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  };
+
+  const unpinFromHudIfDeleted = (id: string) => {
+    const currentPinned = getPinnedHudNote();
+    if (currentPinned && currentPinned.id === id) {
+      setPinnedHudNote(null);
+    }
+  };
+
   const saveMyNotes = useCallback((updated: NoteItem[]) => {
     setMyNotes(updated);
     try {
@@ -335,7 +413,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     setTableNotes(updatedTableNotes);
 
     if (typeof OBR !== 'undefined' && OBR.isReady) {
-      await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
+      try {
+        await OBR.room.setMetadata({ [TABLE_NOTES_KEY]: updatedTableNotes });
+      } catch (err) {
+        console.warn('Failed saving table notes to room metadata:', err);
+      }
     }
   }, []);
 
@@ -345,6 +427,15 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       const customEvent = e as CustomEvent<NoteItem>;
       const updated = customEvent.detail;
       if (!updated || !updated.id) return;
+
+      // Special Case: Scratchpad was edited in HUD
+      if (updated.id === HUD_SCRATCHPAD_ID) {
+        setScratchpad(updated.content);
+        try {
+          localStorage.setItem(LOCAL_SCRATCHPAD_KEY, updated.content);
+        } catch {}
+        return;
+      }
 
       // 1. Check Table Notes
       setTableNotes((prevTable) => {
@@ -460,6 +551,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       ? myNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...myNotes];
     saveMyNotes(updated);
+    syncNoteToHudIfPinned(note);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
@@ -470,6 +562,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   const handleDeleteMyNote = (id: string) => {
     const updated = myNotes.filter((n) => n.id !== id);
     saveMyNotes(updated);
+    unpinFromHudIfDeleted(id);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -537,6 +630,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     const exists = current.some((n) => n.id === note.id);
     const updatedTableNotes = exists ? current.map((n) => (n.id === note.id ? note : n)) : [note, ...current];
     commitTableNotes(updatedTableNotes);
+    syncNoteToHudIfPinned(note);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
@@ -548,6 +642,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     const current = tableNotesRef.current;
     const updatedTableNotes = current.filter((n) => n.id !== id);
     commitTableNotes(updatedTableNotes);
+    unpinFromHudIfDeleted(id);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -571,6 +666,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       ? gmNotes.map((n) => (n.id === note.id ? note : n))
       : [note, ...gmNotes];
     saveGmNotes(updated);
+    syncNoteToHudIfPinned(note);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev).add(note.id);
       persistExpandedIdsToStorage(next);
@@ -584,6 +680,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
     const updated = gmNotes.filter((n) => n.id !== id);
     saveGmNotes(updated);
+    unpinFromHudIfDeleted(id);
     setExpandedNoteIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -671,35 +768,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     return gmNotes;
   }, [activeSubTab, myNotes, tableNotes, gmNotes]);
 
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      All: activeNotesList.length,
-      General: 0,
-      NPC: 0,
-      Location: 0,
-      Loot: 0,
-      Encounters: 0,
-      Leads: 0,
-    };
-    activeNotesList.forEach((n) => {
-      const cat = normalizeCategory(n.category);
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-    return counts;
-  }, [activeNotesList]);
-
-  const visibleCategories = useMemo(() => {
-    const list = ['All'];
-    CATEGORY_ORDER.forEach((cat) => {
-      if ((categoryCounts[cat] || 0) > 0) {
-        list.push(cat);
-      }
-    });
-    return list;
-  }, [categoryCounts]);
-
   const activeSearchQuery = searchByTab[activeSubTab] || '';
-  const activeSelectedCategory = categoryByTab[activeSubTab] || 'All';
 
   const handleSearchChange = (value: string) => {
     setSearchByTab((prev) => ({
@@ -707,31 +776,6 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       [activeSubTab]: value,
     }));
   };
-
-  const handleSelectCategory = (cat: string) => {
-    setCategoryByTab((prev) => {
-      const current = prev[activeSubTab] || 'All';
-      const next = current === cat || cat === 'All' ? 'All' : cat;
-      return {
-        ...prev,
-        [activeSubTab]: next,
-      };
-    });
-  };
-
-  const handleResetActiveFilters = () => {
-    setSearchByTab((prev) => ({ ...prev, [activeSubTab]: '' }));
-    setCategoryByTab((prev) => ({ ...prev, [activeSubTab]: 'All' }));
-  };
-
-  useEffect(() => {
-    if (activeSelectedCategory !== 'All' && (categoryCounts[activeSelectedCategory] || 0) === 0) {
-      setCategoryByTab((prev) => ({
-        ...prev,
-        [activeSubTab]: 'All',
-      }));
-    }
-  }, [activeSelectedCategory, categoryCounts, activeSubTab]);
 
   const handleExportJSON = () => {
     setIsMaintenanceMenuOpen(false);
@@ -950,6 +994,25 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     setIsCreateModalOpen(true);
   };
 
+  const handleConvertScratchpadToCard = () => {
+    if (!scratchpad.trim()) return;
+    setEditingNote({
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      title: `Scratchpad Note (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+      content: scratchpad.trim(),
+      category: 'General',
+      isPinned: false,
+      theme: 'slate',
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      authorRole: currentRole,
+      authorName,
+    });
+    setIsCreateModalOpen(true);
+  };
+
   const handleOpenEditFromReader = (note: NoteItem) => {
     setEditingNote(note);
     setIsCreateModalOpen(true);
@@ -1033,6 +1096,67 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         />
       ) : (
         <>
+          {/* ZONE 1: TOP LIVE SCRATCHPAD & WORD COUNTER */}
+          <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-amber-400 select-none">
+                  📝 Scratchpad
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/40 border border-amber-600/40 text-amber-300 font-bold">
+                  {scratchpadWordCount} {scratchpadWordCount === 1 ? 'word' : 'words'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleTogglePinScratchpad}
+                  className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition cursor-pointer flex items-center gap-1 ${
+                    isScratchpadPinned
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                  title={isScratchpadPinned ? 'Unpin Scratchpad from HUD' : 'Pin Scratchpad to HUD drawer'}
+                >
+                  <Pin className="w-2.5 h-2.5" />
+                  <span>{isScratchpadPinned ? 'HUD Pinned' : 'Pin HUD'}</span>
+                </button>
+
+                {scratchpad.trim() && (
+                  <button
+                    type="button"
+                    onClick={handleConvertScratchpadToCard}
+                    className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 transition cursor-pointer flex items-center gap-0.5"
+                    title="Save scratchpad text into a new card"
+                  >
+                    <FilePlus className="w-2.5 h-2.5 text-amber-400" />
+                    <span>+ Card</span>
+                  </button>
+                )}
+
+                {scratchpad && (
+                  <button
+                    type="button"
+                    onClick={handleClearScratchpad}
+                    className="p-1 text-slate-400 hover:text-rose-400 rounded transition cursor-pointer"
+                    title="Clear scratchpad"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <textarea
+              value={scratchpad}
+              onChange={(e) => handleScratchpadChange(e.target.value)}
+              placeholder="Type quick in-session notes, dialogue clues, or draft Sending spells..."
+              className="w-full h-16 p-2 text-xs rounded-lg bg-slate-900 border border-slate-700/80 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 leading-relaxed font-sans transition resize-none shadow-inner"
+            />
+          </div>
+
+          {/* ZONE 2: LORE & HANDOUTS VAULT */}
           {/* Sub-Tab Navigation Header */}
           <div className="h-7 shrink-0 flex items-center gap-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
             <button
@@ -1046,7 +1170,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               title="My Notes (Stored locally on your machine)"
             >
               <User className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">My Notes</span>
+              <span className="truncate">My Prep</span>
               <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
                 {myNotes.length}
               </span>
@@ -1063,7 +1187,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               title="Table Notes (Shared collaborative cards across the room)"
             >
               <Scroll className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">Table Notes</span>
+              <span className="truncate">Table Handouts</span>
               <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
                 {tableNotes.length}
               </span>
@@ -1081,7 +1205,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 title="GM Notes Vault & Broadcast (GM Only)"
               >
                 <Lock className="w-3 h-3 mr-1 shrink-0" />
-                <span className="truncate">GM Notes</span>
+                <span className="truncate">GM Secrets</span>
                 <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
                   {gmNotes.length}
                 </span>
@@ -1114,7 +1238,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             </div>
           )}
 
-          {/* Search, Filter & Utility Bar */}
+          {/* Search & Actions Bar (Cleaned of category pills) */}
           <div className="shrink-0 flex items-center gap-1.5">
             <div className="relative flex-1 min-w-0">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -1122,7 +1246,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 type="text"
                 value={activeSearchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
-                placeholder="Search notes..."
+                placeholder="Search cards..."
                 className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
               />
               {activeSearchQuery && (
@@ -1195,38 +1319,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 type="button"
                 onClick={handleOpenCreateModal}
                 className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-                title="Create New Note"
+                title="Create New Card"
               >
-                +
+                <Plus className="w-4 h-4" />
               </button>
             </div>
-          </div>
-
-          {/* Category Filter Pills Strip */}
-          <div className="h-6 shrink-0 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5">
-            {visibleCategories.map((cat) => {
-              const isSelected = activeSelectedCategory === cat;
-              const count = categoryCounts[cat] || 0;
-              const abbr = CATEGORY_ABBREVIATIONS[cat] || cat;
-              const activeStyle =
-                CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
-
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => handleSelectCategory(cat)}
-                  className={
-                    isSelected
-                      ? `px-1.5 py-0.5 text-[10px] font-bold rounded-full border transition-colors shrink-0 cursor-pointer text-slate-100 ${activeStyle}`
-                      : 'px-1.5 py-0.5 text-[10px] font-semibold rounded-full border transition-colors shrink-0 cursor-pointer bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
-                  }
-                  title={`Filter by ${cat} (${count})`}
-                >
-                  {abbr} {count}
-                </button>
-              );
-            })}
           </div>
 
           {/* 1. My Notes View */}
@@ -1244,12 +1341,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               allowImportExport={true}
               currentRole={currentRole}
               currentAuthorName={authorName}
-              emptyMessage="No personal notes yet."
-              emptySubtitle="Click '+' above to create cards for clues, loot, NPCs, or reminders."
+              emptyMessage="No personal prep notes yet."
+              emptySubtitle="Use the scratchpad above for fast notes, or click '+' to save structured cards."
               hideControls={true}
               externalSearchQuery={searchByTab.myNotes}
-              externalSelectedCategory={categoryByTab.myNotes}
-              onExternalResetFilters={handleResetActiveFilters}
+              externalSelectedCategory="All"
+              onExternalResetFilters={() => setSearchByTab((prev) => ({ ...prev, myNotes: '' }))}
               onOpenReader={handleOpenReader}
               isGM={isGameMaster}
               currentVault="myNotes"
@@ -1273,12 +1370,12 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               allowImportExport={true}
               currentRole={currentRole}
               currentAuthorName={authorName}
-              emptyMessage="No table notes shared yet."
-              emptySubtitle="Any player or GM can add shared clues, loot, or inventory."
+              emptyMessage="No table handouts shared yet."
+              emptySubtitle="Drop loot parcels, puzzle tablets, or journals here for the party."
               hideControls={true}
               externalSearchQuery={searchByTab.tableNotes}
-              externalSelectedCategory={categoryByTab.tableNotes}
-              onExternalResetFilters={handleResetActiveFilters}
+              externalSelectedCategory="All"
+              onExternalResetFilters={() => setSearchByTab((prev) => ({ ...prev, tableNotes: '' }))}
               onOpenReader={handleOpenReader}
               isGM={isGameMaster}
               currentVault="tableNotes"
@@ -1304,11 +1401,11 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 currentRole="GM"
                 currentAuthorName={authorName}
                 emptyMessage="No secret GM notes yet."
-                emptySubtitle="Click '+' above to write secret scenes, encounter tactics, or riddles."
+                emptySubtitle="Store confidential encounter tactics, villain dialogue, or traps."
                 hideControls={true}
                 externalSearchQuery={searchByTab.gmNotes}
-                externalSelectedCategory={categoryByTab.gmNotes}
-                onExternalResetFilters={handleResetActiveFilters}
+                externalSelectedCategory="All"
+                onExternalResetFilters={() => setSearchByTab((prev) => ({ ...prev, gmNotes: '' }))}
                 onOpenReader={handleOpenReader}
                 isGM={true}
                 currentVault="gmNotes"
@@ -1321,18 +1418,14 @@ export const NotesTab: React.FC<NotesTabProps> = ({
         </>
       )}
 
-      {/* Large Note Modal */}
+      {/* Note Creation / Editing Modal */}
       <CreateNoteModal
         isOpen={isCreateModalOpen}
         isGM={isGameMaster}
         isGMSecretNote={activeSubTab === 'gmNotes'}
         currentVault={activeSubTab}
         editingNote={editingNote}
-        defaultCategory={
-          activeSelectedCategory !== 'All'
-            ? (normalizeCategory(activeSelectedCategory))
-            : 'General'
-        }
+        defaultCategory="General"
         onClose={() => {
           setIsCreateModalOpen(false);
           setEditingNote(null);
