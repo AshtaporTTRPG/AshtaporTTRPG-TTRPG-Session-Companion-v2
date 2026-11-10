@@ -9,14 +9,12 @@ import {
   NoteItem,
   DmSecretNote,
   GmSecretNote,
-  NoteCategory,
-  NOTE_THEME_CONFIG,
+  NOTE_COLOR_CONFIG,
+  resolveNoteColor,
   NoteTransferAction,
-  normalizeCategory,
 } from '../../types/notes';
-import { CATEGORY_STYLES } from './NoteCard';
 import { copyToClipboard } from '../../utils/clipboard';
-import { renderMarkdown, toggleMarkdownTask } from '../../utils/markdownRenderer';
+import { renderMarkdown, toggleMarkdownTask, extractTags } from '../../utils/markdownRenderer';
 import { getPinnedHudNote, setPinnedHudNote, HUD_PIN_EVENT } from './StickyHudNote';
 
 export interface NoteReaderViewProps {
@@ -28,6 +26,7 @@ export interface NoteReaderViewProps {
   isGM?: boolean;
   currentVault?: 'myNotes' | 'tableNotes' | 'gmNotes' | 'dmNotes';
   onTransfer?: (action: NoteTransferAction) => void;
+  onTagClick?: (tag: string) => void;
 }
 
 export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
@@ -39,6 +38,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   isGM = false,
   currentVault = 'myNotes',
   onTransfer,
+  onTagClick,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
@@ -90,11 +90,11 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onBack]);
 
-  const cat = normalizeCategory(note.category);
-  const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
+  const colorKey = resolveNoteColor((note as NoteItem).color, note.theme, note.category);
+  const colorCfg = NOTE_COLOR_CONFIG[colorKey] || NOTE_COLOR_CONFIG.slate;
 
   const handleCopyFullNote = async () => {
-    const textToCopy = `${note.title}\n[${cat}]\n\n${note.content}`;
+    const textToCopy = `${note.title}\n\n${note.content}`;
     const ok = await copyToClipboard(textToCopy);
     if (ok) {
       setCopied(true);
@@ -131,10 +131,6 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     return 'GM';
   }, [note]);
 
-  const themeCfg = note.theme
-    ? NOTE_THEME_CONFIG[note.theme] || NOTE_THEME_CONFIG.slate
-    : NOTE_THEME_CONFIG.slate;
-
   const handleToggleTask = (lineIndex: number) => {
     const newContent = toggleMarkdownTask(note.content, lineIndex);
     const updated = {
@@ -147,8 +143,12 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     }
   };
 
+  const noteTags = extractTags(note.content, note.title);
+
   return (
-    <div className={`flex flex-col h-full p-2.5 select-text overflow-hidden rounded-xl border ${themeCfg.cardClasses}`}>
+    <div
+      className={`flex flex-col h-full p-2.5 select-text overflow-hidden rounded-xl border border-l-[4px] ${colorCfg.borderClass} ${colorCfg.cardClasses}`}
+    >
       {/* Utility Header */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-inherit/30 shrink-0 gap-1.5">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -160,11 +160,6 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
           >
             <ChevronLeft className="w-4 h-4 text-amber-400" /> Back
           </button>
-          <span
-            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider shrink-0 ${catStyle.badge}`}
-          >
-            {cat}
-          </span>
           <h2
             className="text-xs font-bold truncate min-w-0 flex-1 ml-1"
             title={note.title}
@@ -173,7 +168,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
           </h2>
         </div>
 
-        {/* Right Action Icons: Copy, HUD Pin, Transfer, Edit & Delete */}
+        {/* Right Action Icons */}
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
@@ -229,7 +224,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
                     >
                       <span>📋</span>
-                      <span>Copy to Table Notes</span>
+                      <span>Copy to Handouts</span>
                     </button>
                   )}
                   {currentVault !== 'tableNotes' && (
@@ -242,7 +237,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
                     >
                       <span>➔</span>
-                      <span>Move to Table Notes</span>
+                      <span>Move to Handouts</span>
                     </button>
                   )}
                   {currentVault !== 'myNotes' && (
@@ -255,7 +250,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
                     >
                       <span>📋</span>
-                      <span>Copy to My Notes</span>
+                      <span>Copy to My Prep</span>
                     </button>
                   )}
                   {currentVault !== 'myNotes' && (
@@ -268,7 +263,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                       className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
                     >
                       <span>👤</span>
-                      <span>Move to My Notes</span>
+                      <span>Move to My Prep</span>
                     </button>
                   )}
                   {isGM && currentVault !== 'gmNotes' && currentVault !== 'dmNotes' && (
@@ -282,7 +277,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                         className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
                       >
                         <span>📋</span>
-                        <span>Copy to GM Notes</span>
+                        <span>Copy to GM Secrets</span>
                       </button>
                       <button
                         type="button"
@@ -293,7 +288,7 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
                         className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
                       >
                         <span>🔒</span>
-                        <span>Move to GM Notes</span>
+                        <span>Move to GM Secrets</span>
                       </button>
                     </>
                   )}
@@ -335,9 +330,29 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
       </div>
 
       {/* Reading Text Body */}
-      <div className={`flex-1 overflow-y-auto pr-1 text-sm leading-relaxed p-2.5 rounded-lg border selection:bg-amber-500/30 selection:text-amber-200 ${themeCfg.contentClasses}`}>
-        {renderMarkdown(note.content, handleToggleTask)}
+      <div className="flex-1 overflow-y-auto pr-1 text-sm leading-relaxed p-2.5 rounded-lg border border-white/10 bg-slate-950/60 selection:bg-amber-500/30 selection:text-amber-200">
+        {renderMarkdown(note.content, { onToggleTask: handleToggleTask, onTagClick })}
       </div>
+
+      {/* Tags Chips in Reader View */}
+      {noteTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 pt-1.5">
+          {noteTags.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                onTagClick?.(t);
+                onBack();
+              }}
+              className={`px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded border transition cursor-pointer ${colorCfg.tagClass}`}
+              title={`Filter by #${t}`}
+            >
+              #{t}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="pt-2 mt-2 border-t border-inherit/30 flex items-center justify-between text-[11px] opacity-70 shrink-0">
