@@ -21,10 +21,9 @@ import {
   NoteTransferAction,
   normalizeCategory,
 } from '../../types/notes';
-import { NoteCard, CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCard';
+import { NoteCard } from './NoteCard';
 import { CreateNoteModal } from './CreateNoteModal';
-
-export { CATEGORY_STYLES, CATEGORY_PILL_ACTIVE_STYLES } from './NoteCard';
+import { extractTags } from '../../utils/markdownRenderer';
 
 export interface NoteCardListProps {
   notes: NoteItem[];
@@ -44,7 +43,7 @@ export interface NoteCardListProps {
   headerInfo?: React.ReactNode;
   hideControls?: boolean;
   externalSearchQuery?: string;
-  externalSelectedCategory?: string;
+  onExternalSearchChange?: (query: string) => void;
   onExternalResetFilters?: () => void;
   onOpenReader?: (id: string) => void;
   isGM?: boolean;
@@ -72,6 +71,8 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   headerInfo,
   hideControls = false,
   externalSearchQuery,
+  onExternalSearchChange,
+  onExternalResetFilters,
   onOpenReader,
   isGM = currentRole === 'GM',
   currentVault = 'myNotes',
@@ -85,6 +86,14 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
 
   const searchQuery =
     externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
+
+  const setSearch = (val: string) => {
+    if (onExternalSearchChange) {
+      onExternalSearchChange(val);
+    } else {
+      setInternalSearchQuery(val);
+    }
+  };
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -198,7 +207,8 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             title: (item.title || 'Untitled Note').trim(),
             category: normalizeCategory(item.category),
             content: typeof item.content === 'string' ? item.content : '',
-            theme: item.theme,
+            color: item.color || item.theme || 'slate',
+            theme: item.theme || item.color || 'slate',
             isPinned: !!item.isPinned,
             updatedAt: item.updatedAt || new Date().toISOString(),
             createdAt: item.createdAt || new Date().toISOString(),
@@ -254,6 +264,24 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     setEditingNote(null);
   };
 
+  // Extract all unique #tags currently present in this list of notes
+  const activeTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    notes.forEach((n) => {
+      extractTags(n.content, n.title).forEach((t) => tagSet.add(t));
+    });
+    return Array.from(tagSet).sort();
+  }, [notes]);
+
+  const handleTagToggle = (tag: string) => {
+    const targetTag = `#${tag}`;
+    if (searchQuery.trim().toLowerCase() === targetTag.toLowerCase()) {
+      setSearch('');
+    } else {
+      setSearch(targetTag);
+    }
+  };
+
   const filteredAndSortedNotes = useMemo(() => {
     return [...notes]
       .filter((note) => {
@@ -286,93 +314,119 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       {headerInfo && <div className="shrink-0">{headerInfo}</div>}
 
       {!hideControls && (
-        <div className="shrink-0 flex items-center gap-1.5">
-          <div className="relative flex-1 min-w-0">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setInternalSearchQuery(e.target.value)}
-              placeholder="Search notes or #tags..."
-              className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setInternalSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
-                title="Clear search"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={handleExpandAll}
-              title="Expand All"
-              aria-label="Expand All"
-              className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-            >
-              <ChevronsUpDown className="w-3.5 h-3.5" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCollapseAll}
-              title="Collapse All"
-              aria-label="Collapse All"
-              className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-            >
-              <ChevronsDownUp className="w-3.5 h-3.5" />
-            </button>
-
-            {allowImportExport && (
-              <div className="relative" ref={menuRef}>
+        <div className="shrink-0 flex flex-col gap-1.5">
+          {/* Search Bar + Controls */}
+          <div className="flex items-center gap-1.5">
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search notes or #tags..."
+                className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
+              />
+              {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setIsMenuOpen((prev) => !prev)}
-                  title="Backup & Restore Options"
-                  aria-label="Backup & Restore Options"
-                  className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                  title="Clear search"
                 >
-                  <MoreVertical className="w-3.5 h-3.5" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
+              )}
+            </div>
 
-                {isMenuOpen && (
-                  <div className="absolute right-0 mt-1 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
-                    <button
-                      type="button"
-                      onClick={handleExportJSON}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>⬇ Export JSON Backup</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleTriggerImport}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
-                    >
-                      <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span>⬆ Import JSON Backup</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={handleExpandAll}
+                title="Expand All"
+                aria-label="Expand All"
+                className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+              >
+                <ChevronsUpDown className="w-3.5 h-3.5" />
+              </button>
 
-            <button
-              type="button"
-              onClick={handleOpenCreateModal}
-              className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-              title="Create New Note"
-            >
-              +
-            </button>
+              <button
+                type="button"
+                onClick={handleCollapseAll}
+                title="Collapse All"
+                aria-label="Collapse All"
+                className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+              >
+                <ChevronsDownUp className="w-3.5 h-3.5" />
+              </button>
+
+              {allowImportExport && (
+                <div className="relative" ref={menuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsMenuOpen((prev) => !prev)}
+                    title="Backup & Restore Options"
+                    aria-label="Backup & Restore Options"
+                    className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+                  >
+                    <MoreVertical className="w-3.5 h-3.5" />
+                  </button>
+
+                  {isMenuOpen && (
+                    <div className="absolute right-0 mt-1 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
+                      <button
+                        type="button"
+                        onClick={handleExportJSON}
+                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>⬇ Export JSON Backup</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleTriggerImport}
+                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        <span>⬆ Import JSON Backup</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleOpenCreateModal}
+                className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+                title="Create New Note"
+              >
+                +
+              </button>
+            </div>
           </div>
+
+          {/* Dynamic Active #Tag Bar (Keep Labels) */}
+          {activeTags.length > 0 && (
+            <div className="flex items-center gap-1 overflow-x-auto py-0.5 scrollbar-none flex-nowrap">
+              {activeTags.map((t) => {
+                const isSelected = searchQuery.toLowerCase().includes(`#${t}`);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => handleTagToggle(t)}
+                    className={`px-2 py-0.5 text-[10px] font-mono rounded-full border transition cursor-pointer shrink-0 ${
+                      isSelected
+                        ? 'bg-amber-500 text-slate-950 font-bold border-amber-400 shadow-sm'
+                        : 'bg-slate-900/90 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    #{t}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -386,7 +440,10 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setInternalSearchQuery('')}
+                onClick={() => {
+                  setSearch('');
+                  onExternalResetFilters?.();
+                }}
                 className="mt-2 text-xs text-amber-400 hover:underline cursor-pointer"
               >
                 Clear search
@@ -409,6 +466,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
               currentVault={currentVault}
               onTransfer={onTransfer}
               onBroadcastNote={onBroadcastNote}
+              onTagClick={(tag) => handleTagToggle(tag)}
             />
           ))
         )}
