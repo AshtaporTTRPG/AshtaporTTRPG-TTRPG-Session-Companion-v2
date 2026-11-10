@@ -9,6 +9,22 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 export interface MarkdownRenderOptions {
   onToggleTask?: (lineIndex: number) => void;
   collapsibleHeaders?: boolean;
+  onTagClick?: (tag: string) => void;
+}
+
+/**
+ * Extracts all unique #tags from content and optional title
+ * without colliding with markdown headers (# Header).
+ */
+export function extractTags(content: string, title: string = ''): string[] {
+  const combined = `${title}\n${content}`;
+  const regex = /(?:^|\s)#([a-zA-Z][a-zA-Z0-9_\-]*)/g;
+  const tags = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(combined)) !== null) {
+    tags.add(match[1].toLowerCase());
+  }
+  return Array.from(tags);
 }
 
 /**
@@ -32,14 +48,15 @@ export function toggleMarkdownTask(content: string, lineIndex: number): string {
  * - Interactive task checkboxes
  * - Collapsible # (H1), ## (H2), and ### (H3) header sections
  * - Horizontal rule dividers (---, ***, ___)
- * - Inline bold (**bold**), italics (*italic*), and underline (__underline__ or <u>underline</u>)
+ * - Inline bold, italics, underline, strikethrough (~~text~~), and clickable #tags
  * - Bullet lists (- item)
  */
 export const MarkdownContent: React.FC<{
   content: string;
   onToggleTask?: (lineIndex: number) => void;
   collapsibleHeaders?: boolean;
-}> = ({ content, onToggleTask, collapsibleHeaders = true }) => {
+  onTagClick?: (tag: string) => void;
+}> = ({ content, onToggleTask, collapsibleHeaders = true, onTagClick }) => {
   const [collapsedHeaders, setCollapsedHeaders] = useState<Record<string, boolean>>({});
 
   if (!content) return null;
@@ -61,7 +78,6 @@ export const MarkdownContent: React.FC<{
   return (
     <div className="space-y-1">
       {lines.map((line, lineIndex) => {
-        // Empty line
         if (!line.trim()) {
           if (
             collapsibleHeaders &&
@@ -74,7 +90,7 @@ export const MarkdownContent: React.FC<{
           return <div key={lineIndex} className="h-2" />;
         }
 
-        // 1. Horizontal Divider: ---, ***, or ___
+        // 1. Horizontal Divider
         const hrMatch = line.trim().match(/^([-*_])\1{2,}$/);
         if (hrMatch) {
           if (
@@ -88,7 +104,7 @@ export const MarkdownContent: React.FC<{
           return <hr key={lineIndex} className="my-2 border-inherit/30" />;
         }
 
-        // 2. Level 3 Header: ### Sub-Header (Evaluated first to prevent partial prefix match)
+        // 2. Level 3 Header (### Sub-Header)
         const h3Match = line.match(/^###\s+(.*)$/);
         if (h3Match) {
           const headerId = `h3-${lineIndex}`;
@@ -108,7 +124,7 @@ export const MarkdownContent: React.FC<{
                 key={lineIndex}
                 className="text-[11px] font-bold uppercase tracking-wider pt-0.5 pb-0.5 text-inherit opacity-90"
               >
-                {parseInlineFormatting(h3Match[1])}
+                {parseInlineFormatting(h3Match[1], onTagClick)}
               </div>
             );
           }
@@ -135,7 +151,7 @@ export const MarkdownContent: React.FC<{
                 )}
               </button>
               <span className="flex-1 min-w-0 truncate">
-                {parseInlineFormatting(h3Match[1])}
+                {parseInlineFormatting(h3Match[1], onTagClick)}
               </span>
               {isCollapsed && (
                 <span className="text-[9px] font-mono opacity-50 font-normal shrink-0 lowercase">
@@ -146,7 +162,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 3. Level 2 Header: ## Sub-Header
+        // 3. Level 2 Header (## Sub-Header)
         const h2Match = line.match(/^##\s+(.*)$/);
         if (h2Match) {
           const headerId = `h2-${lineIndex}`;
@@ -163,7 +179,7 @@ export const MarkdownContent: React.FC<{
                 key={lineIndex}
                 className="text-xs font-semibold pt-1 pb-0.5 text-inherit"
               >
-                {parseInlineFormatting(h2Match[1])}
+                {parseInlineFormatting(h2Match[1], onTagClick)}
               </div>
             );
           }
@@ -190,7 +206,7 @@ export const MarkdownContent: React.FC<{
                 )}
               </button>
               <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h2Match[1])}
+                {parseInlineFormatting(h2Match[1], onTagClick)}
               </span>
               {isCollapsed && (
                 <span className="text-[9px] font-mono opacity-50 font-normal shrink-0">
@@ -201,7 +217,7 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 4. Level 1 Header: # Header
+        // 4. Level 1 Header (# Header)
         const h1Match = line.match(/^#\s+(.*)$/);
         if (h1Match) {
           const headerId = `h1-${lineIndex}`;
@@ -215,7 +231,7 @@ export const MarkdownContent: React.FC<{
                 key={lineIndex}
                 className="text-xs md:text-sm font-bold border-b border-inherit/25 pb-0.5 pt-1.5 text-inherit"
               >
-                {parseInlineFormatting(h1Match[1])}
+                {parseInlineFormatting(h1Match[1], onTagClick)}
               </div>
             );
           }
@@ -227,7 +243,7 @@ export const MarkdownContent: React.FC<{
               key={lineIndex}
               onClick={(e) => toggleHeader(headerId, e)}
               className="flex items-center gap-1.5 py-1 text-xs md:text-sm font-bold border-b border-inherit/25 cursor-pointer select-none group mt-1.5 mb-1 hover:opacity-85 transition"
-              title={isCollapsed ? 'Click to expand encounter' : 'Click to collapse encounter'}
+              title={isCollapsed ? 'Click to expand' : 'Click to collapse'}
             >
               <button
                 type="button"
@@ -242,7 +258,7 @@ export const MarkdownContent: React.FC<{
                 )}
               </button>
               <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h1Match[1])}
+                {parseInlineFormatting(h1Match[1], onTagClick)}
               </span>
               {isCollapsed && (
                 <span className="text-[10px] font-mono opacity-50 font-normal shrink-0">
@@ -253,7 +269,6 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // Hidden content under collapsed header
         if (
           collapsibleHeaders &&
           ((currentH1Id && collapsedHeaders[currentH1Id]) ||
@@ -293,7 +308,7 @@ export const MarkdownContent: React.FC<{
                   isChecked ? 'line-through opacity-60' : ''
                 }`}
               >
-                {parseInlineFormatting(taskText)}
+                {parseInlineFormatting(taskText, onTagClick)}
               </span>
             </div>
           );
@@ -305,7 +320,9 @@ export const MarkdownContent: React.FC<{
           return (
             <div key={lineIndex} className="flex items-start gap-1.5 my-0.5 pl-1">
               <span className="text-amber-400 select-none shrink-0 leading-tight">•</span>
-              <span className="flex-1 leading-relaxed">{parseInlineFormatting(bulletMatch[1])}</span>
+              <span className="flex-1 leading-relaxed">
+                {parseInlineFormatting(bulletMatch[1], onTagClick)}
+              </span>
             </div>
           );
         }
@@ -313,7 +330,7 @@ export const MarkdownContent: React.FC<{
         // 7. Standard text line
         return (
           <div key={lineIndex} className="leading-relaxed">
-            {parseInlineFormatting(line)}
+            {parseInlineFormatting(line, onTagClick)}
           </div>
         );
       })}
@@ -329,6 +346,7 @@ export function renderMarkdown(
 
   let onToggleTask: ((lineIndex: number) => void) | undefined;
   let collapsibleHeaders = true;
+  let onTagClick: ((tag: string) => void) | undefined;
 
   if (typeof optionsOrToggleTask === 'function') {
     onToggleTask = optionsOrToggleTask;
@@ -337,6 +355,7 @@ export function renderMarkdown(
     if (optionsOrToggleTask.collapsibleHeaders !== undefined) {
       collapsibleHeaders = optionsOrToggleTask.collapsibleHeaders;
     }
+    onTagClick = optionsOrToggleTask.onTagClick;
   }
 
   return (
@@ -344,16 +363,21 @@ export function renderMarkdown(
       content={content}
       onToggleTask={onToggleTask}
       collapsibleHeaders={collapsibleHeaders}
+      onTagClick={onTagClick}
     />
   );
 }
 
 /**
- * Inline formatting helper: parses **bold**, __underline__, <u>underline</u>, and *italic*
+ * Inline formatting helper: parses **bold**, __underline__, <u>underline</u>, *italic*,
+ * ~~strikethrough~~, and clickable #tags
  */
-export function parseInlineFormatting(text: string): React.ReactNode[] {
+export function parseInlineFormatting(
+  text: string,
+  onTagClick?: (tag: string) => void
+): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
-  const regex = /(\*\*([^*]+)\*\*|__([^_]+)__|<u>([^<]+)<\/u>|\*([^*]+)\*)/g;
+  const regex = /(\*\*([^*]+)\*\*|__([^_]+)__|<u>([^<]+)<\/u>|\*([^*]+)\*|~~([^~]+)~~|(?:^|\s)(#([a-zA-Z][a-zA-Z0-9_\-]*)))/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -364,32 +388,56 @@ export function parseInlineFormatting(text: string): React.ReactNode[] {
     }
 
     if (match[2]) {
-      // Bold (**text**)
+      // Bold
       parts.push(
         <strong key={`b-${match.index}`} className="font-bold text-inherit brightness-110">
           {match[2]}
         </strong>
       );
     } else if (match[3]) {
-      // Underline (__text__)
+      // Underline
       parts.push(
         <span key={`u-${match.index}`} className="underline underline-offset-2 text-inherit">
           {match[3]}
         </span>
       );
     } else if (match[4]) {
-      // Underline (<u>text</u>)
+      // Underline (u-tag)
       parts.push(
         <span key={`u-tag-${match.index}`} className="underline underline-offset-2 text-inherit">
           {match[4]}
         </span>
       );
     } else if (match[5]) {
-      // Italic (*text*)
+      // Italic
       parts.push(
         <em key={`i-${match.index}`} className="italic text-inherit">
           {match[5]}
         </em>
+      );
+    } else if (match[6]) {
+      // Strikethrough
+      parts.push(
+        <del key={`del-${match.index}`} className="line-through opacity-60 text-inherit">
+          {match[6]}
+        </del>
+      );
+    } else if (match[8]) {
+      // Tag (#tag)
+      const tagName = match[8];
+      parts.push(
+        <button
+          key={`tag-${match.index}`}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTagClick?.(tagName);
+          }}
+          className="inline-block mx-0.5 px-1 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition cursor-pointer"
+          title={`Filter by #${tagName}`}
+        >
+          #{tagName}
+        </button>
       );
     }
 
@@ -404,11 +452,11 @@ export function parseInlineFormatting(text: string): React.ReactNode[] {
 }
 
 /**
- * Helper to apply markdown formatting to a textarea at current selection
+ * Helper to apply Google Keep markdown formatting to a textarea at current selection
  */
 export function applyMarkdownSyntax(
   textarea: HTMLTextAreaElement | null,
-  type: 'bold' | 'italic' | 'underline' | 'list' | 'task' | 'divider',
+  type: 'bold' | 'italic' | 'underline' | 'strike' | 'h1' | 'h2' | 'list' | 'task' | 'divider',
   currentValue: string,
   setValue: (next: string) => void
 ) {
@@ -422,6 +470,20 @@ export function applyMarkdownSyntax(
   let cursorOffset = 0;
 
   switch (type) {
+    case 'h1': {
+      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
+      const prefix = isStartOfLine ? '# ' : '\n# ';
+      replacement = selectedText ? `${prefix}${selectedText}` : `${prefix}Heading 1`;
+      cursorOffset = replacement.length;
+      break;
+    }
+    case 'h2': {
+      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
+      const prefix = isStartOfLine ? '## ' : '\n## ';
+      replacement = selectedText ? `${prefix}${selectedText}` : `${prefix}Heading 2`;
+      cursorOffset = replacement.length;
+      break;
+    }
     case 'bold':
       if (selectedText) {
         replacement = `**${selectedText}**`;
@@ -447,6 +509,15 @@ export function applyMarkdownSyntax(
       } else {
         replacement = `__underlined text__`;
         cursorOffset = 17;
+      }
+      break;
+    case 'strike':
+      if (selectedText) {
+        replacement = `~~${selectedText}~~`;
+        cursorOffset = replacement.length;
+      } else {
+        replacement = `~~strikethrough~~`;
+        cursorOffset = 15;
       }
       break;
     case 'list': {
