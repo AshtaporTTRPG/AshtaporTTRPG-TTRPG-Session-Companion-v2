@@ -161,24 +161,41 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </ul>
           </section>
 
-          {/* 2. DICE CHAMBER & STAGING (TAB 2) */}
+          {/* 2. DICE CHAMBER & LIVE FEED (TAB 2) */}
           <section id="help-sec-dice" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <Dices className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span>2. Dice Chamber & Staging</span>
+              <span>2. Dice Chamber & Live Shared Feed</span>
             </h3>
             <div className="font-mono text-[10px] text-cyan-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
-              Roll Sum (Pooled total) · Roll Indiv (Separate d20 checks) · Scratchpad Dock
+              Attacks vs Damage · Quick d20 · Visibility (Public/GM/Self) · Math Engine · Macros
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>[ 🎲 ROLL SUM ] (Single Total):</strong> Adds all dice and flat modifiers into one grand result for damage rolls, pooled checks, or healing.
+                <strong>[ ⚔️ ATTACKS / CHECKS & SAVING THROWS ]:</strong> Evaluates each d20 individually with modifiers applied to each die for multi-target attacks, party saves, and mob checks.
               </li>
               <li>
-                <strong>[ 📊 ROLL INDIV ] (Separate Checks):</strong> Rolls each d20 separately with modifiers added to each individual die for multi-attacks and mob checks.
+                <strong>[ 💥 HEALING / DAMAGE & SKILLS CHALLENGE ]:</strong> Aggregates all staged dice and flat bonuses into a single grand total for damage rolls, group skill checks, or recovery.
               </li>
               <li>
-                <strong>Calculator Dock:</strong> Click the calculator icon to run quick arithmetic and insert the output directly into your staging tray.
+                <strong>QUICK D20 Strip:</strong> 1-click triggers for standard rolls without staging: <strong>🎲 d20</strong>, <strong>⚔️ Adv</strong> (rolls 2d20, takes higher), or <strong>🛡️ Dis</strong> (rolls 2d20, takes lower).
+              </li>
+              <li>
+                <strong>Staged Stance (Adv / Straight / Dis):</strong> Set the default modifier state for staged multi-d20 formulas. Straight defaults to standard rolls.
+              </li>
+              <li>
+                <strong>Roll Visibility Tiers:</strong>
+                <div className="pl-2 space-y-0.5 mt-0.5 text-slate-400">
+                  <div>• <strong className="text-amber-300">Public:</strong> Broadcasts to all connected players and GM in the live feed.</div>
+                  <div>• <strong className="text-slate-200">GM:</strong> Whispers roll results strictly to the Game Master.</div>
+                  <div>• <strong className="text-slate-200">Self:</strong> Private client roll visible only on your device (0 room metadata).</div>
+                </div>
+              </li>
+              <li>
+                <strong>🧮 Inline Math Evaluator:</strong> Type arithmetic directly (e.g. <code>15+4</code>, <code>28/2</code>) and click <strong>Apply (+X)</strong> to append the computed result into your active dice formula.
+              </li>
+              <li>
+                <strong>Custom Macros:</strong> Store frequent weapon attacks and spells. Toggle between <strong>⚡ 1-Click</strong> (instant roll) and <strong>📚 Queue</strong> (loads formula into the staging bar for edits).
               </li>
             </ul>
           </section>
