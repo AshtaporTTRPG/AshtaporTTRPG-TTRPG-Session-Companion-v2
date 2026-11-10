@@ -1187,7 +1187,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               title="Table Notes (Shared collaborative cards across the room)"
             >
               <Scroll className="w-3 h-3 mr-1 shrink-0" />
-              <span className="truncate">Table Handouts</span>
+              <span className="truncate">Handouts</span>
               <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900/80 border border-slate-700/60 text-slate-200 font-mono">
                 {tableNotes.length}
               </span>
