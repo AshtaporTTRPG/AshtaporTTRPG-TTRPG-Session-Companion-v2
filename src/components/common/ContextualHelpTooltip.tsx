@@ -230,35 +230,41 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
             </ul>
           </section>
 
-          {/* 5. NOTES & SANDBOX PREP (TAB 5) */}
+          {/* 5. NOTES, SCRATCHPAD & KEEP PREP (TAB 5) */}
           <section id="help-sec-notes" className="space-y-1.5 border-b border-slate-800/80 pb-3.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>5. Notes, Handouts & Broadcasts</span>
+              <span>5. Notes, Scratchpad & Google Keep Prep</span>
             </h3>
             <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
-              3 Vaults (Personal, Table, GM) · 5 Handout Themes · Markdown # ## ### · Clickable - [ ]
+              Live Scratchpad · Dynamic #Tags · 7 Keep Colors · Keep Typography & Tasks
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>3 Vaults:</strong>
+                <strong>Live Scratchpad (Top Zone):</strong> Zero-click persistent typing zone with real-time word counting (perfect for drafting <em>Sending</em> spells). Includes 1-click <strong>Pin HUD</strong> and <strong>+ Card</strong> conversion.
+              </li>
+              <li>
+                <strong>3 Core Vaults:</strong>
                 <div className="pl-2 space-y-0.5 mt-0.5 text-slate-400">
-                  <div>• <strong className="text-slate-200">My Notes:</strong> Private scratchpad stored locally on your device.</div>
-                  <div>• <strong className="text-slate-200">Table Notes:</strong> Collaborative cards synchronized across the table for all players.</div>
-                  <div>• <strong className="text-slate-200">GM Notes:</strong> Secret GM vault. Click <strong>Broadcast</strong> to project any note across all screens in real time.</div>
+                  <div>• <strong className="text-slate-200">My Prep:</strong> Private client cards stored locally on your device.</div>
+                  <div>• <strong className="text-slate-200">Handouts:</strong> Collaborative table cards synchronized in real time across all players.</div>
+                  <div>• <strong className="text-slate-200">GM Secrets:</strong> Confidential DM vault. Click <strong>Broadcast</strong> to project any card across all player screens in real time.</div>
                 </div>
               </li>
               <li>
-                <strong>6 Sandbox Categories:</strong> Filter notes by <strong>General</strong>, <strong>NPC</strong>, <strong>Location</strong>, <strong>Loot</strong>, <strong>Encounters</strong>, or <strong>Leads</strong>.
+                <strong>Dynamic #Tags (Keep Labels):</strong> Type <code>#tag</code> (e.g. <code>#npc</code>, <code>#loot</code>, <code>#ashtapor</code>) anywhere in your card title or body. Tags auto-render as clickable chips on cards, and an active tag ribbon appears below search for instant 1-click filtering.
               </li>
               <li>
-                <strong>1-Click Prep Templates:</strong> Choose <em>"📋 Insert Template..."</em> to scaffold structured agendas, dossiers, dungeon waypoints, or encounter cards.
+                <strong>7 Google Keep Colors (🎨):</strong> Color-code your cards universally using the palette swatches (Slate, Crimson, Amber, Emerald, Teal, Sky, Purple) for rapid visual triage across all vaults.
               </li>
               <li>
-                <strong>Interactive Markdown:</strong> Headers (<code>#</code>, <code>##</code>, <code>###</code>) are collapsible; checkboxes (<code>- [ ]</code>) are interactive and clickable directly in reader views.
+                <strong>Keep Typography:</strong> Toolbar buttons for <strong>H1</strong>, <strong>H2</strong>, <strong>Bold</strong>, <em>Italic</em>, <u>Underline</u>, and <s>Strikethrough</s> (<code>~~text~~</code>). Collapsible headers (<code>#</code>, <code>##</code>, <code>###</code>) keep long notes tidy.
               </li>
               <li>
-                <strong>Vault Transfer:</strong> Use <strong>Transfer</strong> to move or copy notes between My Notes, Table Notes, and GM Notes.
+                <strong>Interactive Tasks:</strong> Markdown checklists (<code>- [ ]</code> and <code>- [x]</code>) can be checked off directly inside card views, full reader views, and the Sticky HUD drawer.
+              </li>
+              <li>
+                <strong>Vault Transfer:</strong> Seamlessly move or copy notes between My Prep, Handouts, and GM Secrets using the <strong>Transfer</strong> menu.
               </li>
             </ul>
           </section>
@@ -267,23 +273,23 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
           <section id="help-sec-hud" className="space-y-1.5">
             <h3 className="font-bold text-amber-400 text-xs flex items-center gap-1.5 uppercase tracking-wide">
               <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
-              <span>6. Sticky HUD Note (Cross-Tab Glance)</span>
+              <span>6. Sticky HUD Note (Bi-Directional Glance)</span>
             </h3>
             <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
-              Cross-Tab Pin · Interactive Checkboxes · Live Inline Edit (✏️) · 0 Metadata
+              Two-Way Sync · Scratchpad or Card Pin · Interactive Tasks · 0 Metadata
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
-                <strong>Pin to HUD:</strong> Click <strong>HUD Pin</strong> on any note card to lock it into a slim drawer visible across Combat, Dice, Tactics, Grimoire, and Notes.
+                <strong>Pin from Tab or Scratchpad:</strong> Click <strong>Pin HUD</strong> on either the top Scratchpad or on any note card to lock it into a slim top drawer visible across Combat, Dice, Tactics, Grimoire, and Notes.
               </li>
               <li>
-                <strong>Interactive Drawer:</strong> Click the bar to expand your pinned note. Tasks (<code>- [ ]</code>) can be checked off directly inside the drawer without leaving combat.
+                <strong>Two-Way Synchronization:</strong> Edits and checkbox toggles made inside the HUD glance drawer immediately sync back to your source cards or Scratchpad, and edits made in the Notes tab instantly update the HUD drawer.
               </li>
               <li>
-                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit note text directly in place; edits sync automatically to your underlying vault.
+                <strong>Interactive Drawer:</strong> Click the glance strip to expand. Checklist tasks (<code>- [ ]</code>) toggle in real time without leaving your active tab.
               </li>
               <li>
-                <strong>Private & Local:</strong> Pinned notes live strictly on your client screen and consume 0 room metadata.
+                <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit text directly in place without opening full modal dialogs.
               </li>
             </ul>
           </section>
