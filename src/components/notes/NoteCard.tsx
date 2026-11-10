@@ -160,6 +160,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const transferRef = useRef<HTMLDivElement>(null);
 
+  const isHandoutVault = currentVault === 'tableNotes';
+
   // HUD Pin State
   const [isHudPinned, setIsHudPinned] = useState(() => {
     const cur = getPinnedHudNote();
@@ -187,11 +189,10 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const cat = normalizeCategory(note.category);
   const catStyle = CATEGORY_STYLES[cat] || CATEGORY_STYLES.General;
 
-  // Inline editing state for dropped-down card view
+  // Inline editing state
   const [isInlineEditing, setIsInlineEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(note.title);
   const [editContent, setEditContent] = useState(note.content);
-  const [editCategory, setEditCategory] = useState<NoteCategory>(cat);
   const [editTheme, setEditTheme] = useState<NoteTheme>(note.theme || 'slate');
   const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -199,10 +200,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     if (!isInlineEditing) {
       setEditTitle(note.title);
       setEditContent(note.content);
-      setEditCategory(cat);
       setEditTheme(note.theme || 'slate');
     }
-  }, [note, isInlineEditing, cat]);
+  }, [note, isInlineEditing]);
 
   const handleBroadcastNote = (targetNote: NoteItem) => {
     if (onBroadcastNote) {
@@ -225,7 +225,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const textToCopy = `${note.title}\n[${cat}]\n\n${note.content}`;
+    const textToCopy = `${note.title}\n\n${note.content}`;
     const ok = await copyToClipboard(textToCopy);
     if (ok) {
       setCopied(true);
@@ -274,7 +274,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     e.stopPropagation();
     setEditTitle(note.title);
     setEditContent(note.content);
-    setEditCategory(cat);
     setEditTheme(note.theme || 'slate');
     setIsInlineEditing(true);
   };
@@ -283,7 +282,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     e.stopPropagation();
     setEditTitle(note.title);
     setEditContent(note.content);
-    setEditCategory(cat);
     setEditTheme(note.theme || 'slate');
     setIsInlineEditing(false);
   };
@@ -296,9 +294,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     const updated: NoteItem = {
       ...note,
       title: editTitle.trim(),
-      category: editCategory,
+      category: cat,
       content: editContent.trim(),
-      theme: editTheme,
+      theme: isHandoutVault ? editTheme : 'slate',
       updatedAt: typeof note.updatedAt === 'number' ? Date.now() : new Date().toISOString(),
     };
 
@@ -318,7 +316,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           : ''
       }`}
     >
-      {/* 1. Header Row */}
+      {/* 1. Header Row (Maximized Title Space, Category Text Badge Removed) */}
       <div
         className="p-2.5 flex items-center justify-between gap-1.5 cursor-pointer select-none"
         onClick={isInlineEditing ? undefined : onToggleExpand}
@@ -344,12 +342,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           >
             {note.title}
           </h4>
-
-          <span
-            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider shrink-0 ${catStyle.badge}`}
-          >
-            {cat}
-          </span>
 
           {note.authorRole && (
             <span
@@ -407,7 +399,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       {isExpanded && (
         <div className="px-2.5 pb-2.5 pt-1 space-y-2 border-t border-inherit/30">
           {isInlineEditing ? (
-            /* INLINE EDIT MODE */
+            /* INLINE EDIT MODE (Categories Removed, Theme Restricted to Handouts) */
             <form onSubmit={handleSaveInlineEdit} className="space-y-2" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <input
@@ -420,32 +412,21 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                   autoFocus
                 />
 
-                <select
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value as NoteCategory)}
-                  aria-label="Category selector"
-                  className="px-2 py-1 text-xs rounded bg-black/40 border border-white/20 text-inherit focus:outline-none focus:border-amber-400 cursor-pointer"
-                >
-                  {NOTE_CATEGORIES.map((c) => (
-                    <option key={c} value={c} className="bg-slate-900 text-slate-100 font-sans">
-                      {c}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={editTheme}
-                  onChange={(e) => setEditTheme(e.target.value as NoteTheme)}
-                  aria-label="Note theme selector"
-                  className="px-2 py-1 text-xs rounded bg-black/40 border border-white/20 text-inherit focus:outline-none focus:border-amber-400 cursor-pointer"
-                  title="Note theme"
-                >
-                  {NOTE_THEMES.map((t) => (
-                    <option key={t} value={t} className="bg-slate-900 text-slate-100 font-sans">
-                      {NOTE_THEME_CONFIG[t]?.name || t}
-                    </option>
-                  ))}
-                </select>
+                {isHandoutVault && (
+                  <select
+                    value={editTheme}
+                    onChange={(e) => setEditTheme(e.target.value as NoteTheme)}
+                    aria-label="Handout style theme"
+                    className="px-2 py-1 text-xs rounded bg-black/40 border border-white/20 text-inherit focus:outline-none focus:border-amber-400 cursor-pointer"
+                    title="Handout Style (Slate, Parchment, Tablet, Scroll, Journal)"
+                  >
+                    {NOTE_THEMES.map((t) => (
+                      <option key={t} value={t} className="bg-slate-900 text-slate-100 font-sans">
+                        {NOTE_THEME_CONFIG[t]?.name || t}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Inline Formatting Toolbar */}
@@ -518,7 +499,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                 onChange={(e) => setEditContent(e.target.value)}
                 rows={5}
                 className={`w-full resize-y rounded-lg p-2.5 text-xs focus:outline-none focus:border-amber-400 leading-relaxed border border-white/20 ${themeCfg.contentClasses}`}
-                placeholder="Write note contents... (- [ ] task, - list, --- divider)"
+                placeholder="Write note contents... (- [ ] task, - list, --- divider, #tag)"
                 required
               />
 
@@ -604,7 +585,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                               className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <span>📋</span>
-                              <span>Copy to Table Notes</span>
+                              <span>Copy to Handouts</span>
                             </button>
                           )}
                           {currentVault !== 'tableNotes' && (
@@ -618,7 +599,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                               className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <span>➔</span>
-                              <span>Move to Table Notes</span>
+                              <span>Move to Handouts</span>
                             </button>
                           )}
                           {currentVault !== 'myNotes' && (
@@ -632,7 +613,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                               className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <span>📋</span>
-                              <span>Copy to My Notes</span>
+                              <span>Copy to My Prep</span>
                             </button>
                           )}
                           {currentVault !== 'myNotes' && (
@@ -646,7 +627,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                               className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <span>👤</span>
-                              <span>Move to My Notes</span>
+                              <span>Move to My Prep</span>
                             </button>
                           )}
                           {isGM && currentVault !== 'gmNotes' && currentVault !== 'dmNotes' && (
@@ -661,7 +642,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                                 className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
                               >
                                 <span>📋</span>
-                                <span>Copy to GM Notes</span>
+                                <span>Copy to GM Secrets</span>
                               </button>
                               <button
                                 type="button"
@@ -673,7 +654,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                                 className="px-2.5 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
                               >
                                 <span>🔒</span>
-                                <span>Move to GM Notes</span>
+                                <span>Move to GM Secrets</span>
                               </button>
                             </>
                           )}
@@ -682,7 +663,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
                     </div>
                   )}
 
-                  {/* Broadcast (STRICTLY GM Notes) */}
+                  {/* Broadcast (STRICTLY GM Secrets) */}
                   {isGM && currentVault === 'gmNotes' && (onBroadcastNote || onToggleReveal) && (
                     <button
                       type="button"
