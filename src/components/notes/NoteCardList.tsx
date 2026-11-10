@@ -17,7 +17,6 @@ import {
 import {
   NoteItem,
   NoteCategory,
-  NOTE_CATEGORIES,
   NotesExportPayload,
   NoteTransferAction,
   normalizeCategory,
@@ -55,25 +54,6 @@ export interface NoteCardListProps {
   activeBroadcastId?: string | null;
 }
 
-const CATEGORY_ORDER: NoteCategory[] = [
-  'General',
-  'NPC',
-  'Location',
-  'Loot',
-  'Encounters',
-  'Leads',
-];
-
-const CATEGORY_ABBREVIATIONS: Record<string, string> = {
-  All: 'All',
-  General: 'Gen',
-  NPC: 'NPC',
-  Location: 'Loc',
-  Loot: 'Loot',
-  Encounters: 'Enc',
-  Leads: 'Lead',
-};
-
 export const NoteCardList: React.FC<NoteCardListProps> = ({
   notes,
   expandedIds: externalExpandedIds,
@@ -92,8 +72,6 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   headerInfo,
   hideControls = false,
   externalSearchQuery,
-  externalSelectedCategory,
-  onExternalResetFilters,
   onOpenReader,
   isGM = currentRole === 'GM',
   currentVault = 'myNotes',
@@ -102,16 +80,11 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
   activeBroadcastId,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
-  const [internalSelectedCategory, setInternalSelectedCategory] = useState<string>('All');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const searchQuery =
     externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
-  const selectedCategory =
-    externalSelectedCategory !== undefined
-      ? externalSelectedCategory
-      : internalSelectedCategory;
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -281,56 +254,15 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
     setEditingNote(null);
   };
 
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      All: notes.length,
-      General: 0,
-      NPC: 0,
-      Location: 0,
-      Loot: 0,
-      Encounters: 0,
-      Leads: 0,
-    };
-    notes.forEach((n) => {
-      const cat = normalizeCategory(n.category);
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-    return counts;
-  }, [notes]);
-
-  const visibleCategories = useMemo(() => {
-    const list = ['All'];
-    CATEGORY_ORDER.forEach((cat) => {
-      if ((categoryCounts[cat] || 0) > 0) {
-        list.push(cat);
-      }
-    });
-    return list;
-  }, [categoryCounts]);
-
-  const handleCategoryPillClick = (cat: string) => {
-    if (selectedCategory === cat || cat === 'All') {
-      setInternalSelectedCategory('All');
-    } else {
-      setInternalSelectedCategory(cat);
-    }
-  };
-
   const filteredAndSortedNotes = useMemo(() => {
     return [...notes]
       .filter((note) => {
-        const cat = normalizeCategory(note.category);
-        const matchesCategory =
-          selectedCategory === 'All' || cat === selectedCategory;
-        if (!matchesCategory) return false;
-
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase().trim();
         const inTitle = note.title.toLowerCase().includes(q);
         const inContent = note.content.toLowerCase().includes(q);
-        const inCategory = cat.toLowerCase().includes(q);
         const inAuthor = (note.authorName || '').toLowerCase().includes(q);
-        return inTitle || inContent || inCategory || inAuthor;
+        return inTitle || inContent || inAuthor;
       })
       .sort((a, b) => {
         const aPinned = !!a.isPinned;
@@ -339,7 +271,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         if (!aPinned && bPinned) return 1;
         return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
       });
-  }, [notes, selectedCategory, searchQuery]);
+  }, [notes, searchQuery]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-1.5">
@@ -354,120 +286,92 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
       {headerInfo && <div className="shrink-0">{headerInfo}</div>}
 
       {!hideControls && (
-        <div className="shrink-0 flex flex-col gap-1">
-          <div className="flex items-center gap-1.5">
-            <div className="relative flex-1 min-w-0">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setInternalSearchQuery(e.target.value)}
-                placeholder="Search notes..."
-                className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setInternalSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
-                  title="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1 shrink-0">
+        <div className="shrink-0 flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setInternalSearchQuery(e.target.value)}
+              placeholder="Search notes or #tags..."
+              className="w-full h-7 pl-8 pr-6 text-xs rounded-lg bg-slate-950 border border-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans transition"
+            />
+            {searchQuery && (
               <button
                 type="button"
-                onClick={handleExpandAll}
-                title="Expand All"
-                aria-label="Expand All"
-                className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+                onClick={() => setInternalSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                title="Clear search"
               >
-                <ChevronsUpDown className="w-3.5 h-3.5" />
+                <X className="w-3.5 h-3.5" />
               </button>
-
-              <button
-                type="button"
-                onClick={handleCollapseAll}
-                title="Collapse All"
-                aria-label="Collapse All"
-                className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-              >
-                <ChevronsDownUp className="w-3.5 h-3.5" />
-              </button>
-
-              {allowImportExport && (
-                <div className="relative" ref={menuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setIsMenuOpen((prev) => !prev)}
-                    title="Backup & Restore Options"
-                    aria-label="Backup & Restore Options"
-                    className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
-                  >
-                    <MoreVertical className="w-3.5 h-3.5" />
-                  </button>
-
-                  {isMenuOpen && (
-                    <div className="absolute right-0 mt-1 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
-                      <button
-                        type="button"
-                        onClick={handleExportJSON}
-                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>⬇ Export JSON Backup</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleTriggerImport}
-                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        <span>⬆ Import JSON Backup</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handleOpenCreateModal}
-                className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-                title="Create New Note"
-              >
-                +
-              </button>
-            </div>
+            )}
           </div>
 
-          <div className="h-6 flex items-center gap-1 overflow-x-hidden flex-nowrap py-0.5 px-0.5">
-            {visibleCategories.map((cat) => {
-              const isSelected = selectedCategory === cat;
-              const count = categoryCounts[cat] || 0;
-              const abbr = CATEGORY_ABBREVIATIONS[cat] || cat;
-              const activeStyle =
-                CATEGORY_PILL_ACTIVE_STYLES[cat] || CATEGORY_PILL_ACTIVE_STYLES.All;
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={handleExpandAll}
+              title="Expand All"
+              aria-label="Expand All"
+              className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+            >
+              <ChevronsUpDown className="w-3.5 h-3.5" />
+            </button>
 
-              return (
+            <button
+              type="button"
+              onClick={handleCollapseAll}
+              title="Collapse All"
+              aria-label="Collapse All"
+              className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
+            >
+              <ChevronsDownUp className="w-3.5 h-3.5" />
+            </button>
+
+            {allowImportExport && (
+              <div className="relative" ref={menuRef}>
                 <button
-                  key={cat}
                   type="button"
-                  onClick={() => handleCategoryPillClick(cat)}
-                  className={
-                    isSelected
-                      ? `px-1.5 py-0.5 text-[10px] font-bold rounded-full border transition-colors shrink-0 cursor-pointer text-slate-100 ${activeStyle}`
-                      : 'px-1.5 py-0.5 text-[10px] font-semibold rounded-full border transition-colors shrink-0 cursor-pointer bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
-                  }
-                  title={`Filter by ${cat} (${count})`}
+                  onClick={() => setIsMenuOpen((prev) => !prev)}
+                  title="Backup & Restore Options"
+                  aria-label="Backup & Restore Options"
+                  className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 flex items-center justify-center transition cursor-pointer"
                 >
-                  {abbr} {count}
+                  <MoreVertical className="w-3.5 h-3.5" />
                 </button>
-              );
-            })}
+
+                {isMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 flex flex-col text-xs">
+                    <button
+                      type="button"
+                      onClick={handleExportJSON}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>⬇ Export JSON Backup</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTriggerImport}
+                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>⬆ Import JSON Backup</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleOpenCreateModal}
+              className="w-7 h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+              title="Create New Note"
+            >
+              +
+            </button>
           </div>
         </div>
       )}
@@ -479,20 +383,13 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
             <FileText className="w-8 h-8 opacity-30 text-slate-400" />
             <p className="text-xs font-medium text-slate-300">{emptyMessage}</p>
             <p className="text-[11px] text-slate-500">{emptySubtitle}</p>
-            {(searchQuery || selectedCategory !== 'All') && (
+            {searchQuery && (
               <button
                 type="button"
-                onClick={() => {
-                  if (onExternalResetFilters) {
-                    onExternalResetFilters();
-                  } else {
-                    setInternalSearchQuery('');
-                    setInternalSelectedCategory('All');
-                  }
-                }}
+                onClick={() => setInternalSearchQuery('')}
                 className="mt-2 text-xs text-amber-400 hover:underline cursor-pointer"
               >
-                Reset filters
+                Clear search
               </button>
             )}
           </div>
@@ -522,9 +419,7 @@ export const NoteCardList: React.FC<NoteCardListProps> = ({
         isGM={isGM}
         currentVault={currentVault}
         editingNote={editingNote}
-        defaultCategory={
-          selectedCategory !== 'All' ? (normalizeCategory(selectedCategory)) : 'General'
-        }
+        defaultCategory="General"
         onClose={() => {
           setIsEditorOpen(false);
           setEditingNote(null);
