@@ -10,6 +10,7 @@ import {
   RollVisibility,
   RollDisplayMode,
   CustomMacro,
+  RollInstance,
 } from '../../types/ttrpg';
 import {
   executeDiceRoll,
@@ -24,6 +25,7 @@ import {
   loadCustomMacros,
   addCustomMacro,
   updateCustomMacro,
+  duplicateCustomMacro,
   deleteCustomMacro,
 } from '../../utils/macroStorage';
 import {
@@ -42,6 +44,7 @@ import {
   SlidersHorizontal,
   Check,
   FileText,
+  Copy,
 } from 'lucide-react';
 import { AddCustomMacroModal } from './AddCustomMacroModal';
 import { EditCustomMacroModal } from './EditCustomMacroModal';
@@ -72,6 +75,17 @@ function getEffectiveGroup(macro: CustomMacro): string {
   return macro.group && macro.group.trim() ? macro.group.trim() : 'General';
 }
 
+/**
+ * Doubles the number of dice in a formula for 5e Critical Hits while keeping flat modifiers unchanged.
+ * Example: "2d6+1d8+3" -> "4d6+2d8+3"
+ */
+function doubleDiceInFormula(formula: string): string {
+  return formula.replace(/(\d*)d(\d+)/gi, (_match, countStr, sidesStr) => {
+    const count = countStr ? parseInt(countStr, 10) : 1;
+    return `${count * 2}d${sidesStr}`;
+  });
+}
+
 export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, playerName }) => {
   const isGameMaster = isGM !== undefined ? isGM : isDm;
   const rollerName = playerName?.trim() || (isGameMaster ? 'Game Master' : 'Adventurer');
@@ -85,7 +99,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
   // Docked Calculator State
   const [calcMode, setCalcMode] = useState<CalcViewMode>('docked');
 
-  // Custom Macros, Profile Dropdown & Manage Mode State
+  // Custom Macros, Profile Dropdown, Batch Multiplier, Crit & Manage Mode State
   const [macros, setMacros] = useState<CustomMacro[]>(() => loadCustomMacros());
   const [isMacrosOpen, setIsMacrosOpen] = useState<boolean>(true);
   const [selectedGroup, setSelectedGroup] = useState<string>(() => {
@@ -96,6 +110,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     }
   });
   const [isManageMode, setIsManageMode] = useState<boolean>(false);
+  const [batchMultiplier, setBatchMultiplier] = useState<number>(1);
+  const [isCritMode, setIsCritMode] = useState<boolean>(false);
   const [editingMacro, setEditingMacro] = useState<CustomMacro | null>(null);
   const [isAddMacroOpen, setIsAddMacroOpen] = useState<boolean>(false);
   const [macroMode, setMacroMode] = useState<'instant' | 'queue'>('instant');
@@ -112,6 +128,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     } catch {
       // Ignore storage quota errors
     }
+  };
+
+  const cycleBatchMultiplier = () => {
+    setBatchMultiplier((prev) => (prev >= 4 ? 1 : prev + 1));
   };
 
   // Compute available profile groups and counts
@@ -326,15 +346,39 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     liveFeedSync.recordDiceRoll(result, true);
   };
 
-  const evaluateMacro = (macro: CustomMacro, slot: MacroSlot = 'primary') => {
-    const isPaired = Boolean(macro.secondaryFormula && macro.secondaryFormula.trim());
-    const expr = (slot === 'secondary' && isPaired ? macro.secondaryFormula! : macro.formula).trim();
-    const displayLabel = isPaired
+  const evaluateMacro = (
+    macro: CustomMacro,
+    slot: MacroSlot = 'primary',
+    applyCrit: boolean = false
+  ) => {
+    const hasPrimary = Boolean(macro.formula && macro.formula.trim());
+    const hasSecondary = Boolean(macro.secondaryFormula && macro.secondaryFormula.trim());
+    const isPaired = hasPrimary && hasSecondary;
+
+    const rawExpr =
+      slot === 'secondary' && hasSecondary
+        ? macro.secondaryFormula!.trim()
+        : (macro.formula || macro.secondaryFormula || '').trim();
+
+    const parsedCheck = parseDiceFormula(rawExpr);
+    const isD20Formula =
+      (parsedCheck?.pool?.some((p) => p.diceType === 'd20')) || /\bd20\b/i.test(rawExpr);
+
+    // Double dice when Crit mode is enabled on Damage/Secondary or non-d20 damage macros
+    const shouldDoubleDice = applyCrit && (slot === 'secondary' || (!isPaired && !isD20Formula));
+    const expr = shouldDoubleDice ? doubleDiceInFormula(rawExpr) : rawExpr;
+
+    const baseLabel = isPaired
       ? `${macro.name} (${slot === 'secondary' ? 'Dmg' : 'Atk'})`
       : macro.name;
+    const displayLabel = shouldDoubleDice ? `${baseLabel} [CRIT ×2 Dice]` : baseLabel;
+
+    // Show after-effects only on Secondary (Damage) when paired, or on the single roll when standalone
+    const shouldIncludeNotes = !isPaired || slot === 'secondary';
+    const resolvedNotes = shouldIncludeNotes && macro.notes?.trim() ? macro.notes.trim() : undefined;
 
     let activeAdvMode: 'normal' | 'advantage' | 'disadvantage' = 'normal';
-    if (slot === 'primary') {
+    if (slot === 'primary' && hasPrimary) {
       const rawMode = (macro as any).rollMode || macro.advantageMode;
       if (rawMode === 'advantage' || rawMode === 'Adv' || rawMode === 'adv') {
         activeAdvMode = 'advantage';
@@ -367,11 +411,22 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
           total,
           formula: expr,
           breakdownLine,
-          isCrit,
+          isCrit: isCrit || shouldDoubleDice,
           isFumble,
           isD20,
+          d20Chosen: winningFace,
+          d20Discarded: discardedFace,
+          modifier: macroMod,
+          poolBreakdown: [
+            {
+              dieType: parsedMacro.dieType || 'd20',
+              rolls: [winningFace],
+              rawRolls: [valA, valB],
+            },
+          ],
           label: displayLabel,
-          notes: macro.notes?.trim() || undefined,
+          notes: resolvedNotes,
+          didCritDouble: shouldDoubleDice,
         };
       }
 
@@ -394,11 +449,16 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         total: res.total,
         formula: expr,
         breakdownLine: line,
-        isCrit: res.isCrit,
-        isFumble: res.isFumble,
+        isCrit: Boolean(res.isCrit || shouldDoubleDice),
+        isFumble: Boolean(res.isFumble),
         isD20,
+        d20Chosen: res.rolls[0] ?? res.total,
+        d20Discarded: undefined,
+        modifier: macroMod,
+        poolBreakdown: res.poolBreakdown,
         label: displayLabel,
-        notes: macro.notes?.trim() || undefined,
+        notes: resolvedNotes,
+        didCritDouble: shouldDoubleDice,
       };
     }
 
@@ -424,11 +484,16 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       total: res.total,
       formula: expr,
       breakdownLine: line,
-      isCrit: res.isCrit,
-      isFumble: res.isFumble,
+      isCrit: Boolean(res.isCrit || shouldDoubleDice),
+      isFumble: Boolean(res.isFumble),
       isD20,
+      d20Chosen: res.rolls[0] ?? res.total,
+      d20Discarded: undefined,
+      modifier: finalMacroModifier,
+      poolBreakdown: res.poolBreakdown,
       label: displayLabel,
-      notes: macro.notes?.trim() || undefined,
+      notes: resolvedNotes,
+      didCritDouble: shouldDoubleDice,
     };
   };
 
@@ -436,15 +501,95 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     e.preventDefault();
     e.stopPropagation();
 
-    const evaluated = evaluateMacro(macro, slot);
     const currentUserId = liveFeedSync.getPlayerId();
-    const breakdownLines = [evaluated.breakdownLine];
-    if (evaluated.notes) {
-      breakdownLines.push(`📝 ${evaluated.notes}`);
+    const countToRoll = batchMultiplier;
+
+    // Single execution (×1)
+    if (countToRoll === 1) {
+      const evaluated = evaluateMacro(macro, slot, isCritMode);
+      if (evaluated.didCritDouble) {
+        setIsCritMode(false);
+      }
+
+      const result: RollResult = {
+        id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        timestamp: Date.now(),
+        sender: rollerName,
+        rollerName,
+        rollerId: currentUserId,
+        isDm,
+        visibility,
+        rollType: 'Straight roll',
+        diceType: evaluated.isD20 ? 'd20' : 'd6',
+        count: 1,
+        modifier: evaluated.modifier,
+        rolls: [evaluated.total],
+        rawRolls: [evaluated.total],
+        total: evaluated.total,
+        advantageMode: 'normal',
+        breakdown: [evaluated.breakdownLine],
+        poolBreakdown: evaluated.poolBreakdown,
+        formula: evaluated.formula,
+        label: evaluated.label,
+        macroName: evaluated.label,
+        notes: evaluated.notes,
+        isCrit: evaluated.isCrit,
+        isFumble: evaluated.isFumble,
+        displayMode: 'sum',
+      };
+
+      liveFeedSync.recordDiceRoll(result, true);
+      return;
     }
 
-    const result: RollResult = {
-      id: `roll-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    // Batch execution (×2, ×3, ×4)
+    const breakdowns: string[] = [];
+    const rollTotals: number[] = [];
+    const instances: RollInstance[] = [];
+    let hasD20 = false;
+    let hasCrit = false;
+    let hasFumble = false;
+    let totalSum = 0;
+    let formulaUsed = '';
+    let baseMacroLabel = '';
+    let resolvedNote: string | undefined;
+    let didAnyCritDouble = false;
+
+    for (let i = 1; i <= countToRoll; i++) {
+      const evaluated = evaluateMacro(macro, slot, isCritMode);
+      if (evaluated.didCritDouble) didAnyCritDouble = true;
+      formulaUsed = evaluated.formula;
+      baseMacroLabel = evaluated.label;
+      if (evaluated.notes) resolvedNote = evaluated.notes;
+
+      breakdowns.push(`#${i} · ${evaluated.breakdownLine}`);
+      rollTotals.push(evaluated.total);
+      totalSum += evaluated.total;
+      if (evaluated.isD20) hasD20 = true;
+      if (evaluated.isCrit) hasCrit = true;
+      if (evaluated.isFumble) hasFumble = true;
+
+      if (evaluated.isD20) {
+        instances.push({
+          index: i,
+          d20Chosen: evaluated.d20Chosen,
+          d20Discarded: evaluated.d20Discarded,
+          isCrit: evaluated.d20Chosen === 20,
+          isFumble: evaluated.d20Chosen === 1,
+          riders: [],
+          modifier: evaluated.modifier,
+          total: evaluated.total,
+        });
+      }
+    }
+
+    if (didAnyCritDouble) {
+      setIsCritMode(false);
+    }
+
+    const batchTitle = `${baseMacroLabel} (×${countToRoll})`;
+    const batchResult: RollResult = {
+      id: `roll-batch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       timestamp: Date.now(),
       sender: rollerName,
       rollerName,
@@ -452,24 +597,25 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       isDm,
       visibility,
       rollType: 'Straight roll',
-      diceType: evaluated.isD20 ? 'd20' : 'd6',
-      count: 1,
+      diceType: hasD20 ? 'd20' : 'd6',
+      count: countToRoll,
       modifier: 0,
-      rolls: [evaluated.total],
-      rawRolls: [evaluated.total],
-      total: evaluated.total,
+      rolls: rollTotals,
+      rawRolls: rollTotals,
+      total: totalSum,
       advantageMode: 'normal',
-      breakdown: breakdownLines,
-      formula: evaluated.formula,
-      label: evaluated.label,
-      macroName: evaluated.label,
-      notes: evaluated.notes,
-      isCrit: evaluated.isCrit,
-      isFumble: evaluated.isFumble,
-      displayMode: 'sum',
+      breakdown: breakdowns,
+      formula: `${formulaUsed} (×${countToRoll})`,
+      label: batchTitle,
+      macroName: batchTitle,
+      notes: resolvedNote,
+      isCrit: hasCrit,
+      isFumble: hasFumble,
+      displayMode: hasD20 ? 'individual' : 'sum',
+      instances: hasD20 ? instances : undefined,
     };
 
-    liveFeedSync.recordDiceRoll(result, true);
+    liveFeedSync.recordDiceRoll(batchResult, true);
   };
 
   const handleStageMacro = (macro: CustomMacro, e: React.MouseEvent, slot: MacroSlot = 'primary') => {
@@ -477,14 +623,16 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     e.stopPropagation();
 
     const key = `${macro.id}:${slot}`;
+    const addCount = batchMultiplier;
+
     setStagedQueue((prev) => {
       const idx = prev.findIndex((item) => item.key === key);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], count: next[idx].count + 1 };
+        next[idx] = { ...next[idx], count: next[idx].count + addCount };
         return next;
       }
-      return [...prev, { key, macro, slot, count: 1 }];
+      return [...prev, { key, macro, slot, count: addCount }];
     });
   };
 
@@ -524,15 +672,19 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     let hasFumble = false;
     let totalSum = 0;
     const comboNames: string[] = [];
+    let didAnyCritDouble = false;
 
     stagedQueue.forEach((item) => {
-      const isPaired = Boolean(item.macro.secondaryFormula && item.macro.secondaryFormula.trim());
+      const hasPrimary = Boolean(item.macro.formula && item.macro.formula.trim());
+      const hasSecondary = Boolean(item.macro.secondaryFormula && item.macro.secondaryFormula.trim());
+      const isPaired = hasPrimary && hasSecondary;
       const itemDisplayName = isPaired
         ? `${item.macro.name} (${item.slot === 'secondary' ? 'Dmg' : 'Atk'})`
         : item.macro.name;
 
       for (let i = 0; i < item.count; i++) {
-        const evalRes = evaluateMacro(item.macro, item.slot);
+        const evalRes = evaluateMacro(item.macro, item.slot, isCritMode);
+        if (evalRes.didCritDouble) didAnyCritDouble = true;
         breakdowns.push(evalRes.breakdownLine);
         rollTotals.push(evalRes.total);
         totalSum += evalRes.total;
@@ -544,10 +696,11 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       comboNames.push(item.count > 1 ? `${itemDisplayName} ×${item.count}` : itemDisplayName);
     });
 
-    uniqueNotes.forEach((noteText) => {
-      breakdowns.push(`📝 ${noteText}`);
-    });
+    if (didAnyCritDouble) {
+      setIsCritMode(false);
+    }
 
+    const combinedNotes = uniqueNotes.size > 0 ? Array.from(uniqueNotes).join(' | ') : undefined;
     const isIndividual = hasD20;
     const totalRollsCount = stagedQueue.reduce((acc, curr) => acc + curr.count, 0);
 
@@ -571,6 +724,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       formula: `Combo (${comboNames.join(', ')})`,
       label: `Combo (${totalRollsCount} rolls)`,
       macroName: `Combo (${totalRollsCount})`,
+      notes: combinedNotes,
       isCrit: hasCrit,
       isFumble: hasFumble,
       displayMode: isIndividual ? 'individual' : 'sum',
@@ -590,6 +744,12 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
     e.stopPropagation();
     setEditingMacro(m);
     setIsAddMacroOpen(true);
+  };
+
+  const handleDuplicateMacro = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = duplicateCustomMacro(id);
+    setMacros(updated);
   };
 
   const handleDeleteMacro = (id: string, e: React.MouseEvent) => {
@@ -826,23 +986,22 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         onApply={handleApplyFromCalculator}
       />
 
-      {/* 6. CUSTOM MACROS DRAWER (HEADER PROFILE DROPDOWN + HYBRID ROWS + MANAGE MODE) */}
+      {/* 6. CUSTOM MACROS DRAWER (ULTRA-COMPACT SINGLE-ROW HEADER) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
-        <div className="flex items-center justify-between gap-1.5">
-          {/* Left: Collapse Toggle + Profile Dropdown Selector */}
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-1">
+          {/* Left: Collapse Chevron + Profile Dropdown */}
+          <div className="flex items-center gap-1 min-w-0 flex-1">
             <button
               type="button"
               onClick={() => setIsMacrosOpen(!isMacrosOpen)}
-              className="flex items-center gap-1 text-xs font-bold text-slate-200 hover:text-amber-300 transition cursor-pointer shrink-0"
+              className="p-0.5 text-amber-400 hover:text-amber-300 rounded hover:bg-slate-800 transition cursor-pointer shrink-0 flex items-center"
               title={isMacrosOpen ? 'Collapse Macros' : 'Expand Macros'}
             >
-              <Bookmark className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="hidden xs:inline">Macros</span>
+              <Bookmark className="w-3.5 h-3.5" />
               {isMacrosOpen ? (
-                <ChevronUp className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <ChevronUp className="w-3 h-3 text-slate-400" />
               ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <ChevronDown className="w-3 h-3 text-slate-400" />
               )}
             </button>
 
@@ -854,10 +1013,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
               }}
               aria-label="Select Macro Profile"
               title="Filter macros by Monster / Encounter Profile"
-              className="min-w-0 max-w-[140px] px-2 py-0.5 text-[11px] font-bold rounded-md bg-slate-950 border border-slate-700/90 text-amber-300 hover:border-amber-400/70 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
+              className="min-w-0 max-w-[125px] px-1.5 py-0.5 text-[11px] font-bold rounded-md bg-slate-950 border border-slate-700/90 text-amber-300 hover:border-amber-400/70 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
             >
               <option value="All" className="bg-slate-900 text-slate-100">
-                All Profiles ({groupCounts.All || 0})
+                All ({groupCounts.All || 0})
               </option>
               {availableGroups.map((grp) => (
                 <option key={grp} value={grp} className="bg-slate-900 text-slate-100">
@@ -867,40 +1026,69 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
             </select>
           </div>
 
-          {/* Right: Mode Toggle + Manage + Add */}
+          {/* Right: Single Mode Pill + Batch Multiplier (×1–×4) + Crit + Manage + Add */}
           <div className="flex items-center gap-1 shrink-0">
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 text-[10px] shrink-0">
-              <button
-                type="button"
-                onClick={() => setMacroMode('instant')}
-                className={`px-1.5 py-0.5 rounded font-semibold transition cursor-pointer flex items-center gap-0.5 ${
-                  macroMode === 'instant'
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="1-Click Mode: Tap any macro to roll immediately"
-              >
-                <Zap className="w-2.5 h-2.5" />
-                <span>1-Click</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMacroMode('queue');
-                  if (!isMacrosOpen) setIsMacrosOpen(true);
-                }}
-                className={`px-1.5 py-0.5 rounded font-semibold transition cursor-pointer flex items-center gap-0.5 ${
-                  macroMode === 'queue'
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Queue Mode: Tap macros to stage combo attacks and roll them together"
-              >
-                <Layers className="w-2.5 h-2.5" />
-                <span>Queue</span>
-              </button>
-            </div>
+            {/* Single-Pill Mode Toggle (1-Click <-> Queue) */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = macroMode === 'instant' ? 'queue' : 'instant';
+                setMacroMode(nextMode);
+                if (nextMode === 'queue' && !isMacrosOpen) setIsMacrosOpen(true);
+              }}
+              className={`px-1.5 py-0.5 rounded border text-[10px] font-bold transition cursor-pointer flex items-center gap-0.5 shrink-0 ${
+                macroMode === 'queue'
+                  ? 'bg-indigo-500/20 border-indigo-400 text-indigo-300'
+                  : 'bg-slate-950 border-slate-800 text-amber-400 hover:border-slate-700'
+              }`}
+              title={
+                macroMode === 'instant'
+                  ? 'Currently 1-Click Mode (Click to switch to Combo Queue Mode)'
+                  : 'Currently Combo Queue Mode (Click to switch to 1-Click Mode)'
+              }
+            >
+              {macroMode === 'instant' ? (
+                <>
+                  <Zap className="w-2.5 h-2.5" />
+                  <span>1-Click</span>
+                </>
+              ) : (
+                <>
+                  <Layers className="w-2.5 h-2.5" />
+                  <span>Queue</span>
+                </>
+              )}
+            </button>
 
+            {/* Batch Multiplier Cycle Pill (×1 -> ×2 -> ×3 -> ×4) */}
+            <button
+              type="button"
+              onClick={cycleBatchMultiplier}
+              className={`px-1.5 py-0.5 rounded border text-[10px] font-mono font-black transition cursor-pointer shrink-0 ${
+                batchMultiplier > 1
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+              }`}
+              title={`Batch Multiplier: ×${batchMultiplier} (Click to cycle ×1, ×2, ×3, ×4 for mob attacks)`}
+            >
+              ×{batchMultiplier}
+            </button>
+
+            {/* Critical Hit (Doubles Dice Count on Damage) */}
+            <button
+              type="button"
+              onClick={() => setIsCritMode((prev) => !prev)}
+              className={`px-1.5 py-0.5 rounded border text-[10px] font-bold transition cursor-pointer shrink-0 ${
+                isCritMode
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-sm'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-emerald-300 hover:border-slate-700'
+              }`}
+              title="Crit Mode: Doubles number of dice rolled on next Damage roll (flat modifier unchanged)"
+            >
+              Crit
+            </button>
+
+            {/* Manage Mode Toggle (Icon-only until active) */}
             {macros.length > 0 && (
               <button
                 type="button"
@@ -908,31 +1096,29 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                   setIsManageMode((prev) => !prev);
                   if (!isMacrosOpen) setIsMacrosOpen(true);
                 }}
-                className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition cursor-pointer flex items-center gap-0.5 ${
+                className={`p-1 rounded border transition cursor-pointer flex items-center gap-0.5 shrink-0 ${
                   isManageMode
-                    ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-sm'
+                    ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 px-1.5 text-[10px] font-bold'
                     : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
                 }`}
-                title={isManageMode ? 'Exit Manage Mode' : 'Manage Macros (Edit / Delete / Pair Attacks)'}
+                title={isManageMode ? 'Exit Manage Mode' : 'Manage Macros (Clone / Edit / Delete)'}
               >
                 {isManageMode ? (
                   <>
-                    <Check className="w-2.5 h-2.5" />
+                    <Check className="w-3 h-3" />
                     <span>Done</span>
                   </>
                 ) : (
-                  <>
-                    <SlidersHorizontal className="w-2.5 h-2.5" />
-                    <span>Manage</span>
-                  </>
+                  <SlidersHorizontal className="w-3 h-3" />
                 )}
               </button>
             )}
 
+            {/* + Add Macro */}
             <button
               type="button"
               onClick={handleOpenAddMacro}
-              className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-500/40 transition cursor-pointer flex items-center gap-0.5"
+              className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-500/40 transition cursor-pointer flex items-center gap-0.5 shrink-0"
               title="Create a new macro"
             >
               <Plus className="w-3 h-3" />
@@ -941,7 +1127,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
           </div>
         </div>
 
-        {/* Hybrid Macro Grid: Standalone Pills (1-col) + Paired Attack/Damage Rows (Full-Width 2-col) */}
+        {/* Hybrid Macro Grid */}
         {isMacrosOpen && (
           <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pt-0.5 pr-0.5">
             {filteredMacros.length === 0 ? (
@@ -950,12 +1136,26 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
               </div>
             ) : (
               filteredMacros.map((m) => {
-                const isPaired = Boolean(m.secondaryFormula && m.secondaryFormula.trim());
+                const hasPrimary = Boolean(m.formula && m.formula.trim());
+                const hasSecondary = Boolean(m.secondaryFormula && m.secondaryFormula.trim());
+                const isPaired = hasPrimary && hasSecondary;
+                const isDamageOnly = !hasPrimary && hasSecondary;
+
                 const primaryStaged = stagedQueue.find((item) => item.key === `${m.id}:primary`);
                 const secondaryStaged = stagedQueue.find((item) => item.key === `${m.id}:secondary`);
                 const hasNotes = Boolean(m.notes && m.notes.trim());
+
+                const displayPrimary = m.formula || '';
+                const displaySecondary = m.secondaryFormula
+                  ? isCritMode
+                    ? doubleDiceInFormula(m.secondaryFormula)
+                    : m.secondaryFormula
+                  : '';
+
                 const tooltipText = [
-                  `${m.name}: ${m.formula}${isPaired ? ` | Dmg: ${m.secondaryFormula}` : ''}`,
+                  `${m.name}${hasPrimary ? ` | Atk: ${m.formula}` : ''}${
+                    hasSecondary ? ` | Dmg: ${m.secondaryFormula}` : ''
+                  }`,
                   hasNotes ? `Notes: ${m.notes}` : '',
                 ]
                   .filter(Boolean)
@@ -980,7 +1180,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                       }`}
                       title={tooltipText}
                     >
-                      {/* Ability Title + Adv/Dis + Notes Indicator */}
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
                         <span className="font-semibold text-slate-200 truncate">
                           {m.name}
@@ -1006,12 +1205,19 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                         )}
                       </div>
 
-                      {/* Action Buttons or Manage Controls */}
                       {isManageMode ? (
                         <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] font-mono text-slate-500 mr-1">
+                          <span className="text-[10px] font-mono text-slate-500 mr-0.5">
                             {m.formula} / {m.secondaryFormula}
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDuplicateMacro(m.id, e)}
+                            className="p-0.5 text-slate-400 hover:text-emerald-300 rounded hover:bg-slate-800 cursor-pointer"
+                            title="Clone / Duplicate macro"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
                           <button
                             type="button"
                             onClick={(e) => handleOpenEditMacro(m, e)}
@@ -1046,12 +1252,12 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                             }`}
                             title={
                               macroMode === 'queue'
-                                ? `Stage Attack/Primary: ${m.formula}`
-                                : `Roll Attack/Primary: ${m.formula}`
+                                ? `Stage Attack: ${displayPrimary}`
+                                : `Roll Attack: ${displayPrimary}${batchMultiplier > 1 ? ` (×${batchMultiplier})` : ''}`
                             }
                           >
                             <span>⚔️</span>
-                            <span>{m.formula}</span>
+                            <span>{displayPrimary}</span>
                             {primaryStaged && (
                               <span className="px-1 bg-white text-indigo-950 rounded font-black text-[9px]">
                                 ×{primaryStaged.count}
@@ -1068,18 +1274,20 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                                 : handleRollMacro(m, e, 'secondary')
                             }
                             className={`px-2 py-0.5 rounded border text-[10px] font-mono font-bold flex items-center gap-1 transition cursor-pointer ${
-                              secondaryStaged
+                              isCritMode
+                                ? 'bg-emerald-950/70 hover:bg-emerald-500 border-emerald-400 text-emerald-300 hover:text-slate-950'
+                                : secondaryStaged
                                 ? 'bg-amber-500 border-amber-300 text-slate-950 shadow-sm'
                                 : 'bg-amber-950/40 hover:bg-amber-500/90 border-amber-500/40 text-amber-300 hover:text-slate-950'
                             }`}
                             title={
                               macroMode === 'queue'
-                                ? `Stage Damage/2nd Roll: ${m.secondaryFormula}`
-                                : `Roll Damage/2nd Roll: ${m.secondaryFormula}`
+                                ? `Stage Damage: ${displaySecondary}`
+                                : `Roll Damage: ${displaySecondary}${batchMultiplier > 1 ? ` (×${batchMultiplier})` : ''}`
                             }
                           >
                             <span>💥</span>
-                            <span>{m.secondaryFormula}</span>
+                            <span>{displaySecondary}</span>
                             {secondaryStaged && (
                               <span className="px-1 bg-slate-950 text-amber-300 rounded font-black text-[9px]">
                                 ×{secondaryStaged.count}
@@ -1092,8 +1300,15 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                   );
                 }
 
-                /* CASE B: STANDALONE SINGLE-FORMULA PILL */
-                const isStaged = Boolean(primaryStaged);
+                /* CASE B: STANDALONE SINGLE-FORMULA PILL (Primary-Only OR Damage-Only) */
+                const activeSlot: MacroSlot = isDamageOnly ? 'secondary' : 'primary';
+                const activeStaged = isDamageOnly ? secondaryStaged : primaryStaged;
+                const isStaged = Boolean(activeStaged);
+                const rawFormula = isDamageOnly ? m.secondaryFormula! : m.formula!;
+                const isD20Single = /\bd20\b/i.test(rawFormula);
+                const shownFormula =
+                  isCritMode && !isD20Single ? doubleDiceInFormula(rawFormula) : rawFormula;
+
                 return (
                   <div
                     key={m.id}
@@ -1101,9 +1316,9 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                       if (isManageMode) {
                         handleOpenEditMacro(m, e);
                       } else if (macroMode === 'queue') {
-                        handleStageMacro(m, e, 'primary');
+                        handleStageMacro(m, e, activeSlot);
                       } else {
-                        handleRollMacro(m, e, 'primary');
+                        handleRollMacro(m, e, activeSlot);
                       }
                     }}
                     className={`group flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg border transition cursor-pointer shadow-sm text-xs min-w-0 ${
@@ -1111,8 +1326,8 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                         ? 'bg-slate-950/90 border-cyan-800/60 hover:border-cyan-400'
                         : isStaged
                         ? 'bg-amber-950/40 border-amber-500 text-amber-200 ring-1 ring-amber-500/40'
-                        : macroMode === 'queue'
-                        ? 'bg-slate-950 hover:bg-amber-950/20 border-slate-700 hover:border-amber-400/60'
+                        : isDamageOnly
+                        ? 'bg-amber-950/15 hover:bg-amber-950/35 border-amber-800/50 hover:border-amber-400/80'
                         : 'bg-slate-950 hover:bg-slate-800 border-slate-800 hover:border-amber-400/80'
                     }`}
                     title={tooltipText}
@@ -1129,9 +1344,19 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[10px] font-mono text-slate-400">{m.formula}</span>
+                      <span
+                        className={`text-[10px] font-mono ${
+                          isCritMode && !isD20Single
+                            ? 'text-emerald-300 font-bold'
+                            : isDamageOnly
+                            ? 'text-amber-300/90'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {isDamageOnly ? `💥 ${shownFormula}` : shownFormula}
+                      </span>
 
-                      {m.advantageMode && m.advantageMode !== 'normal' && (
+                      {!isDamageOnly && m.advantageMode && m.advantageMode !== 'normal' && (
                         <span
                           className={`text-[9px] px-1 rounded font-bold ${
                             m.advantageMode === 'advantage'
@@ -1143,14 +1368,22 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                         </span>
                       )}
 
-                      {!isManageMode && isStaged && primaryStaged && (
+                      {!isManageMode && isStaged && activeStaged && (
                         <span className="px-1 py-0.2 bg-amber-500 text-slate-950 rounded font-black text-[9px]">
-                          ×{primaryStaged.count}
+                          ×{activeStaged.count}
                         </span>
                       )}
 
                       {isManageMode && (
                         <div className="flex items-center gap-0.5 ml-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => handleDuplicateMacro(m.id, e)}
+                            className="p-0.5 text-slate-400 hover:text-emerald-300 rounded hover:bg-slate-800 cursor-pointer"
+                            title="Clone / Duplicate macro"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
                           <button
                             type="button"
                             onClick={(e) => handleOpenEditMacro(m, e)}
@@ -1197,7 +1430,9 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
 
             <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
               {stagedQueue.map((item) => {
-                const isPaired = Boolean(item.macro.secondaryFormula && item.macro.secondaryFormula.trim());
+                const hasPrimary = Boolean(item.macro.formula && item.macro.formula.trim());
+                const hasSecondary = Boolean(item.macro.secondaryFormula && item.macro.secondaryFormula.trim());
+                const isPaired = hasPrimary && hasSecondary;
                 const chipLabel = isPaired
                   ? `${item.macro.name} (${item.slot === 'secondary' ? 'Dmg' : 'Atk'})`
                   : item.macro.name;
@@ -1323,7 +1558,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       <AddCustomMacroModal
         isOpen={isAddMacroOpen && !editingMacro}
         onClose={() => setIsAddMacroOpen(false)}
-        initialFormula={formulaInput || '1d20+5'}
+        initialFormula={formulaInput || ''}
         initialMode={advantageMode}
         existingGroups={availableGroups}
         defaultGroup={selectedGroup}
