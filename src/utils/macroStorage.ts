@@ -4,12 +4,12 @@ const MACRO_STORAGE_KEY = 'ashtapor_macros_v2';
 const LEGACY_STORAGE_KEY = 'ttrpg_custom_macros';
 
 export const DEFAULT_STARTER_MACROS: CustomMacro[] = [
-  { id: 'm-1', name: 'Attack (Longsword)', formula: '1d20+5', rollType: 'Attack roll', advantageMode: 'normal', modifier: 5 },
-  { id: 'm-2', name: 'Damage (Longsword)', formula: '1d8+3', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
-  { id: 'm-3', name: 'Sneak Attack', formula: '3d6', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
-  { id: 'm-4', name: 'Fireball', formula: '8d6', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
-  { id: 'm-5', name: 'Perception Check', formula: '1d20+3', rollType: 'Skill check', advantageMode: 'normal', modifier: 3 },
-  { id: 'm-6', name: 'Fate Die', formula: '1d20', rollType: 'Fate', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-1', name: 'Attack (Longsword)', formula: '1d20+5', group: 'General', rollType: 'Attack roll', advantageMode: 'normal', modifier: 5 },
+  { id: 'm-2', name: 'Damage (Longsword)', formula: '1d8+3', group: 'General', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-3', name: 'Sneak Attack', formula: '3d6', group: 'General', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-4', name: 'Fireball', formula: '8d6', group: 'General', rollType: 'Damage', advantageMode: 'normal', modifier: 0 },
+  { id: 'm-5', name: 'Perception Check', formula: '1d20+3', group: 'General', rollType: 'Skill check', advantageMode: 'normal', modifier: 3 },
+  { id: 'm-6', name: 'Fate Die', formula: '1d20', group: 'General', rollType: 'Fate', advantageMode: 'normal', modifier: 0 },
 ];
 
 /**
@@ -63,13 +63,16 @@ export function addCustomMacro(
   formula: string,
   advantageMode: 'normal' | 'advantage' | 'disadvantage' = 'normal',
   modifier: number = 0,
-  rollType: RollTypeCategory = 'Straight roll'
+  rollType: RollTypeCategory = 'Straight roll',
+  group?: string
 ): CustomMacro {
   const current = loadCustomMacros();
+  const cleanGroup = group?.trim() || undefined;
   const newMacro: CustomMacro = {
     id: `macro-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     name: name.trim(),
     formula: formula.trim(),
+    group: cleanGroup,
     advantageMode,
     modifier,
     rollType,
