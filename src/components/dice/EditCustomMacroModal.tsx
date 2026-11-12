@@ -14,7 +14,7 @@ export interface EditCustomMacroModalProps {
   onSave: (data: {
     id: string;
     name: string;
-    formula: string;
+    formula?: string;
     secondaryFormula?: string;
     notes?: string;
     advantageMode: 'normal' | 'advantage' | 'disadvantage';
@@ -36,14 +36,16 @@ export const EditCustomMacroModal: React.FC<EditCustomMacroModalProps> = ({
   const [notes, setNotes] = useState('');
   const [rollMode, setRollMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal');
   const [group, setGroup] = useState('');
+  const [validationError, setValidationError] = useState('');
 
   useEffect(() => {
     if (isOpen && macro) {
       setMacroName(macro.name || '');
-      setFormula(macro.formula || '1d20+5');
+      setFormula(macro.formula || '');
       setSecondaryFormula(macro.secondaryFormula || '');
       setNotes(macro.notes || '');
       setGroup(macro.group && macro.group !== 'General' ? macro.group : '');
+      setValidationError('');
       const rawMode = (macro as any).rollMode || macro.advantageMode || 'normal';
       const normalizedMode =
         rawMode === 'advantage' || rawMode === 'Adv' || rawMode === 'adv'
@@ -61,12 +63,23 @@ export const EditCustomMacroModal: React.FC<EditCustomMacroModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!macroName.trim() || !formula.trim()) return;
+    const hasName = Boolean(macroName.trim());
+    const hasPrimary = Boolean(formula.trim());
+    const hasSecondary = Boolean(secondaryFormula.trim());
+
+    if (!hasName) {
+      setValidationError('Please enter a macro name.');
+      return;
+    }
+    if (!hasPrimary && !hasSecondary) {
+      setValidationError('Enter at least one formula (Attack/Primary or Damage).');
+      return;
+    }
 
     onSave({
       id: macro.id,
       name: macroName.trim(),
-      formula: formula.trim(),
+      formula: formula.trim() || undefined,
       secondaryFormula: secondaryFormula.trim() || undefined,
       notes: notes.trim() || undefined,
       advantageMode: rollMode,
@@ -94,15 +107,24 @@ export const EditCustomMacroModal: React.FC<EditCustomMacroModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-3.5 space-y-2 text-xs overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+          {validationError && (
+            <div className="px-2.5 py-1.5 rounded bg-rose-950/60 border border-rose-700/80 text-rose-200 text-[11px]">
+              {validationError}
+            </div>
+          )}
+
           <div>
             <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
               Macro / Ability Name *
             </label>
             <input
               type="text"
-              placeholder="e.g. Dragonite Tail, Psychic Burst, Core Blast"
+              placeholder="e.g. Dragonite Tail, Core Blast, Death Throes"
               value={macroName}
-              onChange={(e) => setMacroName(e.target.value)}
+              onChange={(e) => {
+                setMacroName(e.target.value);
+                if (validationError) setValidationError('');
+              }}
               className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 font-sans"
               required
               autoFocus
@@ -113,15 +135,17 @@ export const EditCustomMacroModal: React.FC<EditCustomMacroModalProps> = ({
             <div>
               <label className="text-[10px] font-semibold text-slate-300 flex items-center gap-1 mb-0.5">
                 <Swords className="w-2.5 h-2.5 text-indigo-400" />
-                <span>Primary Formula *</span>
+                <span>Attack / Primary</span>
               </label>
               <input
                 type="text"
-                placeholder="e.g. 1d20+9 or 10d6"
+                placeholder="e.g. 1d20+6 (Optional)"
                 value={formula}
-                onChange={(e) => setFormula(e.target.value)}
-                className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400"
-                required
+                onChange={(e) => {
+                  setFormula(e.target.value);
+                  if (validationError) setValidationError('');
+                }}
+                className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-indigo-300 focus:outline-none focus:border-amber-400 placeholder:text-slate-600"
               />
             </div>
 
@@ -132,15 +156,18 @@ export const EditCustomMacroModal: React.FC<EditCustomMacroModalProps> = ({
               </label>
               <input
                 type="text"
-                placeholder="Optional (e.g. 1d12+5)"
+                placeholder="e.g. 2d6+1d8+3 (Optional)"
                 value={secondaryFormula}
-                onChange={(e) => setSecondaryFormula(e.target.value)}
-                className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-emerald-300 focus:outline-none focus:border-amber-400 placeholder:text-slate-600"
+                onChange={(e) => {
+                  setSecondaryFormula(e.target.value);
+                  if (validationError) setValidationError('');
+                }}
+                className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400 placeholder:text-slate-600"
               />
             </div>
           </div>
           <p className="text-[9px] text-slate-500 -mt-1">
-            Add a 2nd formula to combine Attack + Damage in one row, or leave blank for a standalone roll.
+            Fill either one for a standalone roll, or both for a combined Attack + Damage row.
           </p>
 
           <div>
@@ -150,7 +177,7 @@ export const EditCustomMacroModal: React.FC<EditCustomMacroModalProps> = ({
             </label>
             <input
               type="text"
-              placeholder="e.g. Force + Psychic; DC 18 INT save or Frightened"
+              placeholder="e.g. Slashing + Force; DC 15 DEX save or Prone"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-200 focus:outline-none focus:border-amber-400 font-sans placeholder:text-slate-600"
