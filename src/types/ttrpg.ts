@@ -95,10 +95,6 @@ export function getEffectiveAc(combatant: Combatant): { effectiveAc: number; bon
 
 /**
  * Returns true if a combatant is considered under Fog of War / Masked Stats.
- * - If maskStats is explicitly set, it respects that boolean.
- * - If fogOfWar is explicitly set, it respects that boolean.
- * - If hidden, isSecret, or isReserve is true, it is masked.
- * - Otherwise, monsters, bosses, and custom environmental entities default to Fog of War.
  */
 export function isCombatantFoW(combatant: Combatant): boolean {
   if (combatant.maskStats !== undefined) return combatant.maskStats;
@@ -109,8 +105,6 @@ export function isCombatantFoW(combatant: Combatant): boolean {
 
 /**
  * Generates an incremented clone name for minion duplication.
- * If name ends in a number (e.g. "Goblin 1"), increments it ("Goblin 2");
- * otherwise, appends " 2" (e.g. "Cultist 2").
  */
 export function getClonedCombatantName(name: string): string {
   const trimmed = (name || 'Combatant').trim();
@@ -124,8 +118,7 @@ export function getClonedCombatantName(name: string): string {
 }
 
 /**
- * Deterministic sort:
- * sorted = [...combatants].sort((a, b) => b.initiative - a.initiative || (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id.localeCompare(b.id))
+ * Deterministic sort
  */
 export function sortInitiativeStrictDescending(combatants: Combatant[]): Combatant[] {
   return [...combatants].sort(
@@ -148,8 +141,8 @@ export type RollTypeCategory =
 export interface CustomMacro {
   id: string;
   name: string;
-  formula: string;
-  secondaryFormula?: string; // Optional paired Damage / Secondary roll (e.g., "1d12+5+2d6")
+  formula?: string; // Primary / Attack roll (optional if secondaryFormula is provided)
+  secondaryFormula?: string; // Secondary / Damage roll (optional if formula is provided)
   notes?: string; // Optional damage types, save DCs, and after-effects
   group?: string; // Monster, boss, or encounter profile name (e.g., "Draco", "Witch", "Utility")
   rollType?: RollTypeCategory;
@@ -167,14 +160,14 @@ export interface PairedD20Roll {
   discarded: number;
   modifier?: number;
   totalWithModifier?: number;
-  lineItem?: string; // e.g. "Roll 1: [18, ~~6~~] + 4 = 22"
+  lineItem?: string;
 }
 
 export interface DieGroupRoll {
   dieType: DieType;
-  rolls: number[]; // winning/resolved values
-  pairedRolls?: PairedD20Roll[]; // present for d20 rolls when advantageMode is advantage or disadvantage
-  rawRolls?: number[]; // raw rolls including discarded
+  rolls: number[];
+  pairedRolls?: PairedD20Roll[];
+  rawRolls?: number[];
 }
 
 export interface RollRiderDie {
@@ -209,10 +202,10 @@ export interface DiceRollResult {
   diceType: DieType;
   count: number;
   modifier: number;
-  rolls: number[]; // winning/resolved dice values for all dice (length = count)
+  rolls: number[];
   breakdown?: string[];
-  rawRolls?: number[]; // raw rolls including discarded
-  pairedRolls?: PairedD20Roll[]; // for d20 rolls with advantage/disadvantage
+  rawRolls?: number[];
+  pairedRolls?: PairedD20Roll[];
   total: number;
   advantageMode: 'normal' | 'advantage' | 'disadvantage';
   label?: string;
@@ -234,17 +227,17 @@ export type PinPrivacy = 'shared' | 'personal' | 'dm';
 
 export interface MapPin {
   id: string;
-  x: number; // percentage (0-100)
-  y: number; // percentage (0-100)
+  x: number;
+  y: number;
   title: string;
   category: PinCategory;
   description: string;
   privacy: PinPrivacy;
   author: string;
-  isDmOnly?: boolean; // legacy compat
-  dmNotes?: string; // DM private secret notes
-  personalNotes?: string; // personal player notes
-  isRevealed?: boolean; // When DM reveals a private note to all players
+  isDmOnly?: boolean;
+  dmNotes?: string;
+  personalNotes?: string;
+  isRevealed?: boolean;
   color?: string;
   linkedEncounter?: string;
 }
@@ -255,7 +248,7 @@ export interface MapData {
   url: string;
   type: 'world' | 'tactical';
   scaleUnit: 'miles' | 'feet';
-  scaleRatio: number; // e.g. 50 px = 10 miles or 1 square = 5 feet
+  scaleRatio: number;
   pins: MapPin[];
 }
 
@@ -263,11 +256,11 @@ export type ShapeType = 'sphere' | 'cone' | 'cylinder' | 'cube' | 'line';
 
 export interface GeometryCalculation {
   shape: ShapeType;
-  size: number; // radius, length, or width in feet
-  height?: number; // for cylinder
-  sourceElevation: number; // feet
-  targetElevation: number; // feet
-  horizontalDistance: number; // feet
+  size: number;
+  height?: number;
+  sourceElevation: number;
+  targetElevation: number;
+  horizontalDistance: number;
   diagonalRule: 'euclidean' | '5-10-5' | 'standard-5e';
 }
 
