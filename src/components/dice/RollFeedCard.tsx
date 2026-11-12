@@ -13,32 +13,50 @@ export interface RollFeedCardProps {
   playerName?: string;
 }
 
+/**
+ * Highlights "= <number>" at the end of raw breakdown lines in bright Amber/Gold
+ * so final roll numbers pop immediately without scanning through raw dice brackets.
+ */
 const renderFormattedBreakdown = (text: string) => {
-  if (!text.includes('~~')) return text;
-  const parts = text.split(/(~~.*?~~)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('~~') && part.endsWith('~~')) {
-      return (
-        <span key={i} className="line-through text-slate-500 font-normal">
-          {part.slice(2, -2)}
+  const eqMatch = text.match(/^(.*?)(=\s*-?\d+(?:\s*\|\s*.*)?)$/);
+  const mainBody = eqMatch ? eqMatch[1] : text;
+  const trailingTotal = eqMatch ? eqMatch[2] : null;
+
+  const renderStrikethrough = (str: string) => {
+    if (!str.includes('~~')) return str;
+    const parts = str.split(/(~~.*?~~)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('~~') && part.endsWith('~~')) {
+        return (
+          <span key={i} className="line-through text-slate-500 font-normal">
+            {part.slice(2, -2)}
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
+  return (
+    <span className="flex items-center justify-between gap-2 w-full">
+      <span className="min-w-0 break-words">{renderStrikethrough(mainBody)}</span>
+      {trailingTotal && (
+        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300 font-black font-mono tabular-nums shrink-0">
+          {trailingTotal}
         </span>
-      );
-    }
-    return part;
-  });
+      )}
+    </span>
+  );
 };
 
 export const RollFeedCard: React.FC<RollFeedCardProps> = ({
   roll,
-  isGM,
   isDm = false,
 }) => {
-  const isGameMaster = isGM !== undefined ? isGM : isDm;
-  const isGmOnly = roll.visibility === 'gm_only';
+  const isGmOnly = roll.visibility === 'gm_only' || roll.visibility === 'dm';
   const isIndividual = roll.displayMode === 'individual';
   const hasInstances = isIndividual && Boolean(roll.instances && roll.instances.length > 0);
 
-  // Suppress macro tag if label is just the formula itself or standard d20 string
   const isFormulaLabel =
     roll.label &&
     (roll.label.trim() === roll.formula?.trim() ||
@@ -88,7 +106,13 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
         </div>
 
         <div className="flex items-center shrink-0">
-          <span className="font-mono font-bold text-amber-300 text-xs tabular-nums">
+          <span
+            className={`font-mono font-black text-xs tabular-nums px-1.5 py-0.2 rounded ${
+              roll.isCrit
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+                : 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
+            }`}
+          >
             {isIndividual
               ? `Results: ${
                   hasInstances
@@ -104,17 +128,19 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
       {isIndividual ? (
         hasInstances ? (
           <div className="space-y-1 pt-0.5">
+            {macroName && (
+              <div className="pb-0.5">
+                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                  🏷️ {macroName}
+                </span>
+              </div>
+            )}
             {roll.instances!.map((inst) => (
               <div
                 key={inst.index}
-                className="flex items-center justify-between gap-1.5 py-1 px-1.5 rounded bg-slate-950/60 border border-slate-800/60 text-xs"
+                className="flex items-center justify-between gap-1.5 py-1 px-1.5 rounded bg-slate-950/70 border border-slate-800/80 text-xs"
               >
                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                  {macroName && (
-                    <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold mr-1">
-                      🏷️ {macroName}
-                    </span>
-                  )}
                   <span className="text-slate-400 font-semibold text-[11px] shrink-0">
                     Roll {inst.index}:
                   </span>
@@ -144,8 +170,9 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   )}
 
                   {inst.riders.map((r, rIdx) => (
-                    <span key={rIdx} className="text-slate-300 font-mono text-[11px] shrink-0">
-                      + {r.count}{r.diceType}[{r.rolls.join(', ')}]
+                    <span key={rIdx} className="text-slate-300 font-mono text-[11px] shrink-0 inline-flex items-center gap-1">
+                      <span>+ {r.count}{r.diceType}[{r.rolls.join(', ')}]</span>
+                      <span className="text-cyan-300 font-bold">(= {r.sum})</span>
                     </span>
                   ))}
 
@@ -158,7 +185,13 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   )}
                 </div>
 
-                <span className="text-amber-300 font-bold font-mono text-xs tabular-nums shrink-0 ml-auto pl-1">
+                <span
+                  className={`font-black font-mono text-xs tabular-nums shrink-0 ml-auto px-1.5 py-0.5 rounded border ${
+                    inst.isCrit
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                      : 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                  }`}
+                >
                   = {inst.total}
                 </span>
               </div>
@@ -177,9 +210,9 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
               roll.breakdown.map((line, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center justify-between text-slate-300 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800/60"
+                  className="flex items-center justify-between text-slate-300 bg-slate-950/70 px-2 py-1 rounded border border-slate-800/80"
                 >
-                  <span>{renderFormattedBreakdown(line)}</span>
+                  {renderFormattedBreakdown(line)}
                 </div>
               ))
             ) : (
@@ -207,17 +240,17 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                 return (
                   <div
                     key={pIdx}
-                    className="flex items-center justify-between gap-1.5 py-0.5 px-2 rounded bg-slate-950/60 border border-slate-800/60 text-xs font-mono"
+                    className="flex items-center justify-between gap-1.5 py-0.5 px-2 rounded bg-slate-950/70 border border-slate-800/80 text-xs font-mono"
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                      <span className="font-bold text-amber-400">
+                      <span className="font-bold text-slate-200">
                         {pool.rolls.length}{pool.dieType}:
                       </span>
-                      <span className="text-slate-300">
+                      <span className="text-slate-400">
                         [{pool.rolls.join(', ')}]
                       </span>
                     </div>
-                    <span className="text-slate-400 font-semibold tabular-nums shrink-0">
+                    <span className="px-1.5 py-0.2 rounded bg-cyan-950/80 border border-cyan-700/70 text-cyan-300 font-black tabular-nums shrink-0">
                       = {poolSubtotal}
                     </span>
                   </div>
@@ -225,18 +258,20 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
               })}
 
               {roll.modifier !== 0 && (
-                <div className="flex items-center justify-between gap-1.5 py-0.5 px-2 rounded bg-slate-950/60 border border-slate-800/60 text-xs font-mono">
+                <div className="flex items-center justify-between gap-1.5 py-0.5 px-2 rounded bg-slate-950/70 border border-slate-800/80 text-xs font-mono">
                   <span className="text-slate-400 font-bold">Flat Modifier:</span>
-                  <span className="text-slate-300 font-semibold tabular-nums shrink-0">
+                  <span className="text-slate-200 font-bold tabular-nums shrink-0">
                     {roll.modifier > 0 ? `+${roll.modifier}` : `${roll.modifier}`}
                   </span>
                 </div>
               )}
             </div>
           ) : (
-            <div className="text-slate-300 bg-slate-950/60 px-2 py-1 rounded border border-slate-800/60 text-[11px] font-mono">
+            <div className="text-slate-300 bg-slate-950/70 px-2 py-1 rounded border border-slate-800/80 text-[11px] font-mono space-y-1">
               {roll.breakdown && roll.breakdown.length > 0
-                ? roll.breakdown.join(' | ')
+                ? roll.breakdown.map((line, idx) => (
+                    <div key={idx}>{renderFormattedBreakdown(line)}</div>
+                  ))
                 : `Rolls: [${roll.rolls.join(', ')}]${
                     roll.modifier
                       ? ` (${roll.modifier > 0 ? `+${roll.modifier}` : roll.modifier})`
@@ -245,10 +280,26 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
             </div>
           )}
 
-          <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-amber-300 text-xs">
-            <span>Grand Total:</span>
-            <span className="font-mono tabular-nums text-sm font-black">{roll.total}</span>
+          <div className="pt-1 mt-1 border-t border-slate-800 flex items-center justify-between font-bold text-xs">
+            <span className="text-slate-300">Grand Total:</span>
+            <span
+              className={`font-mono tabular-nums text-sm font-black px-2 py-0.5 rounded border ${
+                roll.isCrit
+                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                  : 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+              }`}
+            >
+              {roll.total}
+            </span>
           </div>
+        </div>
+      )}
+
+      {/* Optional Effects / Notes Callout Banner */}
+      {roll.notes && (
+        <div className="px-2 py-1 rounded bg-cyan-950/35 border border-cyan-800/60 text-cyan-200 text-[11px] font-sans flex items-start gap-1.5">
+          <span className="shrink-0">📝</span>
+          <span className="leading-snug">{roll.notes}</span>
         </div>
       )}
     </div>
