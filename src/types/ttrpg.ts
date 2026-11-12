@@ -149,6 +149,7 @@ export interface CustomMacro {
   id: string;
   name: string;
   formula: string;
+  group?: string; // Monster, boss, or encounter profile name (e.g., "Draconian", "Boss", "Utility")
   rollType?: RollTypeCategory;
   advantageMode?: 'normal' | 'advantage' | 'disadvantage';
   modifier?: number;
