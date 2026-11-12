@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Bookmark, X, Folder } from 'lucide-react';
+import { Bookmark, X, Folder, FileText, Swords, Flame } from 'lucide-react';
 
 export interface AddCustomMacroModalProps {
   isOpen: boolean;
@@ -12,6 +12,8 @@ export interface AddCustomMacroModalProps {
   onSave: (data: {
     name: string;
     formula: string;
+    secondaryFormula?: string;
+    notes?: string;
     advantageMode: 'normal' | 'advantage' | 'disadvantage';
     group?: string;
   }) => void;
@@ -32,6 +34,8 @@ export const AddCustomMacroModal: React.FC<AddCustomMacroModalProps> = ({
 }) => {
   const [macroName, setMacroName] = useState('');
   const [formula, setFormula] = useState(initialFormula);
+  const [secondaryFormula, setSecondaryFormula] = useState('');
+  const [notes, setNotes] = useState('');
   const [rollMode, setRollMode] = useState<'normal' | 'advantage' | 'disadvantage'>(initialMode);
   const [group, setGroup] = useState(defaultGroup);
 
@@ -39,6 +43,8 @@ export const AddCustomMacroModal: React.FC<AddCustomMacroModalProps> = ({
     if (isOpen) {
       setMacroName('');
       setFormula(initialFormula || '1d20+5');
+      setSecondaryFormula('');
+      setNotes('');
       setRollMode(initialMode || 'normal');
       setGroup(defaultGroup && defaultGroup !== 'All' && defaultGroup !== 'General' ? defaultGroup : '');
     }
@@ -55,6 +61,8 @@ export const AddCustomMacroModal: React.FC<AddCustomMacroModalProps> = ({
     onSave({
       name: macroName.trim(),
       formula: formula.trim(),
+      secondaryFormula: secondaryFormula.trim() || undefined,
+      notes: notes.trim() || undefined,
       advantageMode: rollMode,
       group: group.trim() || undefined,
     });
@@ -62,9 +70,9 @@ export const AddCustomMacroModal: React.FC<AddCustomMacroModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn">
-      <div className="w-full max-w-xs bg-slate-900 border border-slate-700 rounded-xl p-3.5 shadow-2xl space-y-2.5">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-2.5 animate-fadeIn">
+      <div className="w-full max-w-sm max-h-[90vh] flex flex-col bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-3.5 py-2 border-b border-slate-800 shrink-0">
           <h4 className="text-xs font-bold text-slate-100 font-display flex items-center gap-1.5">
             <Bookmark className="w-3.5 h-3.5 text-amber-400" />
             <span>Add Custom Macro</span>
@@ -79,14 +87,14 @@ export const AddCustomMacroModal: React.FC<AddCustomMacroModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-2 text-xs">
+        <form onSubmit={handleSubmit} className="p-3.5 space-y-2 text-xs overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
           <div>
             <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-              Macro Name *
+              Macro / Ability Name *
             </label>
             <input
               type="text"
-              placeholder="e.g. Dragonite Sword, Sneak Attack"
+              placeholder="e.g. Dragonite Tail, Psychic Burst, Core Blast"
               value={macroName}
               onChange={(e) => setMacroName(e.target.value)}
               className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 font-sans"
@@ -95,69 +103,103 @@ export const AddCustomMacroModal: React.FC<AddCustomMacroModalProps> = ({
             />
           </div>
 
-          <div>
-            <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-              Formula *
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 1d20+6, 2d6+1d8+3, 8d6"
-              value={formula}
-              onChange={(e) => setFormula(e.target.value)}
-              className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400"
-              required
-            />
-            <p className="text-[9px] text-slate-500 mt-0.5">
-              Flat modifier is parsed automatically from formula (e.g. +6, -1).
-            </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-slate-300 flex items-center gap-1 mb-0.5">
+                <Swords className="w-2.5 h-2.5 text-indigo-400" />
+                <span>Primary Formula *</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 1d20+9 or 10d6"
+                value={formula}
+                onChange={(e) => setFormula(e.target.value)}
+                className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-amber-300 focus:outline-none focus:border-amber-400"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-semibold text-slate-300 flex items-center gap-1 mb-0.5">
+                <Flame className="w-2.5 h-2.5 text-amber-400" />
+                <span>Damage / 2nd Roll</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Optional (e.g. 1d12+5)"
+                value={secondaryFormula}
+                onChange={(e) => setSecondaryFormula(e.target.value)}
+                className="w-full px-2 py-1 font-mono rounded bg-slate-950 border border-slate-700 text-emerald-300 focus:outline-none focus:border-amber-400 placeholder:text-slate-600"
+              />
+            </div>
           </div>
+          <p className="text-[9px] text-slate-500 -mt-1">
+            Add a 2nd formula to combine Attack + Damage in one row, or leave blank for a standalone roll.
+          </p>
 
           <div>
             <label className="text-[10px] font-semibold text-slate-300 flex items-center gap-1 mb-0.5">
-              <Folder className="w-2.5 h-2.5 text-amber-400" />
-              <span>Monster / Encounter Profile</span>
+              <FileText className="w-2.5 h-2.5 text-cyan-400" />
+              <span>Effects, Save DC & Damage Types (Optional)</span>
             </label>
             <input
               type="text"
-              placeholder="e.g. Draconian, Boss, Utility (Optional)"
-              value={group}
-              onChange={(e) => setGroup(e.target.value)}
-              className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 font-sans"
+              placeholder="e.g. Force + Psychic; DC 18 INT save or Frightened"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-200 focus:outline-none focus:border-amber-400 font-sans placeholder:text-slate-600"
             />
-            {selectableGroups.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {selectableGroups.map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => setGroup(g)}
-                    className={`px-1.5 py-0.5 text-[9px] rounded border transition cursor-pointer ${
-                      group.trim().toLowerCase() === g.toLowerCase()
-                        ? 'bg-amber-500/20 border-amber-400 text-amber-300 font-bold'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
-          <div>
-            <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
-              Roll Mode
-            </label>
-            <select
-              value={rollMode}
-              onChange={(e) => setRollMode(e.target.value as 'normal' | 'advantage' | 'disadvantage')}
-              className="w-full px-1.5 py-1 rounded bg-slate-950 border border-slate-700 text-slate-200 cursor-pointer focus:outline-none focus:border-amber-400"
-            >
-              <option value="normal">Straight</option>
-              <option value="advantage">Advantage</option>
-              <option value="disadvantage">Disadvantage</option>
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold text-slate-300 flex items-center gap-1 mb-0.5">
+                <Folder className="w-2.5 h-2.5 text-amber-400" />
+                <span>Monster / Profile</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Draco, Witch"
+                value={group}
+                onChange={(e) => setGroup(e.target.value)}
+                className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-amber-400 font-sans"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-semibold text-slate-300 block mb-0.5">
+                Primary Roll Mode
+              </label>
+              <select
+                value={rollMode}
+                onChange={(e) => setRollMode(e.target.value as 'normal' | 'advantage' | 'disadvantage')}
+                className="w-full px-1.5 py-1 rounded bg-slate-950 border border-slate-700 text-slate-200 cursor-pointer focus:outline-none focus:border-amber-400"
+              >
+                <option value="normal">Straight</option>
+                <option value="advantage">Advantage</option>
+                <option value="disadvantage">Disadvantage</option>
+              </select>
+            </div>
           </div>
+
+          {selectableGroups.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {selectableGroups.map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setGroup(g)}
+                  className={`px-1.5 py-0.5 text-[9px] rounded border transition cursor-pointer ${
+                    group.trim().toLowerCase() === g.toLowerCase()
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-300 font-bold'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-800">
             <button
