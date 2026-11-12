@@ -12,11 +12,6 @@ export const DEFAULT_STARTER_MACROS: CustomMacro[] = [
   { id: 'm-6', name: 'Fate Die', formula: '1d20', group: 'General', rollType: 'Fate', advantageMode: 'normal', modifier: 0 },
 ];
 
-/**
- * Loads custom player macros from localStorage.
- * If never set before, seeds with starter macros and saves them.
- * If user explicitly cleared or has saved macros, returns their saved state.
- */
 export function loadCustomMacros(): CustomMacro[] {
   try {
     const raw = localStorage.getItem(MACRO_STORAGE_KEY);
@@ -26,7 +21,6 @@ export function loadCustomMacros(): CustomMacro[] {
         return parsed;
       }
     }
-    // Check legacy key for migration
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (legacy !== null) {
       const parsed = JSON.parse(legacy);
@@ -39,14 +33,10 @@ export function loadCustomMacros(): CustomMacro[] {
     console.error('Failed to load custom macros from localStorage:', err);
   }
 
-  // First time initialization: seed with defaults
   saveCustomMacros(DEFAULT_STARTER_MACROS);
   return DEFAULT_STARTER_MACROS;
 }
 
-/**
- * Persists custom player macros to localStorage across page reloads and future sessions.
- */
 export function saveCustomMacros(macros: CustomMacro[]): void {
   try {
     localStorage.setItem(MACRO_STORAGE_KEY, JSON.stringify(macros));
@@ -55,12 +45,9 @@ export function saveCustomMacros(macros: CustomMacro[]): void {
   }
 }
 
-/**
- * Creates and appends a new custom macro.
- */
 export function addCustomMacro(
   name: string,
-  formula: string,
+  formula?: string,
   advantageMode: 'normal' | 'advantage' | 'disadvantage' = 'normal',
   modifier: number = 0,
   rollType: RollTypeCategory = 'Straight roll',
@@ -69,13 +56,15 @@ export function addCustomMacro(
   notes?: string
 ): CustomMacro {
   const current = loadCustomMacros();
-  const cleanGroup = group?.trim() || undefined;
+  const cleanPrimary = formula?.trim() || undefined;
   const cleanSecondary = secondaryFormula?.trim() || undefined;
+  const cleanGroup = group?.trim() || undefined;
   const cleanNotes = notes?.trim() || undefined;
+
   const newMacro: CustomMacro = {
     id: `macro-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     name: name.trim(),
-    formula: formula.trim(),
+    formula: cleanPrimary,
     secondaryFormula: cleanSecondary,
     notes: cleanNotes,
     group: cleanGroup,
@@ -88,9 +77,6 @@ export function addCustomMacro(
   return newMacro;
 }
 
-/**
- * Updates an existing macro by ID.
- */
 export function updateCustomMacro(
   id: string,
   updatedFields: Partial<Omit<CustomMacro, 'id'>>
@@ -101,9 +87,23 @@ export function updateCustomMacro(
   return updated;
 }
 
-/**
- * Deletes a macro by ID.
- */
+export function duplicateCustomMacro(id: string): CustomMacro[] {
+  const current = loadCustomMacros();
+  const idx = current.findIndex((m) => m.id === id);
+  if (idx === -1) return current;
+
+  const source = current[idx];
+  const clone: CustomMacro = {
+    ...source,
+    id: `macro-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    name: `${source.name} (Copy)`,
+  };
+
+  const updated = [...current.slice(0, idx + 1), clone, ...current.slice(idx + 1)];
+  saveCustomMacros(updated);
+  return updated;
+}
+
 export function deleteCustomMacro(id: string): CustomMacro[] {
   const current = loadCustomMacros();
   const updated = current.filter((m) => m.id !== id);
@@ -111,9 +111,6 @@ export function deleteCustomMacro(id: string): CustomMacro[] {
   return updated;
 }
 
-/**
- * Resets macros back to the default starter set.
- */
 export function resetCustomMacrosToDefault(): CustomMacro[] {
   saveCustomMacros(DEFAULT_STARTER_MACROS);
   return DEFAULT_STARTER_MACROS;
