@@ -64,14 +64,20 @@ export function addCustomMacro(
   advantageMode: 'normal' | 'advantage' | 'disadvantage' = 'normal',
   modifier: number = 0,
   rollType: RollTypeCategory = 'Straight roll',
-  group?: string
+  group?: string,
+  secondaryFormula?: string,
+  notes?: string
 ): CustomMacro {
   const current = loadCustomMacros();
   const cleanGroup = group?.trim() || undefined;
+  const cleanSecondary = secondaryFormula?.trim() || undefined;
+  const cleanNotes = notes?.trim() || undefined;
   const newMacro: CustomMacro = {
     id: `macro-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     name: name.trim(),
     formula: formula.trim(),
+    secondaryFormula: cleanSecondary,
+    notes: cleanNotes,
     group: cleanGroup,
     advantageMode,
     modifier,
