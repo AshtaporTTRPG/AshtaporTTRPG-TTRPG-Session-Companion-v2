@@ -149,7 +149,9 @@ export interface CustomMacro {
   id: string;
   name: string;
   formula: string;
-  group?: string; // Monster, boss, or encounter profile name (e.g., "Draconian", "Boss", "Utility")
+  secondaryFormula?: string; // Optional paired Damage / Secondary roll (e.g., "1d12+5+2d6")
+  notes?: string; // Optional damage types, save DCs, and after-effects
+  group?: string; // Monster, boss, or encounter profile name (e.g., "Draco", "Witch", "Utility")
   rollType?: RollTypeCategory;
   advantageMode?: 'normal' | 'advantage' | 'disadvantage';
   modifier?: number;
@@ -223,6 +225,7 @@ export interface DiceRollResult {
   individualLineItems?: string[];
   instances?: RollInstance[];
   macroName?: string;
+  notes?: string;
 }
 
 export type PinCategory = 'general' | 'npc' | 'quest' | 'loot' | 'secret' | 'landmark' | 'tavern' | 'settlement';
