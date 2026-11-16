@@ -10,6 +10,8 @@ import {
   RollVisibility,
   RollDisplayMode,
   CustomMacro,
+  PairedD20Roll,
+  DieGroupRoll,
 } from '../../types/ttrpg';
 import {
   executeDiceRoll,
@@ -387,33 +389,61 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       const isD20 = sides === 20;
 
       if (activeAdvMode === 'advantage' || activeAdvMode === 'disadvantage') {
-        const valA = rollSingleDie(sides);
-        const valB = rollSingleDie(sides);
         const isAdv = activeAdvMode === 'advantage';
-        const winningFace = isAdv ? Math.max(valA, valB) : Math.min(valA, valB);
-        const discardedFace = isAdv ? Math.min(valA, valB) : Math.max(valA, valB);
-        const total = winningFace + macroMod;
-        const isCrit = isD20 && winningFace === 20;
-        const isFumble = isD20 && winningFace === 1;
+        const winningFaces: number[] = [];
+        const rawAllFaces: number[] = [];
+        const pairedList: PairedD20Roll[] = [];
+        let hasCrit = false;
+        let hasFumble = false;
 
+        for (let i = 1; i <= count; i++) {
+          const valA = rollSingleDie(sides);
+          const valB = rollSingleDie(sides);
+          const chosen = isAdv ? Math.max(valA, valB) : Math.min(valA, valB);
+          const discarded = isAdv ? Math.min(valA, valB) : Math.max(valA, valB);
+
+          winningFaces.push(chosen);
+          rawAllFaces.push(valA, valB);
+
+          if (isD20 && chosen === 20) hasCrit = true;
+          if (isD20 && chosen === 1) hasFumble = true;
+
+          pairedList.push({
+            pairIndex: i,
+            die1: valA,
+            die2: valB,
+            selected: chosen,
+            discarded,
+            modifier: count === 1 ? macroMod : 0,
+            totalWithModifier: count === 1 ? chosen + macroMod : chosen,
+          });
+        }
+
+        const diceSum = winningFaces.reduce((acc, v) => acc + v, 0);
+        const total = diceSum + macroMod;
         const modStr = macroMod !== 0 ? (macroMod > 0 ? ` + ${macroMod}` : ` - ${Math.abs(macroMod)}`) : '';
-        const breakdownLine = `${displayLabel} (${count}d${sides} ${isAdv ? 'Adv' : 'Dis'}): [${winningFace}, ~~${discardedFace}~~]${modStr} = ${total}`;
+        const pairTexts = pairedList.map((p) => `[${p.selected}, ~~${p.discarded}~~]`).join(', ');
+        const breakdownLine = `${displayLabel} (${count}d${sides} ${isAdv ? 'Adv' : 'Dis'}): ${pairTexts}${modStr} = ${total}`;
+
+        const groupRoll: DieGroupRoll = {
+          dieType: parsedMacro.dieType || 'd20',
+          rolls: winningFaces,
+          pairedRolls: pairedList,
+          rawRolls: rawAllFaces,
+        };
 
         return {
           total,
           formula: expr,
           breakdownLine,
-          isCrit: isCrit || shouldDoubleDice,
-          isFumble,
+          isCrit: hasCrit || shouldDoubleDice,
+          isFumble: hasFumble && !hasCrit,
           isD20,
+          advantageMode: activeAdvMode,
           modifier: macroMod,
-          poolBreakdown: [
-            {
-              dieType: parsedMacro.dieType || 'd20',
-              rolls: [winningFace],
-              rawRolls: [valA, valB],
-            },
-          ],
+          pairedRolls: pairedList,
+          rawRolls: rawAllFaces,
+          poolBreakdown: [groupRoll],
           label: displayLabel,
           notes: resolvedNotes,
           didCritDouble: shouldDoubleDice,
@@ -442,7 +472,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         isCrit: Boolean(res.isCrit || shouldDoubleDice),
         isFumble: Boolean(res.isFumble),
         isD20,
+        advantageMode: 'normal' as const,
         modifier: macroMod,
+        pairedRolls: res.pairedRolls,
+        rawRolls: res.rawRolls,
         poolBreakdown: res.poolBreakdown,
         label: displayLabel,
         notes: resolvedNotes,
@@ -475,7 +508,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       isCrit: Boolean(res.isCrit || shouldDoubleDice),
       isFumble: Boolean(res.isFumble),
       isD20,
+      advantageMode: activeAdvMode,
       modifier: finalMacroModifier,
+      pairedRolls: res.pairedRolls,
+      rawRolls: res.rawRolls,
       poolBreakdown: res.poolBreakdown,
       label: displayLabel,
       notes: resolvedNotes,
@@ -511,9 +547,10 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
       count: 1,
       modifier: evaluated.modifier,
       rolls: [evaluated.total],
-      rawRolls: [evaluated.total],
+      rawRolls: evaluated.rawRolls || [evaluated.total],
+      pairedRolls: evaluated.pairedRolls,
       total: evaluated.total,
-      advantageMode: 'normal',
+      advantageMode: evaluated.advantageMode,
       breakdown: breakdownLines,
       poolBreakdown: evaluated.poolBreakdown,
       formula: evaluated.formula,
@@ -962,7 +999,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
         onApply={handleApplyFromCalculator}
       />
 
-      {/* 6. CUSTOM MACROS DRAWER */}
+      {/* 6. CUSTOM MACROS DRAWER (Expanded max-h-64 for Boss Profiles) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 shrink-0 space-y-1.5 shadow-sm">
         <div className="flex items-center justify-between gap-1">
           {/* Left: Collapse Chevron + Total Count + Profile Dropdown */}
@@ -1007,7 +1044,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
 
           {/* Right: Explicit [ 1-Click | Queue ] Segmented Toggle + Crit + Labeled Edit + Add */}
           <div className="flex items-center gap-1 shrink-0">
-            {/* Explicit Two-Button Segmented Mode Toggle */}
             <div className="flex items-center bg-slate-950 border border-slate-800 rounded p-0.5 text-[10px] shrink-0">
               <button
                 type="button"
@@ -1040,7 +1076,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
               </button>
             </div>
 
-            {/* Critical Hit (Doubles Dice Count on Damage) */}
             <button
               type="button"
               onClick={() => setIsCritMode((prev) => !prev)}
@@ -1054,7 +1089,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
               Crit
             </button>
 
-            {/* Labeled Edit / Manage Toggle */}
             {macros.length > 0 && (
               <button
                 type="button"
@@ -1083,7 +1117,6 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
               </button>
             )}
 
-            {/* + Add Macro */}
             <button
               type="button"
               onClick={handleOpenAddMacro}
@@ -1096,9 +1129,9 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
           </div>
         </div>
 
-        {/* Hybrid Macro Grid */}
+        {/* Hybrid Macro Grid (max-h-64 gives 6-7 rows of visibility) */}
         {isMacrosOpen && (
-          <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pt-0.5 pr-0.5">
+          <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto pt-0.5 pr-0.5">
             {filteredMacros.length === 0 ? (
               <div className="col-span-2 text-[11px] text-slate-500 italic py-1">
                 No custom macros in this profile. Click "+ Add" to create one.
@@ -1267,7 +1300,7 @@ export const DiceChamber: React.FC<DiceChamberProps> = ({ isGM, isDm = false, pl
                   );
                 }
 
-                /* CASE B: STANDALONE SINGLE-FORMULA PILL (Auto-expands to full width if name > 16 chars so names never clip) */
+                /* CASE B: STANDALONE SINGLE-FORMULA PILL */
                 const activeSlot: MacroSlot = isDamageOnly ? 'secondary' : 'primary';
                 const activeStaged = isDamageOnly ? secondaryStaged : primaryStaged;
                 const isStaged = Boolean(activeStaged);
