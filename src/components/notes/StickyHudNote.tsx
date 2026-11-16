@@ -120,9 +120,9 @@ export const StickyHudNote: React.FC = () => {
     window.dispatchEvent(new CustomEvent('ashtapor:note_saved_from_hud', { detail: updated }));
   }, [pinnedNote, editTitle, editContent]);
 
-  const handleToggleTask = useCallback((lineIndex: number) => {
+  const handleToggleTask = useCallback((lineIndex: number, checkboxIndex?: number) => {
     if (!pinnedNote) return;
-    const newContent = toggleMarkdownTask(pinnedNote.content, lineIndex);
+    const newContent = toggleMarkdownTask(pinnedNote.content, lineIndex, checkboxIndex);
     const updated: NoteItem = {
       ...pinnedNote,
       content: newContent,
