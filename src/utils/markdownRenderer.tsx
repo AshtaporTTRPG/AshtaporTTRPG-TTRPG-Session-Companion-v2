@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 export interface MarkdownRenderOptions {
-  onToggleTask?: (lineIndex: number) => void;
+  onToggleTask?: (lineIndex: number, checkboxIndex?: number) => void;
   collapsibleHeaders?: boolean;
   onTagClick?: (tag: string) => void;
 }
@@ -28,24 +28,37 @@ export function extractTags(content: string, title: string = ''): string[] {
 }
 
 /**
- * Toggles a markdown task line at lineIndex between unchecked (- [ ]) and checked (- [x])
+ * Toggles a specific markdown checkbox ([ ] <-> [x]) at lineIndex and optional checkboxIndex (0-based on that line).
+ * Supports both standard single-task lines (- [ ] Task) and multi-checkbox inline lines (1st - [ ] [ ] [ ] [ ]).
  */
-export function toggleMarkdownTask(content: string, lineIndex: number): string {
+export function toggleMarkdownTask(
+  content: string,
+  lineIndex: number,
+  checkboxIndex: number = 0
+): string {
   if (!content) return content;
   const lines = content.split('\n');
   if (lineIndex < 0 || lineIndex >= lines.length) return content;
+
   const line = lines[lineIndex];
-  const match = line.match(/^(\s*-\s*\[)([ xX])(\]\s*.*)$/);
-  if (!match) return content;
-  const currentMark = match[2];
-  const nextMark = currentMark === ' ' ? 'x' : ' ';
-  lines[lineIndex] = `${match[1]}${nextMark}${match[3]}`;
+  let currentIdx = 0;
+
+  const updatedLine = line.replace(/\[([ xX])\]/g, (fullMatch, stateChar) => {
+    const isTarget = currentIdx === checkboxIndex;
+    currentIdx += 1;
+    if (!isTarget) return fullMatch;
+    const nextMark = stateChar === ' ' ? 'x' : ' ';
+    return `[${nextMark}]`;
+  });
+
+  if (updatedLine === line) return content;
+  lines[lineIndex] = updatedLine;
   return lines.join('\n');
 }
 
 /**
  * Markdown Viewer Component that supports:
- * - Interactive task checkboxes
+ * - Interactive task checkboxes (both standard "- [ ] Task" and inline multi-checkboxes "1st - [ ] [ ] [ ]")
  * - Collapsible # (H1), ## (H2), and ### (H3) header sections
  * - Horizontal rule dividers (---, ***, ___)
  * - Inline bold, italics, underline, strikethrough (~~text~~), and clickable #tags
@@ -53,7 +66,7 @@ export function toggleMarkdownTask(content: string, lineIndex: number): string {
  */
 export const MarkdownContent: React.FC<{
   content: string;
-  onToggleTask?: (lineIndex: number) => void;
+  onToggleTask?: (lineIndex: number, checkboxIndex?: number) => void;
   collapsibleHeaders?: boolean;
   onTagClick?: (tag: string) => void;
 }> = ({ content, onToggleTask, collapsibleHeaders = true, onTagClick }) => {
@@ -124,7 +137,7 @@ export const MarkdownContent: React.FC<{
                 key={lineIndex}
                 className="text-[11px] font-bold uppercase tracking-wider pt-0.5 pb-0.5 text-inherit opacity-90"
               >
-                {parseInlineFormatting(h3Match[1], onTagClick)}
+                {parseInlineFormatting(h3Match[1], onTagClick, lineIndex, onToggleTask)}
               </div>
             );
           }
@@ -151,7 +164,7 @@ export const MarkdownContent: React.FC<{
                 )}
               </button>
               <span className="flex-1 min-w-0 truncate">
-                {parseInlineFormatting(h3Match[1], onTagClick)}
+                {parseInlineFormatting(h3Match[1], onTagClick, lineIndex, onToggleTask)}
               </span>
               {isCollapsed && (
                 <span className="text-[9px] font-mono opacity-50 font-normal shrink-0 lowercase">
@@ -179,7 +192,7 @@ export const MarkdownContent: React.FC<{
                 key={lineIndex}
                 className="text-xs font-semibold pt-1 pb-0.5 text-inherit"
               >
-                {parseInlineFormatting(h2Match[1], onTagClick)}
+                {parseInlineFormatting(h2Match[1], onTagClick, lineIndex, onToggleTask)}
               </div>
             );
           }
@@ -206,7 +219,7 @@ export const MarkdownContent: React.FC<{
                 )}
               </button>
               <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h2Match[1], onTagClick)}
+                {parseInlineFormatting(h2Match[1], onTagClick, lineIndex, onToggleTask)}
               </span>
               {isCollapsed && (
                 <span className="text-[9px] font-mono opacity-50 font-normal shrink-0">
@@ -231,7 +244,7 @@ export const MarkdownContent: React.FC<{
                 key={lineIndex}
                 className="text-xs md:text-sm font-bold border-b border-inherit/25 pb-0.5 pt-1.5 text-inherit"
               >
-                {parseInlineFormatting(h1Match[1], onTagClick)}
+                {parseInlineFormatting(h1Match[1], onTagClick, lineIndex, onToggleTask)}
               </div>
             );
           }
@@ -258,7 +271,7 @@ export const MarkdownContent: React.FC<{
                 )}
               </button>
               <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h1Match[1], onTagClick)}
+                {parseInlineFormatting(h1Match[1], onTagClick, lineIndex, onToggleTask)}
               </span>
               {isCollapsed && (
                 <span className="text-[10px] font-mono opacity-50 font-normal shrink-0">
@@ -278,9 +291,11 @@ export const MarkdownContent: React.FC<{
           return null;
         }
 
-        // 5. Checkbox Task list item: - [ ] or - [x]
+        // 5. Standard single-checkbox task list item: - [ ] or - [x] (only when exactly 1 checkbox is on the line)
+        const checkboxMatches = line.match(/\[([ xX])\]/g);
+        const checkboxCount = checkboxMatches ? checkboxMatches.length : 0;
         const taskMatch = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
-        if (taskMatch) {
+        if (taskMatch && checkboxCount === 1) {
           const isChecked = taskMatch[2].toLowerCase() === 'x';
           const taskText = taskMatch[3];
           return (
@@ -290,7 +305,7 @@ export const MarkdownContent: React.FC<{
                 checked={isChecked}
                 onChange={(e) => {
                   e.stopPropagation();
-                  onToggleTask?.(lineIndex);
+                  onToggleTask?.(lineIndex, 0);
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -301,7 +316,7 @@ export const MarkdownContent: React.FC<{
                 onClick={(e) => {
                   if (onToggleTask) {
                     e.stopPropagation();
-                    onToggleTask(lineIndex);
+                    onToggleTask(lineIndex, 0);
                   }
                 }}
                 className={`select-text cursor-pointer leading-tight ${
@@ -314,23 +329,23 @@ export const MarkdownContent: React.FC<{
           );
         }
 
-        // 6. Bullet list item: - item or * item
-        const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
+        // 6. Bullet list item: - item or * item (excluding lines starting with - [ ])
+        const bulletMatch = line.match(/^\s*[-*]\s+(?!\[[ xX]\])(.*)$/);
         if (bulletMatch) {
           return (
             <div key={lineIndex} className="flex items-start gap-1.5 my-0.5 pl-1">
               <span className="text-amber-400 select-none shrink-0 leading-tight">•</span>
               <span className="flex-1 leading-relaxed">
-                {parseInlineFormatting(bulletMatch[1], onTagClick)}
+                {parseInlineFormatting(bulletMatch[1], onTagClick, lineIndex, onToggleTask)}
               </span>
             </div>
           );
         }
 
-        // 7. Standard text line
+        // 7. Standard text line (supports inline multi-checkboxes like "1st - [ ] [ ] [ ] [ ]")
         return (
           <div key={lineIndex} className="leading-relaxed">
-            {parseInlineFormatting(line, onTagClick)}
+            {parseInlineFormatting(line, onTagClick, lineIndex, onToggleTask)}
           </div>
         );
       })}
@@ -340,11 +355,13 @@ export const MarkdownContent: React.FC<{
 
 export function renderMarkdown(
   content: string,
-  optionsOrToggleTask?: ((lineIndex: number) => void) | MarkdownRenderOptions
+  optionsOrToggleTask?:
+    | ((lineIndex: number, checkboxIndex?: number) => void)
+    | MarkdownRenderOptions
 ): React.ReactNode {
   if (!content) return null;
 
-  let onToggleTask: ((lineIndex: number) => void) | undefined;
+  let onToggleTask: ((lineIndex: number, checkboxIndex?: number) => void) | undefined;
   let collapsibleHeaders = true;
   let onTagClick: ((tag: string) => void) | undefined;
 
@@ -369,62 +386,90 @@ export function renderMarkdown(
 }
 
 /**
- * Inline formatting helper: parses **bold**, __underline__, <u>underline</u>, *italic*,
- * ~~strikethrough~~, and clickable #tags
+ * Inline formatting helper: parses inline [ ] / [x] checkboxes, **bold**, __underline__,
+ * <u>underline</u>, *italic*, ~~strikethrough~~, and clickable #tags
  */
 export function parseInlineFormatting(
   text: string,
-  onTagClick?: (tag: string) => void
+  onTagClick?: (tag: string) => void,
+  lineIndex?: number,
+  onToggleTask?: (lineIndex: number, checkboxIndex?: number) => void
 ): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
-  const regex = /(\*\*([^*]+)\*\*|__([^_]+)__|<u>([^<]+)<\/u>|\*([^*]+)\*|~~([^~]+)~~|(?:^|\s)(#([a-zA-Z][a-zA-Z0-9_\-]*)))/g;
+  const regex =
+    /(\[([ xX])\]|\*\*([^*]+)\*\*|__([^_]+)__|<u>([^<]+)<\/u>|\*([^*]+)\*|~~([^~]+)~~|(?:^|\s)(#([a-zA-Z][a-zA-Z0-9_\-]*)))/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
+  let checkboxCounter = 0;
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
       parts.push(text.substring(lastIndex, match.index));
     }
 
-    if (match[2]) {
+    if (match[2] !== undefined) {
+      // Inline checkbox: [ ] or [x]
+      const isChecked = match[2].toLowerCase() === 'x';
+      const currentBoxIdx = checkboxCounter;
+      checkboxCounter += 1;
+
+      parts.push(
+        <input
+          key={`cb-${match.index}-${currentBoxIdx}`}
+          type="checkbox"
+          checked={isChecked}
+          onChange={(e) => {
+            e.stopPropagation();
+            if (lineIndex !== undefined) {
+              onToggleTask?.(lineIndex, currentBoxIdx);
+            }
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+          title={isChecked ? 'Checked (click to uncheck)' : 'Unchecked (click to check)'}
+          className="inline-block align-middle mx-0.5 rounded border-slate-600 bg-slate-900 cursor-pointer w-3.5 h-3.5 accent-amber-500"
+        />
+      );
+    } else if (match[3]) {
       // Bold
       parts.push(
         <strong key={`b-${match.index}`} className="font-bold text-inherit brightness-110">
-          {match[2]}
+          {match[3]}
         </strong>
       );
-    } else if (match[3]) {
+    } else if (match[4]) {
       // Underline
       parts.push(
         <span key={`u-${match.index}`} className="underline underline-offset-2 text-inherit">
-          {match[3]}
-        </span>
-      );
-    } else if (match[4]) {
-      // Underline (u-tag)
-      parts.push(
-        <span key={`u-tag-${match.index}`} className="underline underline-offset-2 text-inherit">
           {match[4]}
         </span>
       );
     } else if (match[5]) {
+      // Underline (u-tag)
+      parts.push(
+        <span key={`u-tag-${match.index}`} className="underline underline-offset-2 text-inherit">
+          {match[5]}
+        </span>
+      );
+    } else if (match[6]) {
       // Italic
       parts.push(
         <em key={`i-${match.index}`} className="italic text-inherit">
-          {match[5]}
+          {match[6]}
         </em>
       );
-    } else if (match[6]) {
+    } else if (match[7]) {
       // Strikethrough
       parts.push(
         <del key={`del-${match.index}`} className="line-through opacity-60 text-inherit">
-          {match[6]}
+          {match[7]}
         </del>
       );
-    } else if (match[8]) {
+    } else if (match[9]) {
       // Tag (#tag)
-      const tagName = match[8];
+      const tagName = match[9];
       parts.push(
         <button
           key={`tag-${match.index}`}
