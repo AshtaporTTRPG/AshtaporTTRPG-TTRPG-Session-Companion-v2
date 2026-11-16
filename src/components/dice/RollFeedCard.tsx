@@ -62,6 +62,8 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
   const isGmOnly = roll.visibility === 'gm_only' || roll.visibility === 'dm';
   const isIndividual = roll.displayMode === 'individual';
   const hasInstances = isIndividual && Boolean(roll.instances && roll.instances.length > 0);
+  const isAdvRoll = roll.advantageMode === 'advantage';
+  const isDisRoll = roll.advantageMode === 'disadvantage';
 
   const isFormulaLabel =
     roll.label &&
@@ -144,6 +146,17 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
             </span>
           )}
 
+          {isIndividual && !hasInstances && isAdvRoll && (
+            <span className="text-[9px] px-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/70 font-bold uppercase shrink-0">
+              Adv
+            </span>
+          )}
+          {isIndividual && !hasInstances && isDisRoll && (
+            <span className="text-[9px] px-1 rounded bg-rose-950 text-rose-300 border border-rose-800/70 font-bold uppercase shrink-0">
+              Dis
+            </span>
+          )}
+
           {isGmOnly && (
             <span className="text-[9px] text-purple-300 font-semibold px-1 py-0.2 rounded bg-purple-950/80 border border-purple-700/70 shrink-0 inline-flex items-center gap-0.5">
               🔒 GM
@@ -182,6 +195,17 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
                   <span className="text-slate-400 font-semibold text-[11px] shrink-0">
                     Roll {inst.index}:
                   </span>
+
+                  {isAdvRoll && (
+                    <span className="text-[9px] px-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/70 font-bold uppercase shrink-0">
+                      Adv
+                    </span>
+                  )}
+                  {isDisRoll && (
+                    <span className="text-[9px] px-1 rounded bg-rose-950 text-rose-300 border border-rose-800/70 font-bold uppercase shrink-0">
+                      Dis
+                    </span>
+                  )}
 
                   <span className="bg-slate-800 text-amber-300 font-bold px-1.5 py-0.2 rounded border border-slate-700 font-mono tabular-nums shrink-0 inline-flex items-center gap-1">
                     <span>{inst.d20Chosen}</span>
