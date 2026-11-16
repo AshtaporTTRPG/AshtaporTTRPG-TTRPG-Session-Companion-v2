@@ -58,7 +58,6 @@ const renderFormattedBreakdown = (text: string) => {
 
 export const RollFeedCard: React.FC<RollFeedCardProps> = ({
   roll,
-  isDm = false,
 }) => {
   const isGmOnly = roll.visibility === 'gm_only' || roll.visibility === 'dm';
   const isIndividual = roll.displayMode === 'individual';
@@ -255,23 +254,63 @@ export const RollFeedCard: React.FC<RollFeedCardProps> = ({
           </div>
         )
       ) : (
-        /* Mode B: Pooled Sum (Inline Die Subtotal Chips — Zero Redundant Footer) */
+        /* Mode B: Pooled Sum (Supports Paired Adv/Dis d20s + Inline Die Subtotal Chips) */
         <div>
           {roll.poolBreakdown && roll.poolBreakdown.length > 0 ? (
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
               {roll.poolBreakdown.map((pool, pIdx) => {
                 const poolSubtotal = pool.rolls.reduce((sum, val) => sum + val, 0);
+                const pairedList =
+                  pool.pairedRolls && pool.pairedRolls.length > 0
+                    ? pool.pairedRolls
+                    : pool.dieType === 'd20' && roll.pairedRolls && roll.pairedRolls.length > 0
+                    ? roll.pairedRolls
+                    : undefined;
+
+                const isAdvPool = pool.dieType === 'd20' && roll.advantageMode === 'advantage';
+                const isDisPool = pool.dieType === 'd20' && roll.advantageMode === 'disadvantage';
+
                 return (
                   <div
                     key={pIdx}
-                    className="inline-flex items-center gap-1.5 py-0.5 px-2 rounded bg-slate-950/80 border border-slate-800/90"
+                    className="inline-flex items-center gap-1.5 py-0.5 px-2 rounded bg-slate-950/80 border border-slate-800/90 flex-wrap"
                   >
                     <span className="font-bold text-slate-200">
                       {pool.rolls.length}{pool.dieType}
                     </span>
-                    <span className="text-slate-400">
-                      [{pool.rolls.join(', ')}]
-                    </span>
+
+                    {isAdvPool && (
+                      <span className="text-[9px] px-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/70 font-bold uppercase">
+                        Adv
+                      </span>
+                    )}
+                    {isDisPool && (
+                      <span className="text-[9px] px-1 rounded bg-rose-950 text-rose-300 border border-rose-800/70 font-bold uppercase">
+                        Dis
+                      </span>
+                    )}
+
+                    {pairedList ? (
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        {pairedList.map((pair, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700/80 tabular-nums"
+                          >
+                            <span className="text-amber-300 font-bold">{pair.selected}</span>
+                            <span className="text-slate-600">,</span>
+                            <span className="line-through text-slate-500 font-normal">
+                              {pair.discarded}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">
+                        [{pool.rolls.join(', ')}]
+                      </span>
+                    )}
+
                     <span className="px-1.5 py-0.2 rounded bg-cyan-950/90 border border-cyan-700/70 text-cyan-300 font-black tabular-nums">
                       = {poolSubtotal}
                     </span>
