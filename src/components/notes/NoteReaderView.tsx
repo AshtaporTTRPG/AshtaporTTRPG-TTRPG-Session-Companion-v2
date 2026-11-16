@@ -131,8 +131,8 @@ export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
     return 'GM';
   }, [note]);
 
-  const handleToggleTask = (lineIndex: number) => {
-    const newContent = toggleMarkdownTask(note.content, lineIndex);
+  const handleToggleTask = (lineIndex: number, checkboxIndex?: number) => {
+    const newContent = toggleMarkdownTask(note.content, lineIndex, checkboxIndex);
     const updated = {
       ...note,
       content: newContent,
