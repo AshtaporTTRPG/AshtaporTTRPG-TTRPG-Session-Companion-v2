@@ -3,365 +3,208 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ChevronLeft, Copy, Check, Pencil, ArrowUpRight, Trash2, Pin } from 'lucide-react';
+import React, { useEffect } from 'react';
 import {
   NoteItem,
-  DmSecretNote,
-  GmSecretNote,
-  NOTE_COLOR_CONFIG,
-  resolveNoteColor,
-  NoteTransferAction,
+  NoteColor,
+  NOTE_COLOR_STYLES,
 } from '../../types/notes';
-import { copyToClipboard } from '../../utils/clipboard';
-import { renderMarkdown, toggleMarkdownTask, extractTags } from '../../utils/markdownRenderer';
-import { getPinnedHudNote, setPinnedHudNote, HUD_PIN_EVENT } from './StickyHudNote';
+import { MarkdownRenderer, toggleCheckboxAtLine } from '../../utils/markdownRenderer';
+import {
+  ChevronLeft,
+  Pin,
+  Edit3,
+  Trash2,
+  Radio,
+  ArrowRightLeft,
+  Monitor,
+  Copy,
+  Check,
+} from 'lucide-react';
 
 export interface NoteReaderViewProps {
-  note: NoteItem | GmSecretNote | DmSecretNote;
-  onBack: () => void;
-  onEdit: () => void;
-  onDelete?: () => void;
-  onSaveNote?: (note: NoteItem | GmSecretNote | DmSecretNote) => void;
-  isGM?: boolean;
-  currentVault?: 'myNotes' | 'tableNotes' | 'gmNotes' | 'dmNotes';
-  onTransfer?: (action: NoteTransferAction) => void;
-  onTagClick?: (tag: string) => void;
+  note: NoteItem;
+  isGM: boolean;
+  isHudPinned: boolean;
+  onClose: () => void;
+  onTogglePin: (noteId: string) => void;
+  onToggleHudPin: (note: NoteItem) => void;
+  onChangeColor: (noteId: string, color: NoteColor) => void;
+  onEdit: (note: NoteItem) => void;
+  onDelete: (noteId: string) => void;
+  onBroadcast: (note: NoteItem) => void;
+  onTransfer: (note: NoteItem) => void;
+  onUpdateContent: (noteId: string, newContent: string) => void;
 }
 
 export const NoteReaderView: React.FC<NoteReaderViewProps> = ({
   note,
-  onBack,
+  isGM,
+  isHudPinned,
+  onClose,
+  onTogglePin,
+  onToggleHudPin,
   onEdit,
   onDelete,
-  onSaveNote,
-  isGM = false,
-  currentVault = 'myNotes',
+  onBroadcast,
   onTransfer,
-  onTagClick,
+  onUpdateContent,
 }) => {
-  const [copied, setCopied] = useState(false);
-  const [isTransferOpen, setIsTransferOpen] = useState(false);
-  const transferRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = React.useState(false);
 
-  // HUD Pin State
-  const [isHudPinned, setIsHudPinned] = useState(() => {
-    const current = getPinnedHudNote();
-    return current?.id === note.id;
-  });
-
-  useEffect(() => {
-    const handleHudUpdate = () => {
-      const current = getPinnedHudNote();
-      setIsHudPinned(current?.id === note.id);
-    };
-    window.addEventListener(HUD_PIN_EVENT, handleHudUpdate);
-    return () => window.removeEventListener(HUD_PIN_EVENT, handleHudUpdate);
-  }, [note.id]);
-
-  const handleToggleHudPin = () => {
-    if (isHudPinned) {
-      setPinnedHudNote(null);
-    } else {
-      setPinnedHudNote(note as NoteItem);
-    }
-  };
-
-  useEffect(() => {
-    if (!isTransferOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (transferRef.current && !transferRef.current.contains(e.target as Node)) {
-        setIsTransferOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isTransferOpen]);
-
-  // Keyboard shortcut: Esc to return to standard notes view
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.preventDefault();
-        onBack();
+        onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onBack]);
+  }, [onClose]);
 
-  const colorKey = resolveNoteColor((note as NoteItem).color, note.theme, note.category);
-  const colorCfg = NOTE_COLOR_CONFIG[colorKey] || NOTE_COLOR_CONFIG.slate;
+  const colorKey: NoteColor = note.color && NOTE_COLOR_STYLES[note.color] ? note.color : 'slate';
+  const style = NOTE_COLOR_STYLES[colorKey];
 
-  const handleCopyFullNote = async () => {
-    const textToCopy = `${note.title}\n\n${note.content}`;
-    const ok = await copyToClipboard(textToCopy);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+  const handleToggleCheckbox = (lineIndex: number, boxIndex: number = 0) => {
+    const nextContent = toggleCheckboxAtLine(note.content, lineIndex, boxIndex);
+    if (nextContent !== note.content) {
+      onUpdateContent(note.id, nextContent);
     }
   };
 
-  const formattedDate = useMemo(() => {
-    try {
-      const raw = note.updatedAt || note.createdAt;
-      const d =
-        typeof raw === 'number'
-          ? new Date(raw)
-          : new Date(raw || Date.now());
-      return d.toLocaleDateString([], {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      });
-    } catch {
-      return 'Recently';
-    }
-  }, [note.updatedAt, note.createdAt]);
-
-  const wordCount = useMemo(() => {
-    if (!note.content || !note.content.trim()) return 0;
-    return note.content.trim().split(/\s+/).filter(Boolean).length;
-  }, [note.content]);
-
-  const author = useMemo(() => {
-    const item = note as NoteItem;
-    if (item.authorName) return item.authorName;
-    if (item.authorRole) return item.authorRole;
-    return 'GM';
-  }, [note]);
-
-  const handleToggleTask = (lineIndex: number) => {
-    const newContent = toggleMarkdownTask(note.content, lineIndex);
-    const updated = {
-      ...note,
-      content: newContent,
-      updatedAt: typeof note.updatedAt === 'number' ? Date.now() : new Date().toISOString(),
-    };
-    if (onSaveNote) {
-      onSaveNote(updated);
-    }
+  const handleCopy = () => {
+    const text = `${note.title}\n\n${note.content}`.trim();
+    navigator.clipboard?.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
-  const noteTags = extractTags(note.content, note.title);
+  const wordCount = note.content.trim()
+    ? note.content.trim().split(/\s+/).length
+    : 0;
 
   return (
     <div
-      className={`flex flex-col h-full p-2.5 select-text overflow-hidden rounded-xl border border-l-[4px] ${colorCfg.borderClass} ${colorCfg.cardClasses}`}
+      className={`flex flex-col h-full rounded-xl border border-l-4 p-3 gap-2.5 overflow-hidden ${style.cardBg} ${style.border} ${style.accentStrip}`}
     >
-      {/* Utility Header */}
-      <div className="flex items-center justify-between pb-2 mb-2 border-b border-inherit/30 shrink-0 gap-1.5">
-        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+      {/* Top Action Bar */}
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80 shrink-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
             type="button"
-            onClick={onBack}
-            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-black/40 hover:bg-black/60 text-inherit border border-white/10 rounded-md transition-colors cursor-pointer shrink-0"
-            title="Back to Notes (Esc)"
+            onClick={onClose}
+            className="px-2 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-amber-300 text-xs font-bold flex items-center gap-1 transition cursor-pointer shrink-0"
           >
-            <ChevronLeft className="w-4 h-4 text-amber-400" /> Back
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span>Back</span>
           </button>
-          <h2
-            className="text-xs font-bold truncate min-w-0 flex-1 ml-1"
-            title={note.title}
-          >
-            {note.title}
-          </h2>
+
+          <h3 className="font-bold text-sm text-slate-100 truncate font-display">
+            {note.title || 'Untitled Note'}
+          </h3>
         </div>
 
-        {/* Right Action Icons */}
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={handleCopyFullNote}
-            title={copied ? 'Copied to clipboard!' : 'Copy Full Note'}
-            className="p-1.5 text-inherit opacity-80 hover:opacity-100 bg-black/30 hover:bg-black/50 border border-white/10 rounded cursor-pointer transition flex items-center gap-1 text-xs"
+            onClick={handleCopy}
+            className="p-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white transition cursor-pointer"
+            title="Copy note"
           >
             {copied ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
             ) : (
-              <Copy className="w-3.5 h-3.5 text-amber-400" />
+              <Copy className="w-3.5 h-3.5" />
             )}
-            <span className="hidden xs:inline">{copied ? 'Copied' : 'Copy'}</span>
           </button>
 
-          {/* Pin to HUD */}
           <button
             type="button"
-            onClick={handleToggleHudPin}
-            title={isHudPinned ? 'Unpin from HUD' : 'Pin to HUD (keep visible across tabs)'}
-            className={`px-2 py-1 text-xs font-semibold rounded border transition-colors cursor-pointer flex items-center gap-1 ${
+            onClick={() => onToggleHudPin(note)}
+            className={`p-1.5 rounded-lg border transition cursor-pointer ${
               isHudPinned
-                ? 'bg-amber-950/80 border-amber-500/80 text-amber-300 ring-1 ring-amber-400/60 shadow-sm'
-                : 'bg-black/30 hover:bg-black/50 text-inherit opacity-80 hover:opacity-100 border-white/10'
+                ? 'bg-amber-500/25 border-amber-400 text-amber-300'
+                : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-amber-300'
             }`}
+            title={isHudPinned ? 'Unpin from HUD' : 'Pin to Top HUD'}
           >
-            <Pin className={`w-3.5 h-3.5 text-amber-400 ${isHudPinned ? 'fill-amber-400' : ''}`} />
-            <span className="hidden xs:inline">{isHudPinned ? 'HUD Pinned' : 'HUD Pin'}</span>
+            <Monitor className="w-3.5 h-3.5" />
           </button>
 
-          {/* Transfer Menu */}
-          {onTransfer && (
-            <div className="relative" ref={transferRef}>
-              <button
-                type="button"
-                onClick={() => setIsTransferOpen((prev) => !prev)}
-                title="Transfer note across vaults"
-                className="px-2 py-1 text-xs font-semibold rounded bg-black/30 hover:bg-black/50 text-inherit opacity-80 hover:opacity-100 border border-white/10 transition cursor-pointer flex items-center gap-1"
-              >
-                <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden xs:inline">Transfer</span>
-              </button>
-
-              {isTransferOpen && (
-                <div className="absolute right-0 top-full mt-1 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50 flex flex-col text-xs font-sans text-slate-100">
-                  {currentVault !== 'tableNotes' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTransferOpen(false);
-                        onTransfer('copy_to_table');
-                      }}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <span>📋</span>
-                      <span>Copy to Handouts</span>
-                    </button>
-                  )}
-                  {currentVault !== 'tableNotes' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTransferOpen(false);
-                        onTransfer('move_to_table');
-                      }}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <span>➔</span>
-                      <span>Move to Handouts</span>
-                    </button>
-                  )}
-                  {currentVault !== 'myNotes' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTransferOpen(false);
-                        onTransfer('copy_to_my');
-                      }}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <span>📋</span>
-                      <span>Copy to My Prep</span>
-                    </button>
-                  )}
-                  {currentVault !== 'myNotes' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTransferOpen(false);
-                        onTransfer('move_to_my');
-                      }}
-                      className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-sky-300 flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <span>👤</span>
-                      <span>Move to My Prep</span>
-                    </button>
-                  )}
-                  {isGM && currentVault !== 'gmNotes' && currentVault !== 'dmNotes' && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsTransferOpen(false);
-                          onTransfer('copy_to_gm');
-                        }}
-                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer border-t border-slate-800"
-                      >
-                        <span>📋</span>
-                        <span>Copy to GM Secrets</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsTransferOpen(false);
-                          onTransfer('move_to_gm');
-                        }}
-                        className="px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 hover:text-rose-300 flex items-center gap-1.5 transition cursor-pointer"
-                      >
-                        <span>🔒</span>
-                        <span>Move to GM Secrets</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Edit Note */}
           <button
             type="button"
-            onClick={onEdit}
-            title="Edit Note"
-            className="p-1.5 text-inherit opacity-80 hover:opacity-100 bg-black/30 hover:bg-black/50 border border-white/10 rounded cursor-pointer transition"
+            onClick={() => onTogglePin(note.id)}
+            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+              note.isPinned
+                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-amber-300'
+            }`}
+            title={note.isPinned ? 'Unpin note' : 'Pin note'}
           >
-            <Pencil className="w-3.5 h-3.5" />
+            <Pin className={`w-3.5 h-3.5 ${note.isPinned ? 'fill-amber-400' : ''}`} />
           </button>
 
-          {/* Delete Note */}
-          {onDelete && (
+          {isGM && note.scope === 'gm' && (
             <button
               type="button"
-              onClick={() => {
-                if (window.confirm(`Delete note "${note.title}"?`)) {
-                  if (isHudPinned) {
-                    setPinnedHudNote(null);
-                  }
-                  onDelete();
-                  onBack();
-                }
-              }}
-              title="Delete Note"
-              className="p-1.5 text-slate-400 hover:text-rose-400 bg-black/30 hover:bg-black/50 border border-white/10 rounded cursor-pointer transition"
+              onClick={() => onBroadcast(note)}
+              className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 transition cursor-pointer"
+              title="Broadcast Handout"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Radio className="w-3.5 h-3.5" />
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => onTransfer(note)}
+            className="p-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-cyan-300 transition cursor-pointer"
+            title="Transfer note"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onEdit(note)}
+            className="p-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-amber-300 transition cursor-pointer"
+            title="Edit note"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onDelete(note.id);
+              onClose();
+            }}
+            className="p-1.5 rounded-lg bg-slate-900/80 hover:bg-rose-950/60 border border-slate-700/80 text-slate-300 hover:text-rose-400 transition cursor-pointer"
+            title="Delete note"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      {/* Reading Text Body */}
-      <div className="flex-1 overflow-y-auto pr-1 text-sm leading-relaxed p-2.5 rounded-lg border border-white/10 bg-slate-950/60 selection:bg-amber-500/30 selection:text-amber-200">
-        {renderMarkdown(note.content, { onToggleTask: handleToggleTask, onTagClick })}
+      {/* Scrollable Note Content Body */}
+      <div className="flex-1 overflow-y-auto rounded-lg bg-slate-950/60 border border-slate-800/80 p-3 scrollbar-thin scrollbar-thumb-slate-800">
+        {note.content ? (
+          <MarkdownRenderer
+            content={note.content}
+            onToggleCheckbox={handleToggleCheckbox}
+          />
+        ) : (
+          <p className="text-xs text-slate-500 italic">Empty note.</p>
+        )}
       </div>
 
-      {/* Tags Chips in Reader View */}
-      {noteTags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1 pt-1.5">
-          {noteTags.map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => {
-                onTagClick?.(t);
-                onBack();
-              }}
-              className={`px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded border transition cursor-pointer ${colorCfg.tagClass}`}
-              title={`Filter by #${t}`}
-            >
-              #{t}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="pt-2 mt-2 border-t border-inherit/30 flex items-center justify-between text-[11px] opacity-70 shrink-0">
+      {/* Footer Metadata */}
+      <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-800/80 shrink-0">
         <span>
-          {formattedDate} · {wordCount} {wordCount === 1 ? 'word' : 'words'} · {author}
+          {new Date(note.updatedAt).toLocaleDateString()} · {wordCount} words · {note.authorName}
         </span>
-        <span className="text-[10px] font-mono select-none">
-          Esc to return
-        </span>
+        <span>Esc to return</span>
       </div>
     </div>
   );
