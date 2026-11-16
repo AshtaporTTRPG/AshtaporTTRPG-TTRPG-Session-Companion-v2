@@ -4,550 +4,430 @@
  */
 
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 
-export interface MarkdownRenderOptions {
-  onToggleTask?: (lineIndex: number) => void;
-  collapsibleHeaders?: boolean;
-  onTagClick?: (tag: string) => void;
-}
-
-/**
- * Extracts all unique #tags from content and optional title
- * without colliding with markdown headers (# Header).
- */
-export function extractTags(content: string, title: string = ''): string[] {
-  const combined = `${title}\n${content}`;
-  const regex = /(?:^|\s)#([a-zA-Z][a-zA-Z0-9_\-]*)/g;
-  const tags = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(combined)) !== null) {
-    tags.add(match[1].toLowerCase());
-  }
-  return Array.from(tags);
-}
-
-/**
- * Toggles a markdown task line at lineIndex between unchecked (- [ ]) and checked (- [x])
- */
-export function toggleMarkdownTask(content: string, lineIndex: number): string {
-  if (!content) return content;
-  const lines = content.split('\n');
-  if (lineIndex < 0 || lineIndex >= lines.length) return content;
-  const line = lines[lineIndex];
-  const match = line.match(/^(\s*-\s*\[)([ xX])(\]\s*.*)$/);
-  if (!match) return content;
-  const currentMark = match[2];
-  const nextMark = currentMark === ' ' ? 'x' : ' ';
-  lines[lineIndex] = `${match[1]}${nextMark}${match[3]}`;
-  return lines.join('\n');
-}
-
-/**
- * Markdown Viewer Component that supports:
- * - Interactive task checkboxes
- * - Collapsible # (H1), ## (H2), and ### (H3) header sections
- * - Horizontal rule dividers (---, ***, ___)
- * - Inline bold, italics, underline, strikethrough (~~text~~), and clickable #tags
- * - Bullet lists (- item)
- */
-export const MarkdownContent: React.FC<{
+export interface MarkdownRendererProps {
   content: string;
-  onToggleTask?: (lineIndex: number) => void;
-  collapsibleHeaders?: boolean;
-  onTagClick?: (tag: string) => void;
-}> = ({ content, onToggleTask, collapsibleHeaders = true, onTagClick }) => {
-  const [collapsedHeaders, setCollapsedHeaders] = useState<Record<string, boolean>>({});
+  onToggleCheckbox?: (lineIndex: number, boxIndex?: number) => void;
+  compact?: boolean;
+  className?: string;
+}
 
-  if (!content) return null;
+/**
+ * Toggles a specific markdown checkbox ([ ] <-> [x]) on the given 0-based line index.
+ * Supports multiple inline checkboxes on a single line via `boxIndex` (default 0).
+ */
+export function toggleCheckboxAtLine(
+  content: string,
+  targetLineIndex: number,
+  targetBoxIndex: number = 0
+): string {
+  const lines = content.split(/\r?\n/);
+  if (targetLineIndex < 0 || targetLineIndex >= lines.length) return content;
 
-  const lines = content.split('\n');
+  const line = lines[targetLineIndex];
+  let currentBox = 0;
 
-  const toggleHeader = (headerId: string, e: React.MouseEvent) => {
+  // Match any [ ], [x], or [X] token on the line (preserving optional leading "- " bullet)
+  const updatedLine = line.replace(/\[([ xX])\]/g, (fullMatch, stateChar) => {
+    const isTarget = currentBox === targetBoxIndex;
+    currentBox += 1;
+    if (!isTarget) return fullMatch;
+    const isChecked = stateChar.toLowerCase() === 'x';
+    return isChecked ? '[ ]' : '[x]';
+  });
+
+  if (updatedLine !== line) {
+    lines[targetLineIndex] = updatedLine;
+    return lines.join('\n');
+  }
+
+  return content;
+}
+
+/**
+ * Renders inline formatting:
+ * - Interactive inline checkboxes: [ ] and [x]
+ * - Bold: **text** or __text__
+ * - Italic: *text* or _text_
+ * - Underline: <u>text</u>
+ * - Strikethrough: ~~text~~
+ * - Inline Code: `code`
+ * - Hashtag labels: #tag
+ */
+function renderInlineTokens(
+  text: string,
+  options?: {
+    lineIndex?: number;
+    onToggleCheckbox?: (lineIndex: number, boxIndex?: number) => void;
+    compact?: boolean;
+  }
+): React.ReactNode[] {
+  const tokens: React.ReactNode[] = [];
+  // Combined regex for inline checkboxes, bold, underline, strikethrough, inline code, italic, and #tags
+  const pattern =
+    /(\[([ xX])\]|\*\*[^*]+?\*\*|__[^_]+?__|<u>[\s\S]+?<\/u>|~~[^~]+?~~|`[^`]+?`|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_|(^|\s)(#[a-zA-Z0-9_-]{1,30}))/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyCounter = 0;
+  let boxCounter = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push(text.slice(lastIndex, match.index));
+    }
+
+    const full = match[0];
+    const checkboxState = match[2];
+
+    if (checkboxState !== undefined) {
+      const checked = checkboxState.toLowerCase() === 'x';
+      const currentBoxIdx = boxCounter;
+      boxCounter += 1;
+      const lineIdx = options?.lineIndex;
+      const toggleFn = options?.onToggleCheckbox;
+      const isCompact = Boolean(options?.compact);
+
+      tokens.push(
+        <button
+          key={`cb-${keyCounter++}`}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (toggleFn && lineIdx !== undefined) {
+              toggleFn(lineIdx, currentBoxIdx);
+            }
+          }}
+          disabled={!toggleFn || lineIdx === undefined}
+          title={checked ? 'Mark slot available' : 'Mark slot expended'}
+          className={`inline-flex items-center justify-center align-middle mx-0.5 rounded border transition shrink-0 ${
+            isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'
+          } ${
+            checked
+              ? 'bg-emerald-500 border-emerald-400 text-slate-950'
+              : 'bg-slate-900/90 border-slate-500 hover:border-amber-400 text-transparent'
+          } ${toggleFn ? 'cursor-pointer' : 'cursor-default'}`}
+        >
+          <Check className={isCompact ? 'w-2.5 h-2.5 stroke-[3]' : 'w-3 h-3 stroke-[3]'} />
+        </button>
+      );
+    } else if (
+      (full.startsWith('**') && full.endsWith('**')) ||
+      (full.startsWith('__') && full.endsWith('__'))
+    ) {
+      tokens.push(
+        <strong key={`b-${keyCounter++}`} className="font-bold text-slate-100">
+          {full.slice(2, -2)}
+        </strong>
+      );
+    } else if (full.startsWith('<u>') && full.endsWith('</u>')) {
+      tokens.push(
+        <u key={`u-${keyCounter++}`} className="underline decoration-amber-400/70 underline-offset-2 text-slate-100">
+          {full.slice(3, -4)}
+        </u>
+      );
+    } else if (full.startsWith('~~') && full.endsWith('~~')) {
+      tokens.push(
+        <del key={`s-${keyCounter++}`} className="line-through text-slate-500">
+          {full.slice(2, -2)}
+        </del>
+      );
+    } else if (full.startsWith('`') && full.endsWith('`')) {
+      tokens.push(
+        <code
+          key={`c-${keyCounter++}`}
+          className="px-1 py-0.2 rounded bg-slate-900/90 border border-slate-700/80 text-amber-300 font-mono text-[10px]"
+        >
+          {full.slice(1, -1)}
+        </code>
+      );
+    } else if (
+      (full.startsWith('*') && full.endsWith('*')) ||
+      (full.startsWith('_') && full.endsWith('_'))
+    ) {
+      tokens.push(
+        <em key={`i-${keyCounter++}`} className="italic text-slate-200">
+          {full.slice(1, -1)}
+        </em>
+      );
+    } else if (match[4]) {
+      const leadingSpace = match[3] || '';
+      const tagText = match[4];
+      if (leadingSpace) tokens.push(leadingSpace);
+      tokens.push(
+        <span
+          key={`tag-${keyCounter++}`}
+          className="inline-block px-1 py-0.2 rounded bg-amber-500/15 border border-amber-500/35 text-amber-300 font-mono text-[10px]"
+        >
+          {tagText}
+        </span>
+      );
+    } else {
+      tokens.push(full);
+    }
+
+    lastIndex = match.index + full.length;
+  }
+
+  if (lastIndex < text.length) {
+    tokens.push(text.slice(lastIndex));
+  }
+
+  return tokens;
+}
+
+interface ParsedBlock {
+  type: 'heading' | 'line';
+  level?: 1 | 2 | 3;
+  title?: string;
+  lineIndex: number;
+  rawLine: string;
+}
+
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+  content,
+  onToggleCheckbox,
+  compact = false,
+  className = '',
+}) => {
+  const [collapsedSections, setCollapsedSections] = useState<Record<number, boolean>>({});
+
+  const toggleSection = (headerLineIndex: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    setCollapsedHeaders((prev) => ({
+    setCollapsedSections((prev) => ({
       ...prev,
-      [headerId]: !prev[headerId],
+      [headerLineIndex]: !prev[headerLineIndex],
     }));
   };
 
-  let currentH1Id: string | null = null;
-  let currentH2Id: string | null = null;
-  let currentH3Id: string | null = null;
+  const lines = (content || '').split(/\r?\n/);
+
+  const blocks: ParsedBlock[] = lines.map((rawLine, lineIndex) => {
+    const headingMatch = rawLine.match(/^(#{1,3})\s+(.*)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length as 1 | 2 | 3;
+      return {
+        type: 'heading',
+        level,
+        title: headingMatch[2],
+        lineIndex,
+        rawLine,
+      };
+    }
+    return {
+      type: 'line',
+      lineIndex,
+      rawLine,
+    };
+  });
+
+  const renderedElements: React.ReactNode[] = [];
+  let hiddenUntilLevel: number | null = null;
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+
+    if (block.type === 'heading' && block.level) {
+      if (hiddenUntilLevel !== null && block.level <= hiddenUntilLevel) {
+        hiddenUntilLevel = null;
+      }
+      if (hiddenUntilLevel !== null) {
+        continue;
+      }
+
+      const isCollapsed = Boolean(collapsedSections[block.lineIndex]);
+      if (isCollapsed) {
+        hiddenUntilLevel = block.level;
+      }
+
+      const headingStyles =
+        block.level === 1
+          ? compact
+            ? 'text-xs font-bold text-amber-300 mt-1.5 mb-0.5'
+            : 'text-sm font-bold text-amber-300 mt-2.5 mb-1 pb-0.5 border-b border-slate-700/70'
+          : block.level === 2
+          ? compact
+            ? 'text-[11px] font-bold text-amber-200/95 mt-1 mb-0.5'
+            : 'text-xs font-bold text-amber-200 mt-2 mb-0.5'
+          : compact
+          ? 'text-[11px] font-semibold text-slate-200 mt-1'
+          : 'text-xs font-semibold text-slate-200 mt-1.5';
+
+      renderedElements.push(
+        <div
+          key={`h-${block.lineIndex}`}
+          onClick={(e) => toggleSection(block.lineIndex, e)}
+          className={`flex items-center gap-1 cursor-pointer select-none group hover:text-amber-200 transition ${headingStyles}`}
+          title={isCollapsed ? 'Click to expand section' : 'Click to collapse section'}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-3 h-3 text-amber-400/80 shrink-0" />
+          ) : (
+            <ChevronDown className="w-3 h-3 text-amber-400/80 shrink-0" />
+          )}
+          <span className="min-w-0 break-words">
+            {renderInlineTokens(block.title || '', {
+              lineIndex: block.lineIndex,
+              onToggleCheckbox,
+              compact,
+            })}
+          </span>
+        </div>
+      );
+      continue;
+    }
+
+    if (hiddenUntilLevel !== null) {
+      continue;
+    }
+
+    const raw = block.rawLine;
+
+    // Horizontal rule
+    if (/^(\s*[-*_]\s*){3,}$/.test(raw)) {
+      renderedElements.push(
+        <hr key={`hr-${block.lineIndex}`} className="my-1.5 border-slate-700/70" />
+      );
+      continue;
+    }
+
+    // Standard single-checkbox task item at start of line: - [ ] Task text
+    // (Only uses full-line strikethrough when there is a single checkbox on the line)
+    const singleTaskMatch = raw.match(/^\s*-\s*\[([ xX])\]\s*(.*)$/);
+    const totalCheckboxesOnLine = (raw.match(/\[([ xX])\]/g) || []).length;
+
+    if (singleTaskMatch && totalCheckboxesOnLine === 1) {
+      const checked = singleTaskMatch[1].toLowerCase() === 'x';
+      const taskText = singleTaskMatch[2];
+      renderedElements.push(
+        <div
+          key={`task-${block.lineIndex}`}
+          onClick={(e) => {
+            if (onToggleCheckbox) {
+              e.stopPropagation();
+              onToggleCheckbox(block.lineIndex, 0);
+            }
+          }}
+          className={`flex items-start gap-1.5 py-0.5 group ${
+            onToggleCheckbox ? 'cursor-pointer' : ''
+          }`}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCheckbox?.(block.lineIndex, 0);
+            }}
+            className={`mt-0.5 w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition cursor-pointer ${
+              checked
+                ? 'bg-emerald-500 border-emerald-400 text-slate-950'
+                : 'bg-slate-900/90 border-slate-500 group-hover:border-amber-400 text-transparent'
+            }`}
+            title={checked ? 'Mark incomplete' : 'Mark complete'}
+          >
+            <Check className="w-2.5 h-2.5 stroke-[3]" />
+          </button>
+          <span
+            className={`min-w-0 break-words leading-snug ${
+              checked ? 'line-through text-slate-500' : 'text-slate-200'
+            }`}
+          >
+            {renderInlineTokens(taskText, {
+              lineIndex: block.lineIndex,
+              onToggleCheckbox,
+              compact,
+            })}
+          </span>
+        </div>
+      );
+      continue;
+    }
+
+    // Unordered bullet list item (excluding lines starting with "- [ ]" / "- [x]")
+    const bulletMatch = raw.match(/^\s*[-*•]\s+(?!\[[ xX]\])(.*)$/);
+    if (bulletMatch) {
+      renderedElements.push(
+        <div key={`li-${block.lineIndex}`} className="flex items-start gap-1.5 py-0.2 pl-1">
+          <span className="text-amber-400/80 select-none leading-snug">•</span>
+          <span className="min-w-0 break-words text-slate-200 leading-snug">
+            {renderInlineTokens(bulletMatch[1], {
+              lineIndex: block.lineIndex,
+              onToggleCheckbox,
+              compact,
+            })}
+          </span>
+        </div>
+      );
+      continue;
+    }
+
+    // Numbered list item
+    const numMatch = raw.match(/^\s*(\d+[.)])\s+(.*)$/);
+    if (numMatch) {
+      renderedElements.push(
+        <div key={`ol-${block.lineIndex}`} className="flex items-start gap-1.5 py-0.2 pl-1">
+          <span className="text-amber-400/80 font-mono text-[10px] select-none pt-0.5">
+            {numMatch[1]}
+          </span>
+          <span className="min-w-0 break-words text-slate-200 leading-snug">
+            {renderInlineTokens(numMatch[2], {
+              lineIndex: block.lineIndex,
+              onToggleCheckbox,
+              compact,
+            })}
+          </span>
+        </div>
+      );
+      continue;
+    }
+
+    // Blockquote
+    const quoteMatch = raw.match(/^\s*>\s?(.*)$/);
+    if (quoteMatch) {
+      renderedElements.push(
+        <blockquote
+          key={`q-${block.lineIndex}`}
+          className="border-l-2 border-amber-400/70 pl-2 py-0.5 my-0.5 italic text-slate-300 bg-slate-950/30 rounded-r"
+        >
+          {renderInlineTokens(quoteMatch[1], {
+            lineIndex: block.lineIndex,
+            onToggleCheckbox,
+            compact,
+          })}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // Blank line spacer
+    if (!raw.trim()) {
+      renderedElements.push(
+        <div key={`sp-${block.lineIndex}`} className={compact ? 'h-1' : 'h-2'} />
+      );
+      continue;
+    }
+
+    // Regular paragraph line (supports inline checkboxes like "1st - [ ] [ ] [ ] [ ]")
+    renderedElements.push(
+      <div
+        key={`p-${block.lineIndex}`}
+        className="min-w-0 break-words text-slate-200 leading-relaxed flex flex-wrap items-center gap-y-0.5"
+      >
+        {renderInlineTokens(raw, {
+          lineIndex: block.lineIndex,
+          onToggleCheckbox,
+          compact,
+        })}
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-1">
-      {lines.map((line, lineIndex) => {
-        if (!line.trim()) {
-          if (
-            collapsibleHeaders &&
-            ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-              (currentH2Id && collapsedHeaders[currentH2Id]) ||
-              (currentH3Id && collapsedHeaders[currentH3Id]))
-          ) {
-            return null;
-          }
-          return <div key={lineIndex} className="h-2" />;
-        }
-
-        // 1. Horizontal Divider
-        const hrMatch = line.trim().match(/^([-*_])\1{2,}$/);
-        if (hrMatch) {
-          if (
-            collapsibleHeaders &&
-            ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-              (currentH2Id && collapsedHeaders[currentH2Id]) ||
-              (currentH3Id && collapsedHeaders[currentH3Id]))
-          ) {
-            return null;
-          }
-          return <hr key={lineIndex} className="my-2 border-inherit/30" />;
-        }
-
-        // 2. Level 3 Header (### Sub-Header)
-        const h3Match = line.match(/^###\s+(.*)$/);
-        if (h3Match) {
-          const headerId = `h3-${lineIndex}`;
-          currentH3Id = headerId;
-
-          if (
-            collapsibleHeaders &&
-            ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-              (currentH2Id && collapsedHeaders[currentH2Id]))
-          ) {
-            return null;
-          }
-
-          if (!collapsibleHeaders) {
-            return (
-              <div
-                key={lineIndex}
-                className="text-[11px] font-bold uppercase tracking-wider pt-0.5 pb-0.5 text-inherit opacity-90"
-              >
-                {parseInlineFormatting(h3Match[1], onTagClick)}
-              </div>
-            );
-          }
-
-          const isCollapsed = Boolean(collapsedHeaders[headerId]);
-
-          return (
-            <div
-              key={lineIndex}
-              onClick={(e) => toggleHeader(headerId, e)}
-              className="flex items-center gap-1 py-0.5 text-[11px] font-bold uppercase tracking-wider cursor-pointer select-none group mt-1 mb-0.5 hover:opacity-85 transition pl-1 text-inherit opacity-90"
-              title={isCollapsed ? 'Click to expand sub-section' : 'Click to collapse sub-section'}
-            >
-              <button
-                type="button"
-                onClick={(e) => toggleHeader(headerId, e)}
-                className="p-0.5 rounded hover:bg-black/20 text-amber-400/70 shrink-0 cursor-pointer"
-                title={isCollapsed ? 'Expand sub-section' : 'Collapse sub-section'}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="w-2.5 h-2.5" />
-                ) : (
-                  <ChevronDown className="w-2.5 h-2.5" />
-                )}
-              </button>
-              <span className="flex-1 min-w-0 truncate">
-                {parseInlineFormatting(h3Match[1], onTagClick)}
-              </span>
-              {isCollapsed && (
-                <span className="text-[9px] font-mono opacity-50 font-normal shrink-0 lowercase">
-                  (collapsed)
-                </span>
-              )}
-            </div>
-          );
-        }
-
-        // 3. Level 2 Header (## Sub-Header)
-        const h2Match = line.match(/^##\s+(.*)$/);
-        if (h2Match) {
-          const headerId = `h2-${lineIndex}`;
-          currentH2Id = headerId;
-          currentH3Id = null;
-
-          if (collapsibleHeaders && currentH1Id && collapsedHeaders[currentH1Id]) {
-            return null;
-          }
-
-          if (!collapsibleHeaders) {
-            return (
-              <div
-                key={lineIndex}
-                className="text-xs font-semibold pt-1 pb-0.5 text-inherit"
-              >
-                {parseInlineFormatting(h2Match[1], onTagClick)}
-              </div>
-            );
-          }
-
-          const isCollapsed = Boolean(collapsedHeaders[headerId]);
-
-          return (
-            <div
-              key={lineIndex}
-              onClick={(e) => toggleHeader(headerId, e)}
-              className="flex items-center gap-1.5 py-0.5 text-xs font-semibold cursor-pointer select-none group mt-1 mb-0.5 hover:opacity-85 transition pl-1.5"
-              title={isCollapsed ? 'Click to expand section' : 'Click to collapse section'}
-            >
-              <button
-                type="button"
-                onClick={(e) => toggleHeader(headerId, e)}
-                className="p-0.5 rounded hover:bg-black/20 text-amber-400/80 shrink-0 cursor-pointer"
-                title={isCollapsed ? 'Expand sub-section' : 'Collapse sub-section'}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="w-3 h-3" />
-                ) : (
-                  <ChevronDown className="w-3 h-3" />
-                )}
-              </button>
-              <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h2Match[1], onTagClick)}
-              </span>
-              {isCollapsed && (
-                <span className="text-[9px] font-mono opacity-50 font-normal shrink-0">
-                  (collapsed)
-                </span>
-              )}
-            </div>
-          );
-        }
-
-        // 4. Level 1 Header (# Header)
-        const h1Match = line.match(/^#\s+(.*)$/);
-        if (h1Match) {
-          const headerId = `h1-${lineIndex}`;
-          currentH1Id = headerId;
-          currentH2Id = null;
-          currentH3Id = null;
-
-          if (!collapsibleHeaders) {
-            return (
-              <div
-                key={lineIndex}
-                className="text-xs md:text-sm font-bold border-b border-inherit/25 pb-0.5 pt-1.5 text-inherit"
-              >
-                {parseInlineFormatting(h1Match[1], onTagClick)}
-              </div>
-            );
-          }
-
-          const isCollapsed = Boolean(collapsedHeaders[headerId]);
-
-          return (
-            <div
-              key={lineIndex}
-              onClick={(e) => toggleHeader(headerId, e)}
-              className="flex items-center gap-1.5 py-1 text-xs md:text-sm font-bold border-b border-inherit/25 cursor-pointer select-none group mt-1.5 mb-1 hover:opacity-85 transition"
-              title={isCollapsed ? 'Click to expand' : 'Click to collapse'}
-            >
-              <button
-                type="button"
-                onClick={(e) => toggleHeader(headerId, e)}
-                className="p-0.5 rounded hover:bg-black/20 text-amber-400 shrink-0 cursor-pointer"
-                title={isCollapsed ? 'Expand section' : 'Collapse section'}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                )}
-              </button>
-              <span className="flex-1 min-w-0 truncate text-inherit">
-                {parseInlineFormatting(h1Match[1], onTagClick)}
-              </span>
-              {isCollapsed && (
-                <span className="text-[10px] font-mono opacity-50 font-normal shrink-0">
-                  (collapsed)
-                </span>
-              )}
-            </div>
-          );
-        }
-
-        if (
-          collapsibleHeaders &&
-          ((currentH1Id && collapsedHeaders[currentH1Id]) ||
-            (currentH2Id && collapsedHeaders[currentH2Id]) ||
-            (currentH3Id && collapsedHeaders[currentH3Id]))
-        ) {
-          return null;
-        }
-
-        // 5. Checkbox Task list item: - [ ] or - [x]
-        const taskMatch = line.match(/^(\s*)-\s*\[([ xX])\]\s*(.*)$/);
-        if (taskMatch) {
-          const isChecked = taskMatch[2].toLowerCase() === 'x';
-          const taskText = taskMatch[3];
-          return (
-            <div key={lineIndex} className="flex items-start gap-1.5 my-0.5">
-              <input
-                type="checkbox"
-                checked={isChecked}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onToggleTask?.(lineIndex);
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-                className="mt-0.5 rounded border-slate-600 bg-slate-900 cursor-pointer w-3.5 h-3.5 shrink-0 accent-amber-500"
-              />
-              <span
-                onClick={(e) => {
-                  if (onToggleTask) {
-                    e.stopPropagation();
-                    onToggleTask(lineIndex);
-                  }
-                }}
-                className={`select-text cursor-pointer leading-tight ${
-                  isChecked ? 'line-through opacity-60' : ''
-                }`}
-              >
-                {parseInlineFormatting(taskText, onTagClick)}
-              </span>
-            </div>
-          );
-        }
-
-        // 6. Bullet list item: - item or * item
-        const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
-        if (bulletMatch) {
-          return (
-            <div key={lineIndex} className="flex items-start gap-1.5 my-0.5 pl-1">
-              <span className="text-amber-400 select-none shrink-0 leading-tight">•</span>
-              <span className="flex-1 leading-relaxed">
-                {parseInlineFormatting(bulletMatch[1], onTagClick)}
-              </span>
-            </div>
-          );
-        }
-
-        // 7. Standard text line
-        return (
-          <div key={lineIndex} className="leading-relaxed">
-            {parseInlineFormatting(line, onTagClick)}
-          </div>
-        );
-      })}
+    <div className={`${compact ? 'text-[11px]' : 'text-xs'} space-y-0.5 ${className}`}>
+      {renderedElements}
     </div>
   );
 };
 
-export function renderMarkdown(
-  content: string,
-  optionsOrToggleTask?: ((lineIndex: number) => void) | MarkdownRenderOptions
-): React.ReactNode {
-  if (!content) return null;
-
-  let onToggleTask: ((lineIndex: number) => void) | undefined;
-  let collapsibleHeaders = true;
-  let onTagClick: ((tag: string) => void) | undefined;
-
-  if (typeof optionsOrToggleTask === 'function') {
-    onToggleTask = optionsOrToggleTask;
-  } else if (optionsOrToggleTask) {
-    onToggleTask = optionsOrToggleTask.onToggleTask;
-    if (optionsOrToggleTask.collapsibleHeaders !== undefined) {
-      collapsibleHeaders = optionsOrToggleTask.collapsibleHeaders;
-    }
-    onTagClick = optionsOrToggleTask.onTagClick;
-  }
-
-  return (
-    <MarkdownContent
-      content={content}
-      onToggleTask={onToggleTask}
-      collapsibleHeaders={collapsibleHeaders}
-      onTagClick={onTagClick}
-    />
-  );
-}
-
-/**
- * Inline formatting helper: parses **bold**, __underline__, <u>underline</u>, *italic*,
- * ~~strikethrough~~, and clickable #tags
- */
-export function parseInlineFormatting(
-  text: string,
-  onTagClick?: (tag: string) => void
-): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const regex = /(\*\*([^*]+)\*\*|__([^_]+)__|<u>([^<]+)<\/u>|\*([^*]+)\*|~~([^~]+)~~|(?:^|\s)(#([a-zA-Z][a-zA-Z0-9_\-]*)))/g;
-
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-
-    if (match[2]) {
-      // Bold
-      parts.push(
-        <strong key={`b-${match.index}`} className="font-bold text-inherit brightness-110">
-          {match[2]}
-        </strong>
-      );
-    } else if (match[3]) {
-      // Underline
-      parts.push(
-        <span key={`u-${match.index}`} className="underline underline-offset-2 text-inherit">
-          {match[3]}
-        </span>
-      );
-    } else if (match[4]) {
-      // Underline (u-tag)
-      parts.push(
-        <span key={`u-tag-${match.index}`} className="underline underline-offset-2 text-inherit">
-          {match[4]}
-        </span>
-      );
-    } else if (match[5]) {
-      // Italic
-      parts.push(
-        <em key={`i-${match.index}`} className="italic text-inherit">
-          {match[5]}
-        </em>
-      );
-    } else if (match[6]) {
-      // Strikethrough
-      parts.push(
-        <del key={`del-${match.index}`} className="line-through opacity-60 text-inherit">
-          {match[6]}
-        </del>
-      );
-    } else if (match[8]) {
-      // Tag (#tag)
-      const tagName = match[8];
-      parts.push(
-        <button
-          key={`tag-${match.index}`}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onTagClick?.(tagName);
-          }}
-          className="inline-block mx-0.5 px-1 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition cursor-pointer"
-          title={`Filter by #${tagName}`}
-        >
-          #{tagName}
-        </button>
-      );
-    }
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : [text];
-}
-
-/**
- * Helper to apply Google Keep markdown formatting to a textarea at current selection
- */
-export function applyMarkdownSyntax(
-  textarea: HTMLTextAreaElement | null,
-  type: 'bold' | 'italic' | 'underline' | 'strike' | 'h1' | 'h2' | 'list' | 'task' | 'divider',
-  currentValue: string,
-  setValue: (next: string) => void
-) {
-  if (!textarea) return;
-
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  const selectedText = currentValue.substring(start, end);
-
-  let replacement = '';
-  let cursorOffset = 0;
-
-  switch (type) {
-    case 'h1': {
-      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
-      const prefix = isStartOfLine ? '# ' : '\n# ';
-      replacement = selectedText ? `${prefix}${selectedText}` : `${prefix}Heading 1`;
-      cursorOffset = replacement.length;
-      break;
-    }
-    case 'h2': {
-      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
-      const prefix = isStartOfLine ? '## ' : '\n## ';
-      replacement = selectedText ? `${prefix}${selectedText}` : `${prefix}Heading 2`;
-      cursorOffset = replacement.length;
-      break;
-    }
-    case 'bold':
-      if (selectedText) {
-        replacement = `**${selectedText}**`;
-        cursorOffset = replacement.length;
-      } else {
-        replacement = `**bold text**`;
-        cursorOffset = 11;
-      }
-      break;
-    case 'italic':
-      if (selectedText) {
-        replacement = `*${selectedText}*`;
-        cursorOffset = replacement.length;
-      } else {
-        replacement = `*italic text*`;
-        cursorOffset = 12;
-      }
-      break;
-    case 'underline':
-      if (selectedText) {
-        replacement = `__${selectedText}__`;
-        cursorOffset = replacement.length;
-      } else {
-        replacement = `__underlined text__`;
-        cursorOffset = 17;
-      }
-      break;
-    case 'strike':
-      if (selectedText) {
-        replacement = `~~${selectedText}~~`;
-        cursorOffset = replacement.length;
-      } else {
-        replacement = `~~strikethrough~~`;
-        cursorOffset = 15;
-      }
-      break;
-    case 'list': {
-      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
-      const prefix = isStartOfLine ? '- ' : '\n- ';
-      replacement = selectedText ? `${prefix}${selectedText}` : `${prefix}List item`;
-      cursorOffset = replacement.length;
-      break;
-    }
-    case 'task': {
-      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
-      const prefix = isStartOfLine ? '- [ ] ' : '\n- [ ] ';
-      replacement = selectedText ? `${prefix}${selectedText}` : `${prefix}Task item`;
-      cursorOffset = replacement.length;
-      break;
-    }
-    case 'divider': {
-      const isStartOfLine = start === 0 || currentValue[start - 1] === '\n';
-      replacement = isStartOfLine ? '---\n' : '\n---\n';
-      cursorOffset = replacement.length;
-      break;
-    }
-  }
-
-  const nextValue = currentValue.substring(0, start) + replacement + currentValue.substring(end);
-  setValue(nextValue);
-
-  setTimeout(() => {
-    textarea.focus();
-    const newCursor = start + cursorOffset;
-    textarea.setSelectionRange(newCursor, newCursor);
-  }, 0);
-}
+export default MarkdownRenderer;
