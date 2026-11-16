@@ -168,7 +168,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
               <span>2. Dice Chamber & Live Shared Feed</span>
             </h3>
             <div className="font-mono text-[10px] text-cyan-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
-              Attacks vs Damage · Quick d20 · Visibility (Public/GM/Self) · Math Engine · Macros
+              Profiles · Paired Atk/Dmg Macros · Crit Toggle · Queue · Adv/Dis Badges · Math Dock
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
@@ -178,10 +178,16 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 <strong>[ 💥 HEALING / DAMAGE & SKILLS CHALLENGE ]:</strong> Aggregates all staged dice and flat bonuses into a single grand total for damage rolls, group skill checks, or recovery.
               </li>
               <li>
-                <strong>QUICK D20 Strip:</strong> 1-click triggers for standard rolls without staging: <strong>🎲 d20</strong>, <strong>⚔️ Adv</strong> (rolls 2d20, takes higher), or <strong>🛡️ Dis</strong> (rolls 2d20, takes lower).
+                <strong>QUICK D20 & Adv/Dis Tracking:</strong> 1-click triggers for <strong>🎲 d20</strong>, <strong>⚔️ Adv</strong>, and <strong>🛡️ Dis</strong>. All Advantage/Disadvantage rolls show both d20 faces (<code>[chosen, discarded]</code>) and a green <strong>ADV</strong> or red <strong>DIS</strong> badge in the Roll Feed.
               </li>
               <li>
-                <strong>Staged Stance (Adv / Straight / Dis):</strong> Set the default modifier state for staged multi-d20 formulas. Straight defaults to standard rolls.
+                <strong>Monster / Encounter Profiles:</strong> Organize custom macros by creature or boss group using the profile dropdown (e.g. <em>Draco</em>, <em>Draconian</em>, <em>All</em>) so only relevant abilities appear during their turn.
+              </li>
+              <li>
+                <strong>Paired Attack + Damage Macros:</strong> Pair an Attack formula (<code>⚔️ 1d20+9</code>) and Damage formula (<code>💥 1d12+5+2d6</code>) with optional save DC / after-effect notes on a single full-width ability row.
+              </li>
+              <li>
+                <strong>⚡ 1-Click, 📚 Queue & Crit Mode:</strong> Use <strong>1-Click</strong> for instant rolls, <strong>Queue</strong> to batch multiple attacks first and roll damage only for hits, or toggle <strong>Crit</strong> to automatically double damage dice on your next roll (flat modifiers unchanged).
               </li>
               <li>
                 <strong>Roll Visibility Tiers:</strong>
@@ -193,9 +199,6 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
               </li>
               <li>
                 <strong>🧮 Inline Math Evaluator:</strong> Type arithmetic directly (e.g. <code>15+4</code>, <code>28/2</code>) and click <strong>Apply (+X)</strong> to append the computed result into your active dice formula.
-              </li>
-              <li>
-                <strong>Custom Macros:</strong> Store frequent weapon attacks and spells. Toggle between <strong>⚡ 1-Click</strong> (instant roll) and <strong>📚 Queue</strong> (loads formula into the staging bar for edits).
               </li>
             </ul>
           </section>
@@ -254,7 +257,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
               <span>5. Notes, Scratchpad & Google Keep Prep</span>
             </h3>
             <div className="font-mono text-[10px] text-amber-300/90 bg-slate-950/80 px-2 py-1 rounded border border-slate-800/80">
-              Live Scratchpad · Dynamic #Tags · 7 Keep Colors · Keep Typography & Tasks
+              Live Scratchpad · Dynamic #Tags · 7 Keep Colors · Inline Checkboxes & Spell Slots
             </div>
             <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300 pt-0.5">
               <li>
@@ -278,7 +281,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 <strong>Keep Typography:</strong> Toolbar buttons for <strong>H1</strong>, <strong>H2</strong>, <strong>Bold</strong>, <em>Italic</em>, <u>Underline</u>, and <s>Strikethrough</s> (<code>~~text~~</code>). Collapsible headers (<code>#</code>, <code>##</code>, <code>###</code>) keep long notes tidy.
               </li>
               <li>
-                <strong>Interactive Tasks:</strong> Markdown checklists (<code>- [ ]</code> and <code>- [x]</code>) can be checked off directly inside card views, full reader views, and the Sticky HUD drawer.
+                <strong>Interactive Checkboxes & Spell Slots:</strong> Use <code>- [ ]</code> for single tasks or place multiple <code>[ ]</code> boxes inline (e.g. <code>1st - [ ] [ ] [ ] [ ]</code>) to track enemy spell slots and charges directly inside cards, full reader views, and the Sticky HUD drawer.
               </li>
               <li>
                 <strong>Vault Transfer:</strong> Seamlessly move or copy notes between My Prep, Handouts, and GM Secrets using the <strong>Transfer</strong> menu.
@@ -303,7 +306,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
                 <strong>Two-Way Synchronization:</strong> Edits and checkbox toggles made inside the HUD glance drawer immediately sync back to your source cards or Scratchpad, and edits made in the Notes tab instantly update the HUD drawer.
               </li>
               <li>
-                <strong>Interactive Drawer:</strong> Click the glance strip to expand. Checklist tasks (<code>- [ ]</code>) toggle in real time without leaving your active tab.
+                <strong>Interactive Drawer:</strong> Click the glance strip to expand. Checkboxes (<code>- [ ]</code> or inline <code>[ ]</code>) toggle in real time without leaving your active tab.
               </li>
               <li>
                 <strong>Live Inline Editing:</strong> Click <strong>✏️</strong> on the HUD bar to edit text directly in place without opening full modal dialogs.
