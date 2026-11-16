@@ -257,8 +257,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   const activeTheme = isInlineEditing ? editTheme : (note.theme || 'slate');
   const themeCfg = NOTE_THEME_CONFIG[activeTheme] || NOTE_THEME_CONFIG.slate;
 
-  const handleToggleTask = (lineIndex: number) => {
-    const newContent = toggleMarkdownTask(note.content, lineIndex);
+  const handleToggleTask = (lineIndex: number, checkboxIndex?: number) => {
+    const newContent = toggleMarkdownTask(note.content, lineIndex, checkboxIndex);
     const updated: NoteItem = {
       ...note,
       category: cat,
